@@ -13,6 +13,7 @@ from .views import (
     associate_user_store,
     cash_flow_detailed,
     cash_flow_summary,
+    check_plan_limits_simple,
     debug_user_store,
     feature_gates_view,
     inventory_item_batches_view, 
@@ -82,6 +83,8 @@ urlpatterns = [
     path('admin/users/<int:user_id>/subscription/', update_subscription, name='admin_update_subscription'),
     path('admin/analytics/products/', get_product_analytics, name='admin_product_analytics'),
     path('admin/analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
+
+    path('check-plan-limits/', check_plan_limits_simple, name='check-plan-limits'),
     
 
     # --- Rotas Automáticas (Router) ---
