@@ -579,14 +579,10 @@ class Promotion(models.Model):
             return False
         return True
 
-# inventory/models.py - CORRIGIR o modelo UserPlanCache
-
 class UserPlanCache(models.Model):
     """Cache de limites por usuário (performance)"""
-    
-    # ✅ CORREÇÃO: Usar settings.AUTH_USER_MODEL em vez de string
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,  # Em vez de 'CustomUser'
+        'CustomUser', 
         on_delete=models.CASCADE, 
         related_name='plan_cache'
     )
