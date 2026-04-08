@@ -233,57 +233,53 @@ export default function AddProduct() {
     setShowScanner(true);
   };
 
-  // ✅ MODIFICADO: handleLookup com verificação de limites
-  const handleLookup = async (barcode: string) => {
-    if (!barcode.trim()) return;
-    setLookupLoading(true);
+  // ✅ CORRIGIR handleLookup - remover campo inexistente
+const handleLookup = async (barcode: string) => {
+  if (!barcode.trim()) return;
+  setLookupLoading(true);
+  
+  try {
+    const result = await productService.lookupByEan(barcode);
     
-    try {
-      const result = await productService.lookupByEan(barcode);
-      
-      if (result.found) {
-        // ✅ NOVO: Verificar se é produto novo para a loja
-        const isNewProduct = !('existing_in_store' in result.data) || !result.data.existing_in_store;
-        
-        if (isNewProduct) {
-          // ✅ VERIFICAR LIMITES ANTES de prosseguir
-          const canAdd = await checkPlanLimits();
-          if (!canAdd) {
-            return;
-          }
-        }
-        
-        const resData = result.data as any;
-        const remote = resData.remote || resData;
-        setData(prev => ({
-          ...prev,
-          bar_code: barcode,
-          name: remote?.name || resData?.name || prev.name,
-          sale_price: remote?.sale_price || resData?.sale_price || prev.sale_price,
-          cost_price: prev.cost_price,
-          natura_sku: remote?.natura_sku || resData?.natura_sku || prev.natura_sku,
-          image_url: remote?.image_url || resData?.image_url || prev.image_url,
-          category: remote?.category || resData?.category || prev.category,
-          official_price: remote?.official_price || resData?.official_price || 0,
-          brand: remote?.brand || resData?.brand || prev.brand || ""
-        }));
-        
-        toast({ title: "Produto Identificado!", description: "Dados carregados com sucesso." });
-      } else {
-        // ✅ PRODUTO NOVO: Sempre verificar limites
-        const canAdd = await checkPlanLimits();
-        if (!canAdd) {
-          return;
-        }
-        
-        toast({ title: "Novo Código", description: "Preencha os dados no próximo passo." });
+    if (result.found) {
+      // ✅ NOVO: Assumir que é produto novo se não há dados específicos
+      // (API não retorna existing_in_store, então validamos sempre)
+      const canAdd = await checkPlanLimits();
+      if (!canAdd) {
+        return;
       }
-    } catch {
-      toast({ title: "Aviso", description: "Falha na busca remota. Preencha manualmente." });
-    } finally {
-      setLookupLoading(false);
+      
+      const resData = result.data as any;
+      const remote = resData.remote || resData;
+      setData(prev => ({
+        ...prev,
+        bar_code: barcode,
+        name: remote?.name || resData?.name || prev.name,
+        sale_price: remote?.sale_price || resData?.sale_price || prev.sale_price,
+        cost_price: prev.cost_price,
+        natura_sku: remote?.natura_sku || resData?.natura_sku || prev.natura_sku,
+        image_url: remote?.image_url || resData?.image_url || prev.image_url,
+        category: remote?.category || resData?.category || prev.category,
+        official_price: remote?.official_price || resData?.official_price || 0,
+        brand: remote?.brand || resData?.brand || prev.brand || ""
+      }));
+      
+      toast({ title: "Produto Identificado!", description: "Dados carregados com sucesso." });
+    } else {
+      // ✅ PRODUTO NOVO: Sempre verificar limites
+      const canAdd = await checkPlanLimits();
+      if (!canAdd) {
+        return;
+      }
+      
+      toast({ title: "Novo Código", description: "Preencha os dados no próximo passo." });
     }
-  };
+  } catch {
+    toast({ title: "Aviso", description: "Falha na busca remota. Preencha manualmente." });
+  } finally {
+    setLookupLoading(false);
+  }
+};
 
   // ✅ MODIFICADO: handleBarcodeScan com verificação de limites
   const handleBarcodeScan = async (barcode: string) => {

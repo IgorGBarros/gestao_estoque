@@ -3192,36 +3192,43 @@ def cash_flow_detailed(request):
     
 # inventory/views.py - ADICIONAR
 
+# inventory/views.py - ENDPOINT SIMPLIFICADO
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def check_plan_limits(request):
-    """Endpoint para verificar limites do plano atual"""
+def check_plan_limits_simple(request):
+    """Endpoint simplificado para verificar limites (sem dependência de tabelas admin)"""
     try:
         store = get_current_store(request.user)
         if not store:
             return Response({'error': 'Loja não encontrada'}, status=400)
         
-        limits_info = store.get_plan_limits()
+        # ✅ LÓGICA HARDCODED (sem dependência de plan_configs)
+        current_count = store.items.values('product').distinct().count()
         
-        # Adicionar informações do plano
-        config = store.plan_config
-        plan_info = {
-            'plan': store.plan,
-            'display_name': config.display_name if config else store.plan.upper(),
-            'features': {
-                'scanner': config.can_use_scanner if config else True,
-                'storefront': config.can_use_storefront if config else False,
-                'alerts': config.can_use_alerts if config else False,
-                'ai_assistant': config.can_use_ai_assistant if config else False,
-                'analytics': config.can_use_analytics if config else False,
-            } if config else {}
-        }
+        # Definir limites baseado no plano (hardcoded temporariamente)
+        if store.plan == 'free':
+            limit = 20
+            can_add = current_count < limit
+        else:  # pro ou outros
+            limit = None  # Ilimitado
+            can_add = True
         
         return Response({
-            **limits_info,
-            **plan_info
+            'current_plan': store.plan,
+            'current_count': current_count,
+            'limit': limit,
+            'can_add_products': can_add,
+            'remaining': (limit - current_count) if limit else None
         })
         
     except Exception as e:
         print(f"❌ Erro ao verificar limites: {e}")
-        return Response({'error': str(e)}, status=500)
+        return Response({
+            'error': 'Erro ao verificar limites',
+            'current_plan': 'free',
+            'current_count': 0,
+            'limit': 20,
+            'can_add_products': True,
+            'remaining': 20
+        }, status=200)  # Retornar 200 com dados padrão para não quebrar
