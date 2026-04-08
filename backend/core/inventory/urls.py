@@ -22,7 +22,9 @@ from .views import (
     CustomTokenObtainPairView,
     StockTransactionViewSet,
     profile_view,
-
+    AdminUserListView,
+    AdminUpdatePlanView,
+    AdminUpdateSubscriptionView,
     public_storefront,
     public_storefront_view,
     dashboard_overview,
@@ -52,7 +54,9 @@ urlpatterns = [
     path('auth/register/', CustomUserCreateView.as_view(), name='register'), 
     path('auth/firebase/', FirebaseLoginView.as_view(), name='firebase_login'),
 
-
+    path('admin/users/', AdminUserListView.as_view(), name='admin-users-list'),
+    path('admin/users/<int:pk>/plan/', AdminUpdatePlanView.as_view(), name='admin-update-plan'),
+    path('admin/users/<int:pk>/subscription/', AdminUpdateSubscriptionView.as_view(), name='admin-update-sub'),
 
     path('session-control/', SessionControlView.as_view(), name='session-control'),
     path('session-summary/', SessionSummaryView.as_view(), name='session-summary'),
