@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Shield, Crown, User, Loader2, Check, Search, Users, ChevronUp, ChevronDown,
+  ArrowLeft, Shield, Crown, User, Loader2, Check, Search, Users, ChevronUp, ChevronDown, 
   ExternalLink, RefreshCw, AlertTriangle, Package, Calendar, Phone, Store, Mail, BarChart3,
   Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
   Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
@@ -468,31 +468,41 @@ export default function AdminPanel() {
   const navigate = useNavigate();
   const { toast } = useToast();
   
-  // Estados existentes mantidos
+  // Estados de autenticação
   const [authenticated, setAuthenticated] = useState(false);
   const [secret, setSecret] = useState("");
+  
+  // Estados de dados
   const [users, setUsers] = useState<AdminUser[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState("");
-  const [planFilter, setPlanFilter] = useState<"all" | "free" | "pro">("all");
-  const [sortField, setSortField] = useState<SortField>("created_at");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [updatingId, setUpdatingId] = useState<string | number | null>(null);
-  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
-  const [showSubForm, setShowSubForm] = useState(false);
-  const [subForm, setSubForm] = useState({ external_id: "", started_at: "", expires_at: "" });
-  const [subSaving, setSubSaving] = useState(false);
-  const [globalProvider, setGlobalProvider] = useState(() => localStorage.getItem("admin_global_provider") || "");
-
-  // Novos estados para funcionalidades avançadas
-  const [activeTab, setActiveTab] = useState("dashboard");
   const [planConfigs, setPlanConfigs] = useState<PlanConfig[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
+  
+  // Estados de UI
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [planFilter, setPlanFilter] = useState<"all" | "free" | "pro">("all");
+  
+  // Estados de ordenação
+  const [sortField, setSortField] = useState<SortField>("created_at");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  
+  // Estados de ações
+  const [updatingId, setUpdatingId] = useState<string | number | null>(null);
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
+  
+  // Estados de modais
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [showPromotionModal, setShowPromotionModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<PlanConfig | null>(null);
   const [editingPromotion, setEditingPromotion] = useState<Promotion | null>(null);
+
+  // Estados originais mantidos
+  const [showSubForm, setShowSubForm] = useState(false);
+  const [subForm, setSubForm] = useState({ external_id: "", started_at: "", expires_at: "" });
+  const [subSaving, setSubSaving] = useState(false);
+  const [globalProvider, setGlobalProvider] = useState(() => localStorage.getItem("admin_global_provider") || "");
 
   const PROVIDERS = [
     { value: "stripe", label: "Stripe" },
@@ -501,15 +511,21 @@ export default function AdminPanel() {
     { value: "manual", label: "Manual" },
   ];
 
-  // Função expandida para carregar todos os dados
+  // ==========================================
+  // FUNÇÕES DE API (expandidas)
+  // ==========================================
+
   const fetchAllData = async () => {
     setLoading(true);
     try {
-      // Carrega usuários (função existente)
+      // Mantém a função original para usuários
       const usersRes = await adminApi.listUsers();
       setUsers(usersRes || []);
 
-      // Simula dados de planos (em produção, viria do backend)
+      // Simula dados para as novas funcionalidades
+      // Em produção, essas seriam chamadas reais para o backend
+      
+      // Dados simulados de planos
       setPlanConfigs([
         {
           plan_type: 'free',
@@ -547,7 +563,7 @@ export default function AdminPanel() {
         }
       ]);
 
-      // Simula dados de promoções
+      // Dados simulados de promoções
       setPromotions([
         {
           id: '1',
@@ -564,7 +580,7 @@ export default function AdminPanel() {
         }
       ]);
 
-      // Calcula estatísticas baseadas nos dados reais
+      // Estatísticas simuladas baseadas nos usuários reais
       const totalUsers = usersRes?.length || 0;
       const proUsers = usersRes?.filter(u => u.plan === 'pro').length || 0;
       const freeUsers = totalUsers - proUsers;
@@ -574,7 +590,7 @@ export default function AdminPanel() {
         active_stores: Math.floor(totalUsers * 0.7),
         pro_stores: proUsers,
         free_stores: freeUsers,
-        total_products: totalUsers * 15,
+        total_products: totalUsers * 15, // média estimada
         total_revenue: proUsers * 39.90,
         monthly_revenue: proUsers * 39.90,
         churn_rate: 5.2,
@@ -600,10 +616,8 @@ export default function AdminPanel() {
     }
   };
 
-  // Mantém função original para compatibilidade
-  const fetchUsers = fetchAllData;
+  const fetchUsers = fetchAllData; // Mantém compatibilidade
 
-  // Funções existentes mantidas
   const togglePlan = async (user: AdminUser) => {
     const newPlan = user.plan === "pro" ? "free" : "pro";
     setUpdatingId(user.id);
@@ -650,11 +664,13 @@ export default function AdminPanel() {
   const savePlanConfig = async (planData: Partial<PlanConfig>) => {
     try {
       if (editingPlan) {
+        // Simula update
         setPlanConfigs(prev => prev.map(p => 
           p.plan_type === editingPlan.plan_type ? { ...p, ...planData } : p
         ));
         toast({ title: "Plano atualizado com sucesso" });
       } else {
+        // Simula create
         const newPlan = { ...planData } as PlanConfig;
         setPlanConfigs(prev => [...prev, newPlan]);
         toast({ title: "Plano criado com sucesso" });
@@ -708,13 +724,20 @@ export default function AdminPanel() {
     }
   };
 
+  // ==========================================
+  // EFEITOS
+  // ==========================================
+
   useEffect(() => {
     if (authenticated) {
       fetchAllData();
     }
   }, [authenticated]);
 
-  // Computações existentes mantidas
+  // ==========================================
+  // COMPUTAÇÕES
+  // ==========================================
+
   const filtered = useMemo(() => {
     let list = users;
     if (planFilter !== "all") list = list.filter((u) => u.plan === planFilter);
