@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from .admin_views import get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription
+from .admin_views import get_store_behavior_analytics, get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription,get_product_analytics
 from .views import (
     CustomUserCreateView,
     FirebaseLoginView,
@@ -80,6 +80,8 @@ urlpatterns = [
     path('admin/users/', list_users, name='admin_users'),
     path('admin/users/<int:user_id>/plan/', update_plan, name='admin_update_plan'),
     path('admin/users/<int:user_id>/subscription/', update_subscription, name='admin_update_subscription'),
+    path('admin/analytics/products/', get_product_analytics, name='admin_product_analytics'),
+    path('admin/analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
     
 
     # --- Rotas Automáticas (Router) ---
