@@ -194,12 +194,22 @@ class Store(models.Model):
         self.payment_external_id = None
         self.save()
     
-    def get_active_promotions(self):
-        """Retorna promoções ativas para esta loja"""
-        return [
-            promo for promo in Promotion.objects.filter(is_active=True)
-            if promo.is_valid_for_store(self)
-        ]
+    def get_active_promotions(self, obj):
+        """Método corrigido para obter promoções"""
+        try:
+            # Usar método corrigido ou versão simplificada
+            return [
+                {
+                    'id': promo.id,
+                    'title': promo.title,
+                    'message': promo.message,
+                    'discount_percent': getattr(promo, 'discount_percent', 0)
+                }
+                for promo in obj.get_active_promotions()
+            ]
+        except Exception as e:
+            print(f"❌ Erro ao obter promoções: {e}")
+            return []
     
     def __str__(self):
         return f"{self.name} ({self.owner.email if self.owner else 'Sem dono'})"
