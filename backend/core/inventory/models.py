@@ -73,8 +73,7 @@ class Store(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
-    cached_product_count = models.IntegerField(default=0)
-    cache_updated_at = models.DateTimeField(auto_now=True)
+
     # ✅ RELACIONAMENTO CORRETO
     owner = models.OneToOneField(
         settings.AUTH_USER_MODEL,
