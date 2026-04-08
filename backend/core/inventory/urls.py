@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from backend.core.inventory.admin_views import get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription
+from .admin_views import get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription
 from .views import (
     CustomUserCreateView,
     FirebaseLoginView,
