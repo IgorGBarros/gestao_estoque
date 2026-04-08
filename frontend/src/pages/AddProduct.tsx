@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ScanBarcode, Camera, Hash, DollarSign, ChevronRight, ChevronLeft,
-  Check, Loader2, X, Package, Search, Lock, ImageIcon, Clock, CreditCard
+  Check, Loader2, X, Package, Search, Lock, ImageIcon, Clock, CreditCard, AlertTriangle
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import ProductSearchModal from "../components/ProductSearchModal";
@@ -22,8 +22,6 @@ const STEPS = [
   { id: "expiry", label: "Validade", icon: Camera },
   { id: "details", label: "Detalhes", icon: DollarSign },
   { id: "confirm", label: "Confirmar", icon: Check },
-
-  
 ];
 
 const CATEGORIES = ["Perfumaria", "Corpo", "Rosto", "Cabelos", "Maquiagem", "Infantil", "Casa", "Outro"];
@@ -52,17 +50,33 @@ interface SessionStatus {
   duration_minutes?: number;
 }
 
+// ✅ NOVO: Interface para limites do plano
+interface PlanLimits {
+  current_plan: string;
+  current_count: number;
+  limit: number | null;
+  can_add_products: boolean;
+  remaining: number | null;
+}
+
 // ✅ NOVO: API de sessão
 const sessionApi = {
   getStatus: async (): Promise<SessionStatus> => {
-    const response = await fetch('/api/session-control/');
+    const response = await fetch('/api/session-control/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      }
+    });
     return response.json();
   },
   
   finish: async () => {
     const response = await fetch('/api/session-control/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      },
       body: JSON.stringify({ action: 'finish' })
     });
     return response.json();
@@ -71,7 +85,10 @@ const sessionApi = {
   confirmInvestment: async (sessionId: number, data: any) => {
     const response = await fetch('/api/session-summary/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      },
       body: JSON.stringify({ session_id: sessionId, ...data })
     });
     return response.json();
@@ -101,16 +118,59 @@ export default function AddProduct() {
   const [sessionSummaryData, setSessionSummaryData] = useState<any>(null);
   const [showInvestmentModal, setShowInvestmentModal] = useState(false);
   
+  // ✅ NOVOS ESTADOS: Controle de limites
+  const [planLimits, setPlanLimits] = useState<PlanLimits | null>(null);
+  const [limitsLoading, setLimitsLoading] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<EntryData>({
     bar_code: "", name: "", category: "Perfumaria", natura_sku: "",
     image_url: "", official_price: 0, sale_price: 0, cost_price: 0,
-    quantity: 1, batch_code: "", expiry_date: "", expiry_photo_url: "",brand: "",
+    quantity: 1, batch_code: "", expiry_date: "", expiry_photo_url: "", brand: "",
   });
 
-  // ✅ NOVO: Verificar status da sessão ao carregar
+  // ✅ NOVO: Função para verificar limites
+  const checkPlanLimits = async (): Promise<boolean> => {
+    setLimitsLoading(true);
+    try {
+      const response = await fetch('/api/check-plan-limits/', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const limits = await response.json();
+      setPlanLimits(limits);
+      
+      // Se não pode adicionar produtos, mostrar modal de upgrade
+      if (!limits.can_add_products) {
+        setUpgradeFeature({
+          feature: "Limite de Produtos Atingido",
+          description: `Você atingiu o limite de ${limits.limit} produtos do plano ${limits.current_plan.toUpperCase()}. Faça upgrade para continuar cadastrando produtos.`
+        });
+        setShowUpgrade(true);
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Erro ao verificar limites:', error);
+      toast({
+        title: "Erro",
+        description: "Falha ao verificar limites do plano.",
+        variant: "destructive"
+      });
+      return false;
+    } finally {
+      setLimitsLoading(false);
+    }
+  };
+
+  // ✅ NOVO: Verificar status da sessão e limites ao carregar
   useEffect(() => {
     checkSessionStatus();
+    checkPlanLimits();
   }, []);
 
   const checkSessionStatus = async () => {
@@ -158,66 +218,111 @@ export default function AddProduct() {
     setShowUpgrade(true);
   };
 
-  const handleScannerClick = () => {
+  const handleScannerClick = async () => {
     if (isLocked("barcode_scanner")) {
       triggerProGate("Scanner de Código de Barras", "Mais rápido e preciso! O Scanner é exclusivo PRO.");
       return;
     }
+    
+    // ✅ NOVO: Verificar limites antes de abrir scanner
+    const canAdd = await checkPlanLimits();
+    if (!canAdd) {
+      return;
+    }
+    
     setShowScanner(true);
   };
 
-const handleLookup = async (barcode: string) => {
-  if (!barcode.trim()) return;
-  setLookupLoading(true);
-  try {
-    const result = await productService.lookupByEan(barcode);
-    if (result.found) {
-      const resData = result.data as any;
-      const remote = resData.remote || resData;
-      setData(prev => ({
-        ...prev,
-        bar_code: barcode,
-        name: remote?.name || resData?.name || prev.name,
-        sale_price: remote?.sale_price || resData?.sale_price || prev.sale_price,
-        cost_price: prev.cost_price,
-        natura_sku: remote?.natura_sku || resData?.natura_sku || prev.natura_sku,
-        image_url: remote?.image_url || resData?.image_url || prev.image_url,
-        category: remote?.category || resData?.category || prev.category,
-        official_price: remote?.official_price || resData?.official_price || 0,
-        brand: remote?.brand || resData?.brand || prev.brand || "" // ✅ ADICIONAR - do crawler
-      }));
-      toast({ title: "Produto Identificado!", description: "Dados carregados com sucesso." });
-    } else {
-      toast({ title: "Novo Código", description: "Preencha os dados no próximo passo." });
+  // ✅ MODIFICADO: handleLookup com verificação de limites
+  const handleLookup = async (barcode: string) => {
+    if (!barcode.trim()) return;
+    setLookupLoading(true);
+    
+    try {
+      const result = await productService.lookupByEan(barcode);
+      
+      if (result.found) {
+        // ✅ NOVO: Verificar se é produto novo para a loja
+        const isNewProduct = !('existing_in_store' in result.data) || !result.data.existing_in_store;
+        
+        if (isNewProduct) {
+          // ✅ VERIFICAR LIMITES ANTES de prosseguir
+          const canAdd = await checkPlanLimits();
+          if (!canAdd) {
+            return;
+          }
+        }
+        
+        const resData = result.data as any;
+        const remote = resData.remote || resData;
+        setData(prev => ({
+          ...prev,
+          bar_code: barcode,
+          name: remote?.name || resData?.name || prev.name,
+          sale_price: remote?.sale_price || resData?.sale_price || prev.sale_price,
+          cost_price: prev.cost_price,
+          natura_sku: remote?.natura_sku || resData?.natura_sku || prev.natura_sku,
+          image_url: remote?.image_url || resData?.image_url || prev.image_url,
+          category: remote?.category || resData?.category || prev.category,
+          official_price: remote?.official_price || resData?.official_price || 0,
+          brand: remote?.brand || resData?.brand || prev.brand || ""
+        }));
+        
+        toast({ title: "Produto Identificado!", description: "Dados carregados com sucesso." });
+      } else {
+        // ✅ PRODUTO NOVO: Sempre verificar limites
+        const canAdd = await checkPlanLimits();
+        if (!canAdd) {
+          return;
+        }
+        
+        toast({ title: "Novo Código", description: "Preencha os dados no próximo passo." });
+      }
+    } catch {
+      toast({ title: "Aviso", description: "Falha na busca remota. Preencha manualmente." });
+    } finally {
+      setLookupLoading(false);
     }
-  } catch {
-    toast({ title: "Aviso", description: "Falha na busca remota. Preencha manualmente." });
-  } finally {
-    setLookupLoading(false);
-  }
-};
+  };
+
+  // ✅ MODIFICADO: handleBarcodeScan com verificação de limites
   const handleBarcodeScan = async (barcode: string) => {
     setShowScanner(false);
     setData(prev => ({ ...prev, bar_code: barcode }));
+    
+    // ✅ VERIFICAR LIMITES antes de fazer lookup
+    const canAdd = await checkPlanLimits();
+    if (!canAdd) {
+      return;
+    }
+    
     await handleLookup(barcode);
     setStep(1); 
   };
 
-const selectSuggestion = (product: any) => {
-  setData((prev) => ({
-    ...prev,
-    bar_code: product.bar_code || product.barcode || prev.bar_code,
-    name: product.name,
-    category: product.category || prev.category,
-    natura_sku: product.natura_sku || product.sku || "",
-    image_url: product.image_url || "",
-    official_price: product.official_price || 0,
-    sale_price: product.official_price || prev.sale_price,
-    brand: product.brand || prev.brand || "", // ✅ ADICIONAR - do catálogo
-  }));
-  setIsSearchOpen(false);
-  setStep(1);
-};
+  // ✅ MODIFICADO: selectSuggestion com verificação de limites
+  const selectSuggestion = async (product: any) => {
+    // ✅ VERIFICAR LIMITES antes de selecionar
+    const canAdd = await checkPlanLimits();
+    if (!canAdd) {
+      return;
+    }
+    
+    setData((prev) => ({
+      ...prev,
+      bar_code: product.bar_code || product.barcode || prev.bar_code,
+      name: product.name,
+      category: product.category || prev.category,
+      natura_sku: product.natura_sku || product.sku || "",
+      image_url: product.image_url || "",
+      official_price: product.official_price || 0,
+      sale_price: product.official_price || prev.sale_price,
+      brand: product.brand || prev.brand || "",
+    }));
+    
+    setIsSearchOpen(false);
+    setStep(1);
+  };
 
   const handleExpiryPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -239,51 +344,99 @@ const selectSuggestion = (product: any) => {
     }
   };
 
-const handleSave = async () => {
-  if (!data.bar_code?.trim()) {
-    toast({ title: "Código obrigatório", description: "Digite ou escaneie o EAN.", variant: "destructive" });
-    return;
-  }
-  
-  try {
-    // ✅ CORREÇÃO: Construir payload dinamicamente
-    const payload: any = {
-      bar_code: data.bar_code.trim(),
-      name: data.name || "Produto sem nome",
-      category: data.category,
-      natura_sku: data.natura_sku,
-      expiration_date: data.expiry_date,
-      expiry_photo_url: data.expiry_photo_url,
-      quantity: data.quantity,
-      cost_price: data.cost_price,
-      sale_price: data.sale_price,
-      batch_code: data.batch_code,
-    };
-    
-    // ✅ ADICIONAR brand apenas se existir e não for vazio
-    if (data.brand && data.brand.trim() !== "") {
-      payload.brand = data.brand.trim();
+  const handleSave = async () => {
+    if (!data.bar_code?.trim()) {
+      toast({ title: "Código obrigatório", description: "Digite ou escaneie o EAN.", variant: "destructive" });
+      return;
     }
     
-    await saveEntry(payload);
-    
-    setIsSuccess(true);
-    setTimeout(() => {
-      navigate("/");
-    }, 2000);
-  } catch (error) {
-    console.error('Erro ao salvar:', error);
-    // O Toast de erro já vem do useStockEntry
-  }
-};
+    try {
+      // ✅ CORREÇÃO: Construir payload dinamicamente
+      const payload: any = {
+        bar_code: data.bar_code.trim(),
+        name: data.name || "Produto sem nome",
+        category: data.category,
+        natura_sku: data.natura_sku,
+        expiration_date: data.expiry_date,
+        expiry_photo_url: data.expiry_photo_url,
+        quantity: data.quantity,
+        cost_price: data.cost_price,
+        sale_price: data.sale_price,
+        batch_code: data.batch_code,
+      };
+      
+      // ✅ ADICIONAR brand apenas se existir e não for vazio
+      if (data.brand && data.brand.trim() !== "") {
+        payload.brand = data.brand.trim();
+      }
+      
+      await saveEntry(payload);
+      
+      // ✅ NOVO: Atualizar limites após salvar
+      await checkPlanLimits();
+      
+      setIsSuccess(true);
+      setTimeout(() => {
+        navigate("/");
+      }, 2000);
+    } catch (error) {
+      console.error('Erro ao salvar:', error);
+      // O Toast de erro já vem do useStockEntry
+    }
+  };
+
   const canAdvance = () => {
     if (step === 0) return !!data.bar_code?.trim() && !lookupLoading;
     if (step === 1) return true;
     if (step === 2) return data.quantity > 0 && data.name.trim() !== "";
     return true;
   };
-    return (
+
+  return (
     <div className="min-h-screen bg-background">
+      {/* ✅ NOVO: Header com informações dos limites */}
+      {planLimits && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`px-4 py-2 flex items-center justify-between text-sm border-b ${
+            planLimits.can_add_products 
+              ? 'bg-green-50 text-green-800 border-green-200' 
+              : 'bg-red-50 text-red-800 border-red-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Package size={14} />
+            <span className="font-medium">
+              {planLimits.current_count}/{planLimits.limit || '∞'} produtos
+            </span>
+            <span className="text-xs opacity-75">
+              ({planLimits.current_plan.toUpperCase()})
+            </span>
+          </div>
+          
+          {!planLimits.can_add_products ? (
+            <button 
+              onClick={() => {
+                setUpgradeFeature({
+                  feature: "Upgrade Necessário",
+                  description: `Limite de ${planLimits.limit} produtos atingido no plano ${planLimits.current_plan.toUpperCase()}.`
+                });
+                setShowUpgrade(true);
+              }}
+              className="text-xs bg-red-600 text-white px-2 py-1 rounded font-medium hover:bg-red-700 transition-colors flex items-center gap-1"
+            >
+              <AlertTriangle size={12} />
+              Fazer Upgrade
+            </button>
+          ) : planLimits.remaining !== null && planLimits.remaining <= 5 ? (
+            <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded font-medium">
+              {planLimits.remaining} restantes
+            </span>
+          ) : null}
+        </motion.div>
+      )}
+
       {/* ✅ NOVO: Header com status da sessão */}
       {sessionStatus.has_session && (
         <motion.div 
@@ -366,18 +519,34 @@ const handleSave = async () => {
                       onBlur={(e) => handleLookup(e.target.value)}
                       placeholder="Escaneie ou digite..."
                       className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary"
+                      disabled={limitsLoading}
                     />
-                    {lookupLoading && <p className="text-xs text-primary mt-1 animate-pulse">Buscando informações...</p>}
+                    {(lookupLoading || limitsLoading) && (
+                      <p className="text-xs text-primary mt-1 animate-pulse flex items-center gap-1">
+                        <Loader2 size={12} className="animate-spin" />
+                        {limitsLoading ? "Verificando limites..." : "Buscando informações..."}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="h-px flex-1 bg-border" />
                     <span className="text-xs text-muted-foreground">OU</span>
                     <div className="h-px flex-1 bg-border" />
                   </div>
-                  <button onClick={handleScannerClick} className={`w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all ${isLocked("barcode_scanner") ? "opacity-80" : ""}`}>
+                  <button 
+                    onClick={handleScannerClick} 
+                    disabled={limitsLoading}
+                    className={`w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all ${isLocked("barcode_scanner") || limitsLoading ? "opacity-80" : ""}`}
+                  >
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${!isLocked("barcode_scanner") ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-                        {!isLocked("barcode_scanner") ? <ScanBarcode size={20} /> : <Lock size={20} />}
+                      <div className={`p-2 rounded-lg ${!isLocked("barcode_scanner") && !limitsLoading ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                        {limitsLoading ? (
+                          <Loader2 size={20} className="animate-spin" />
+                        ) : !isLocked("barcode_scanner") ? (
+                          <ScanBarcode size={20} />
+                        ) : (
+                          <Lock size={20} />
+                        )}
                       </div>
                       <div>
                         <p className="font-bold text-sm text-foreground flex items-center gap-2">
@@ -387,9 +556,15 @@ const handleSave = async () => {
                     </div>
                     <ChevronRight className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
                   </button>
-                  <button onClick={() => setIsSearchOpen(true)} className="w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all">
+                  <button 
+                    onClick={() => setIsSearchOpen(true)} 
+                    disabled={limitsLoading}
+                    className="w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all"
+                  >
                     <div className="flex items-center gap-3">
-                      <div className="p-2 bg-primary/10 text-primary rounded-lg"><Search size={20} /></div>
+                      <div className="p-2 bg-primary/10 text-primary rounded-lg">
+                        <Search size={20} />
+                      </div>
                       <div>
                         <p className="font-bold text-sm text-foreground">Buscar por Nome</p>
                         <p className="text-xs text-muted-foreground">Catálogo Global</p>
@@ -431,7 +606,6 @@ const handleSave = async () => {
           )}
 
           {/* STEP 2: DETALHES GERAIS */}
-          
           {step === 2 && (
             <motion.div key="details" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <div className="space-y-5 rounded-xl border border-border bg-card p-5">
