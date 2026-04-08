@@ -73,6 +73,8 @@ class Store(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+    cached_product_count = models.IntegerField(default=0)
+    cache_updated_at = models.DateTimeField(auto_now=True)
     # ✅ RELACIONAMENTO CORRETO
     owner = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -111,8 +113,18 @@ class Store(models.Model):
     # inventory/models.py - ATUALIZAR Store    
     @property
     def product_count(self):
-        """Conta produtos da loja"""
-        return self.items.count()
+        """✅ CONTAGEM OTIMIZADA com cache"""
+        # Cache válido por 5 minutos
+        if self.cache_updated_at:
+            age = timezone.now() - self.cache_updated_at
+            if age.total_seconds() < 300:
+                return self.cached_product_count
+        
+        # Recalcular (produtos únicos por loja)
+        real_count = self.items.values('product').distinct().count()
+        self.cached_product_count = real_count
+        self.save(update_fields=['cached_product_count', 'cache_updated_at'])
+        return real_count
     
     @property
     def plan_config(self):
@@ -128,7 +140,7 @@ class Store(models.Model):
         return self.product_count < config.max_products
     
     def get_plan_limits(self):
-        """Retorna informações sobre limites do plano"""
+        """✅ INFORMAÇÕES COMPLETAS de limites"""
         config = self.plan_config
         current_count = self.product_count
         
@@ -137,14 +149,16 @@ class Store(models.Model):
                 'current_count': current_count,
                 'limit': config.max_products,
                 'can_add': current_count < config.max_products,
-                'remaining': config.max_products - current_count
+                'remaining': config.max_products - current_count,
+                'percentage_used': (current_count / config.max_products) * 100
             }
         else:
             return {
                 'current_count': current_count,
                 'limit': None,
                 'can_add': True,
-                'remaining': None
+                'remaining': None,
+                'percentage_used': 0
             }
         
     @property

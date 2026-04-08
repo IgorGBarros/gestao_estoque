@@ -242,6 +242,17 @@ class StockEntrySerializer(serializers.Serializer):
     category = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     natura_sku = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     image_url = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        store = self.context.get('store')  # ✅ AUTOMÁTICO: store no contexto
+        
+        # ✅ AUTOMÁTICO: validação de limite
+        if not store.can_add_products:
+            raise ValidationError({
+                'error': 'PLAN_LIMIT_REACHED',
+                'current_count': store.product_count,
+                'limit': store.plan_config.max_products
+            })
     
     # ✅ APENAS validações básicas de formato
     def validate_quantity(self, value):
