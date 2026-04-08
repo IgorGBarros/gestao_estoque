@@ -105,6 +105,99 @@ class Store(models.Model):
                 counter += 1
             self.slug = slug
         super().save(*args, **kwargs)
+
+    # inventory/models.py - ATUALIZAR Store    
+    @property
+    def product_count(self):
+        """Conta produtos da loja"""
+        return self.items.count()
+    
+    @property
+    def plan_config(self):
+        """Retorna configuração do plano atual"""
+        return PlanConfig.objects.filter(plan_type=self.plan).first()
+    
+    @property
+    def can_add_products(self):
+        """Verifica se pode adicionar mais produtos"""
+        config = self.plan_config
+        if not config or config.max_products is None:
+            return True
+        return self.product_count < config.max_products
+    
+    @property
+    def products_limit_reached(self):
+        """Verifica se atingiu limite de produtos"""
+        return not self.can_add_products
+    
+    @property
+    def can_use_feature(self):
+        """Retorna dict com recursos disponíveis"""
+        config = self.plan_config
+        if not config:
+            return {
+                'scanner': True,
+                'storefront': False,
+                'alerts': False,
+                'ai_assistant': False,
+                'analytics': False
+            }
+        
+        return {
+            'scanner': config.can_use_scanner,
+            'storefront': config.can_use_storefront,
+            'alerts': config.can_use_alerts,
+            'ai_assistant': config.can_use_ai_assistant,
+            'analytics': config.can_use_analytics
+        }
+    
+    @property
+    def subscription_status(self):
+        """Status da assinatura"""
+        if not self.subscription_expires_at:
+            return 'active' if self.plan == 'pro' else 'free'
+        
+        if timezone.now() > self.subscription_expires_at:
+            return 'expired'
+        
+        return 'active'
+    
+    @property
+    def days_until_expiry(self):
+        """Dias até expirar"""
+        if not self.subscription_expires_at:
+            return None
+        
+        delta = self.subscription_expires_at - timezone.now()
+        return max(0, delta.days)
+    
+    def upgrade_to_pro(self, billing_cycle='monthly'):
+        """Upgrade para PRO"""
+        self.plan = 'pro'
+        self.subscription_started_at = timezone.now()
+        
+        if billing_cycle == 'yearly':
+            self.subscription_expires_at = timezone.now() + timezone.timedelta(days=365)
+        else:
+            # Para assinatura mensal, não definir expiração (renovação automática)
+            self.subscription_expires_at = None
+            
+        self.save()
+    
+    def downgrade_to_free(self):
+        """Downgrade para Free"""
+        self.plan = 'free'
+        self.subscription_expires_at = None
+        self.payment_provider = None
+        self.payment_external_id = None
+        self.save()
+    
+    def get_active_promotions(self):
+        """Retorna promoções ativas para esta loja"""
+        return [
+            promo for promo in Promotion.objects.filter(is_active=True)
+            if promo.is_valid_for_store(self)
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.owner.email if self.owner else 'Sem dono'})"
@@ -324,3 +417,110 @@ class RegistrationSession(models.Model):
     
     def __str__(self):
         return f"Sessão {self.id} - {self.store.name} ({self.products_count} produtos)"
+    
+# inventory/models.py - ADICIONAR
+
+class PlanConfig(models.Model):
+    """Configuração global de planos (não por tenant)"""
+    
+    PLAN_CHOICES = [
+        ('free', 'Free'),
+        ('pro', 'Pro'),
+        ('premium', 'Premium'),
+    ]
+    
+    plan_type = models.CharField(max_length=20, choices=PLAN_CHOICES, unique=True)
+    display_name = models.CharField(max_length=50)
+    description = models.TextField(blank=True)
+    
+    # Limites configuráveis
+    max_products = models.IntegerField(null=True, blank=True, help_text="NULL = ilimitado")
+    max_storage_mb = models.IntegerField(default=100)
+    
+    # Recursos habilitados
+    can_use_scanner = models.BooleanField(default=True)
+    can_use_storefront = models.BooleanField(default=False)
+    can_use_alerts = models.BooleanField(default=False)
+    can_use_ai_assistant = models.BooleanField(default=False)
+    can_use_analytics = models.BooleanField(default=False)
+    
+    # Preços
+    monthly_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    yearly_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    
+    # UI
+    highlight_color = models.CharField(max_length=7, default='#3B82F6')
+    is_popular = models.BooleanField(default=False)
+    is_visible = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'plan_configs'
+        ordering = ['sort_order']
+        verbose_name = 'Configuração de Plano'
+        verbose_name_plural = 'Configurações de Planos'
+        
+    def __str__(self):
+        return f"{self.display_name} (R$ {self.monthly_price}/mês)"
+
+class Promotion(models.Model):
+    """Promoções globais (aplicadas por regra de tenant)"""
+    
+    TARGET_CHOICES = [
+        ('all', 'Todas as lojas'),
+        ('free', 'Apenas plano Free'),
+        ('pro', 'Apenas plano Pro'),
+        ('new_stores', 'Lojas novas (< 7 dias)'),
+        ('inactive_stores', 'Lojas inativas (> 30 dias)'),
+    ]
+    
+    title = models.CharField(max_length=100)
+    message = models.TextField()
+    target_audience = models.CharField(max_length=20, choices=TARGET_CHOICES, default='free')
+    
+    # Desconto
+    discount_percent = models.IntegerField(default=0)
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    
+    # Controle temporal
+    is_active = models.BooleanField(default=True)
+    starts_at = models.DateTimeField(default=timezone.now)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    
+    # Controle de exibição
+    max_views_per_store = models.IntegerField(null=True, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'promotions'
+        verbose_name = 'Promoção'
+        verbose_name_plural = 'Promoções'
+        
+    def __str__(self):
+        return self.title
+    
+    def is_valid_for_store(self, store):
+        """Verifica se promoção é válida para uma loja específica"""
+        now = timezone.now()
+        
+        # Verificações básicas
+        if not self.is_active or now < self.starts_at:
+            return False
+        if self.ends_at and now > self.ends_at:
+            return False
+            
+        # Verificação por target
+        if self.target_audience == 'free' and store.plan != 'free':
+            return False
+        if self.target_audience == 'pro' and store.plan != 'pro':
+            return False
+        if self.target_audience == 'new_stores':
+            days_since_creation = (now - store.created_at).days
+            if days_since_creation > 7:
+                return False
+                
+        return True

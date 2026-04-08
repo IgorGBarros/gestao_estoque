@@ -18,3 +18,4 @@ ios/Pods
 *.sqlite
 *.db   
 *.sql
+downloaded_files/

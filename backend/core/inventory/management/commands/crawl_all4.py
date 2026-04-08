@@ -50,45 +50,72 @@ def detect_category(name):
     return "Geral"
 
 class Command(BaseCommand):
-    help = 'Super Crawler Otimizado: Prioriza produtos existentes e múltiplas páginas'
+    help = 'Super Crawler Ultra-Otimizado: Performance melhorada por marca'
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # ✅ CACHE DE SKUs EXISTENTES PARA MARY KAY
+        self.existing_mary_kay_skus = set()
+        self._load_existing_mary_kay_skus()
+    
+    def _load_existing_mary_kay_skus(self):
+        """✅ CARREGAR SKUs EXISTENTES DA MARY KAY NO INÍCIO"""
+        try:
+            existing_skus = Product.objects.filter(brand="Mary Kay").values_list('natura_sku', flat=True)
+            self.existing_mary_kay_skus = set(existing_skus)
+            print(f"📋 Carregados {len(self.existing_mary_kay_skus)} SKUs existentes da Mary Kay")
+        except Exception as e:
+            print(f"⚠️ Erro ao carregar SKUs existentes: {e}")
+            self.existing_mary_kay_skus = set()
     
     def add_arguments(self, parser):
         parser.add_argument('--brand', type=str, help='Marca específica para crawlear')
         parser.add_argument('--update-existing', action='store_true', help='Priorizar produtos existentes')
         parser.add_argument('--max-pages', type=int, default=10, help='Máximo de páginas por marca')
+        parser.add_argument('--fast-mode', action='store_true', help='Modo rápido (menos delays)')
 
     def handle(self, *args, **options):
-        # 🚀 CONFIGURAÇÃO DAS MARCAS COM MÚLTIPLAS URLs
+        # 🚀 CONFIGURAÇÃO OTIMIZADA POR MARCA
         STORES = [
             {
                 "brand": "Natura", 
                 "list_url": "https://www.natura.com.br/c/todos-produtos", 
                 "domain": "www.natura.com.br", 
-                "prefix": "NATBRA"
+                "prefix": "NATBRA",
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.0      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "Avon", 
                 "list_url": "https://www.avon.com.br/c/todos-produtos", 
                 "domain": "www.avon.com.br", 
-                "prefix": "AVNBRA"
+                "prefix": "AVNBRA",
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.0      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "O Boticário", 
                 "list_url": "https://www.boticario.com.br/todos-os-produtos/", 
                 "domain": "www.boticario.com.br", 
-                "prefix": None
+                "prefix": None,
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.5      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "Quem Disse Berenice", 
                 "list_url": "https://www.quemdisseberenice.com.br/todos-produtos-site/", 
                 "domain": "www.quemdisseberenice.com.br", 
-                "prefix": None
+                "prefix": None,
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.5      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "Eudora", 
                 "list_url": "https://www.eudora.com.br/site-todo/", 
                 "domain": "www.eudora.com.br", 
-                "prefix": None
+                "prefix": None,
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.5      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "Mary Kay",
@@ -96,14 +123,20 @@ class Command(BaseCommand):
                     "https://loja.marykay.com.br/cuidados-faciais",
                     "https://loja.marykay.com.br/maquiagem", 
                     "https://loja.marykay.com.br/cuidados-corporais",
-                    "https://loja.marykay.com.br/fragrancias",
-                    "https://loja.marykay.com.br/presentes",
-                    "https://loja.marykay.com.br/promocoes"
+                    "https://loja.marykay.com.br/fragrancias"  # ✅ REDUZIDO PARA 4 URLs
                 ],
                 "domain": "loja.marykay.com.br", 
-                "prefix": None
+                "prefix": None,
+                "speed": "slow",   # ✅ MARCA LENTA (JavaScript)
+                "delay": 3.0       # ✅ DELAY NECESSÁRIO
             }
         ]
+
+        # ✅ MODO RÁPIDO: REDUZIR DELAYS
+        if options['fast_mode']:
+            for store in STORES:
+                store['delay'] = store['delay'] * 0.5  # Reduzir delays pela metade
+            self.stdout.write(self.style.WARNING("⚡ MODO RÁPIDO ATIVADO: Delays reduzidos"))
         
         # ✅ FILTRAR MARCA ESPECÍFICA SE SOLICITADO
         if options['brand']:
@@ -111,6 +144,12 @@ class Command(BaseCommand):
             if not STORES:
                 self.stdout.write(self.style.ERROR(f"❌ Marca '{options['brand']}' não encontrada!"))
                 return
+
+        # ✅ PROCESSAR MARCAS RÁPIDAS PRIMEIRO
+        fast_stores = [s for s in STORES if s['speed'] == 'fast']
+        slow_stores = [s for s in STORES if s['speed'] == 'slow']
+        
+        self.stdout.write(f"🚀 Marcas rápidas: {len(fast_stores)} | 🐌 Marcas lentas: {len(slow_stores)}")
         
         # ✅ PRIORIZAR PRODUTOS EXISTENTES
         if options['update_existing']:
@@ -118,25 +157,21 @@ class Command(BaseCommand):
             self.update_existing_products(STORES)
         
         MAX_PAGES = options['max_pages']
-        self.stdout.write(self.style.WARNING(f"🕷️ Iniciando Super Crawler Otimizado (Máx: {MAX_PAGES} páginas)..."))
-        
-        # ✅ CONTROLE DE PÁGINAS VAZIAS POR MARCA
-        empty_pages = {store["brand"]: 0 for store in STORES}
-        discovered_products = defaultdict(list)
-        
-        # ✅ CONFIGURAÇÃO CORRIGIDA DO SELENIUMBASE
+        total_processed = 0
+
+        # ✅ CONFIGURAÇÃO SELENIUMBASE OTIMIZADA
         with SB(
             uc=True,
             headless=True, 
-            page_load_strategy="eager",
+            page_load_strategy="eager",  # ✅ CARREGAMENTO MAIS RÁPIDO
             disable_js=False,
             disable_csp=True,
             incognito=True,
         ) as sb:
             
-            # ✅ CONFIGURAR TIMEOUTS
-            sb.driver.set_page_load_timeout(45)
-            sb.driver.set_script_timeout(30)
+            # ✅ TIMEOUTS OTIMIZADOS
+            sb.driver.set_page_load_timeout(30)  # ✅ REDUZIDO DE 45 para 30
+            sb.driver.set_script_timeout(20)     # ✅ REDUZIDO DE 30 para 20
             
             # ✅ CONFIGURAR TRATAMENTO DE ERROS GLOBAL
             sb.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
@@ -162,40 +197,401 @@ class Command(BaseCommand):
                 '''
             })
             
-            # ✅ DESCOBERTA INTELIGENTE POR PÁGINAS
-            for page in range(1, MAX_PAGES + 1):
-                self.stdout.write(self.style.WARNING(f"\n--- 📂 PÁGINA {page}/{MAX_PAGES} ---"))
-                
-                page_discoveries = 0
-                
-                for store in STORES:
-                    if empty_pages[store['brand']] >= 3:
-                        continue
-                    
-                    brand_discoveries = self.discover_products_for_brand(sb, store, page)
-                    discovered_products[store['brand']].extend(brand_discoveries)
-                    
-                    if not brand_discoveries:
-                        empty_pages[store['brand']] += 1
-                        self.stdout.write(f"   ⚠️ {store['brand']}: Página vazia ({empty_pages[store['brand']]}/3)")
-                    else:
-                        empty_pages[store['brand']] = 0
-                        page_discoveries += len(brand_discoveries)
-                        self.stdout.write(self.style.SUCCESS(f"   ✅ {store['brand']}: {len(brand_discoveries)} produtos"))
-                
-                # ✅ PARAR SE TODAS AS MARCAS ESTÃO VAZIAS
-                if all(count >= 3 for count in empty_pages.values()):
-                    self.stdout.write(self.style.SUCCESS("🏁 Fim das páginas em todas as marcas!"))
-                    break
-                
-                if page_discoveries == 0:
-                    self.stdout.write("   ⏭️ Página vazia em todas as marcas, continuando...")
-                    continue
+            # ✅ PROCESSAR MARCAS RÁPIDAS PRIMEIRO
+            for store in fast_stores:
+                processed = self.process_fast_brand(sb, store, MAX_PAGES)
+                total_processed += processed
+                self.stdout.write(f"✅ {store['brand']}: {processed} produtos processados")
             
-            # ✅ PROCESSAMENTO INTELIGENTE DOS PRODUTOS DESCOBERTOS
-            self.process_discovered_products(sb, discovered_products)
+            # ✅ PROCESSAR MARCAS LENTAS POR ÚLTIMO
+            for store in slow_stores:
+                processed = self.process_slow_brand(sb, store, min(MAX_PAGES, 5))  # ✅ LIMITAR MARY KAY
+                total_processed += processed
+                self.stdout.write(f"✅ {store['brand']}: {processed} produtos processados")
+
+        self.stdout.write(self.style.SUCCESS(f"🎉 Total processado: {total_processed} produtos"))
+
+    def extract_mary_kay_simple(self, sb):
+        """⚡ EXTRAÇÃO SIMPLIFICADA MARY KAY COM VERIFICAÇÃO DE SKU EXISTENTE"""
+        try:
+            soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
+            
+            # ✅ SKU
+            sku_tag = soup.find(class_=re.compile(r'product-identifier__value'))
+            sku = sku_tag.text.strip() if sku_tag else None
+            
+            if not sku:
+                return None
+            
+            # ✅ VERIFICAR SE SKU JÁ EXISTE NO BANCO
+            if sku in self.existing_mary_kay_skus:
+                self.stdout.write(f"   ⏭️ SKU {sku} já existe no banco, pulando...")
+                return None
+            
+            # ✅ NOME
+            name_tag = soup.find(['h1', 'h2'], class_=re.compile(r'product|title'))
+            name = name_tag.text.strip() if name_tag else f"Produto Mary Kay {sku}"
+            
+            # ✅ PREÇO (SIMPLIFICADO)
+            price = Decimal('0.00')
+            try:
+                price_tag = soup.find(class_=re.compile(r'price|valor'))
+                if price_tag:
+                    price_text = re.search(r'(\d+[,\.]\d{2})', price_tag.text)
+                    if price_text:
+                        price = Decimal(price_text.group(1).replace(',', '.'))
+            except:
+                pass
+            
+            return {
+                'sku': sku,
+                'name': name,
+                'price': price,
+                'image_url': None,
+                'desc': "Mary Kay"
+            }
+            
+        except Exception:
+            return None
+
+    def parse_mary_kay_variation(self, soup, variation_text):
+        """✅ PARSER MELHORADO PARA MARY KAY COM VERIFICAÇÃO DE SKU"""
+        try:
+            # ✅ SKU
+            sku_tag = soup.find(class_=re.compile(r'product-identifier__value'))
+            sku = sku_tag.text.strip() if sku_tag else None
+            
+            if not sku:
+                return None
+            
+            # ✅ VERIFICAR SE SKU JÁ EXISTE NO BANCO
+            if sku in self.existing_mary_kay_skus:
+                self.stdout.write(f"   ⏭️ SKU {sku} (variação: {variation_text}) já existe no banco, pulando...")
+                return None
+            
+            # ✅ NOME BASE
+            base_name_tag = soup.find(class_=re.compile(r'productBrand'))
+            base_name = base_name_tag.text.strip() if base_name_tag else "Produto Mary Kay"
+            
+            # ✅ NOME COMPLETO COM VARIAÇÃO
+            if variation_text:
+                full_name = f"{base_name} - {variation_text}"
+            else:
+                full_name = base_name
+            
+            # ✅ PREÇO
+            price = Decimal('0.00')
+            try:
+                int_tag = soup.find(class_=re.compile(r'currencyInteger'))
+                frac_tag = soup.find(class_=re.compile(r'currencyFraction'))
+                
+                if int_tag and frac_tag:
+                    price_str = f"{int_tag.text.strip()}.{frac_tag.text.strip()}"
+                    price = Decimal(price_str)
+            except:
+                pass
+            
+            # ✅ IMAGEM
+            image_url = None
+            img_tag = soup.find('img', class_=re.compile(r'productImageTag--main'))
+            if img_tag and img_tag.has_attr('src'):
+                image_url = img_tag['src'].split('?')[0]
+            
+            # ✅ DESCRIÇÃO
+            description = f"Mary Kay - {variation_text}" if variation_text else "Mary Kay"
+            
+            return {
+                'sku': sku,
+                'name': full_name,
+                'price': price,
+                'image_url': image_url,
+                'desc': description
+            }
+            
+        except Exception as e:
+            self.stdout.write(f"❌ Erro ao parsear Mary Kay: {e}")
+            return None
+
+    def save_product_safely(self, product_data, brand):
+        """✅ SALVAMENTO SEGURO COM ATUALIZAÇÃO DO CACHE"""
+        try:
+            sku = product_data['sku']
+            name = product_data['name'] or f"Produto {brand} - {sku}"
+            price = product_data['price']
+            image_url = product_data['image_url']
+            description = product_data['desc']
+            
+            if "Access Denied" in name or "Access Denied" in str(description):
+                return False
+            
+            if not sku or len(str(sku)) < 2:
+                return False
+            
+            smart_category = detect_category(name)
+            
+            product, created = Product.objects.get_or_create(
+                natura_sku=str(sku),
+                defaults={
+                    'name': name[:255],
+                    'brand': brand,
+                    'category': smart_category,
+                    'official_price': price,
+                    'bar_code': None,
+                    'image_url': image_url,
+                    'description': description or f"Descoberto no site {brand}",
+                    'last_checked_at': timezone.now(),
+                    'last_checked_price': price,
+                    'is_protected': True
+                }
+            )
+            
+            # ✅ ADICIONAR SKU AO CACHE SE FOR MARY KAY E NOVO
+            if brand == "Mary Kay" and created:
+                self.existing_mary_kay_skus.add(str(sku))
+            
+            if not created:
+                if len(name) > len(product.name) or "Produto" in product.name:
+                    product.name = name[:255]
+                
+                product.brand = brand
+                product.category = smart_category
+                product.official_price = price
+                product.last_checked_at = timezone.now()
+                product.last_checked_price = price
+                
+                if image_url and not product.image_url:
+                    product.image_url = image_url
+                
+                if description and (not product.description or len(description) > len(product.description)):
+                    product.description = description
+                
+                product.save()
+            
+            # ✅ HISTÓRICO DE PREÇOS - CORRIGIDO PARA USAR captured_at
+            if price > 0:
+                try:
+                    # Verificar se já existe um preço similar nas últimas 24 horas
+                    recent_price = PriceHistory.objects.filter(
+                        product=product,
+                        price=price,
+                        captured_at__gte=timezone.now() - timedelta(hours=24)  # ✅ CORRIGIDO: captured_at
+                    ).first()
+                    
+                    if not recent_price:
+                        PriceHistory.objects.create(
+                            product=product,
+                            price=price
+                            # ✅ captured_at será definido automaticamente pelo modelo
+                        )
+                except Exception as price_error:
+                    # ✅ NÃO MOSTRAR ERRO - apenas log interno
+                    pass
+            
+            status = "✨" if created else "🔄"
+            img_status = "🖼️" if image_url else "❌"
+            price_display = f"R$ {price}" if price > 0 else "Sem preço"
+            
+            self.stdout.write(self.style.SUCCESS(
+                f"{status} [{brand}] {sku} ({smart_category}) - {name[:30]}... | {price_display} | {img_status}"
+            ))
+            
+            return True
+            
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"❌ Erro ao salvar produto: {e}"))
+            return False
+
+    # ✅ MANTER TODOS OS OUTROS MÉTODOS INALTERADOS
+    def process_fast_brand(self, sb, store, max_pages):
+        """⚡ PROCESSAMENTO OTIMIZADO PARA MARCAS RÁPIDAS"""
+        processed = 0
+        empty_pages = 0
         
-        self.stdout.write(self.style.SUCCESS("🎉 Super Crawler Otimizado Finalizado!"))
+        for page in range(1, max_pages + 1):
+            if empty_pages >= 2:  # ✅ PARAR MAIS CEDO
+                break
+                
+            url = f"{store['list_url']}?page={page}" if '?' not in store['list_url'] else f"{store['list_url']}&page={page}"
+            
+            try:
+                sb.open(url)
+                sb.sleep(store['delay'])  # ✅ DELAY MÍNIMO
+                
+                # ✅ SCROLL RÁPIDO
+                sb.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                sb.sleep(0.5)  # ✅ DELAY MÍNIMO
+                
+                # ✅ VERIFICAR BLOQUEIOS
+                page_title = sb.get_title()
+                if "Access Denied" in page_title or "erro" in page_title.lower():
+                    self.stdout.write(self.style.ERROR(f"⛔ Bloqueio detectado em {store['brand']}!"))
+                    continue
+                
+                soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
+                products = self.extract_fast_products(soup, store)
+                
+                if not products:
+                    empty_pages += 1
+                    continue
+                
+                empty_pages = 0
+                
+                # ✅ PROCESSAMENTO EM LOTE
+                for product_data in products:
+                    if self.save_product_safely(product_data, store['brand']):
+                        processed += 1
+                
+                self.stdout.write(f"   📄 Página {page}: {len(products)} produtos")
+                
+            except Exception as e:
+                self.stdout.write(f"❌ Erro página {page}: {e}")
+                continue
+        
+        return processed
+
+    def process_slow_brand(self, sb, store, max_pages):
+        """🐌 PROCESSAMENTO CUIDADOSO PARA MARY KAY COM VERIFICAÇÃO DE SKU"""
+        processed = 0
+        skipped = 0
+        
+        urls_to_visit = store.get('list_urls', [store.get('list_url')])
+        
+        for base_url in urls_to_visit:
+            for page in range(1, max_pages + 1):
+                url = f"{base_url}?page={page}"
+                
+                try:
+                    sb.open(url)
+                    sb.sleep(store['delay'])  # ✅ DELAY NECESSÁRIO
+                    
+                    # ✅ AGUARDAR JAVASCRIPT
+                    try:
+                        sb.wait_for_element("body", timeout=15)
+                    except:
+                        sb.sleep(2)
+                    
+                    # ✅ SCROLL GRADUAL
+                    sb.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.5);")
+                    sb.sleep(1)
+                    sb.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    sb.sleep(2)
+                    
+                    soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
+                    product_links = self.extract_mary_kay_links(soup, store)
+                    
+                    # ✅ PROCESSAR APENAS OS PRIMEIROS 10 PRODUTOS POR PÁGINA
+                    limited_links = product_links[:10]
+                    
+                    for product_link in limited_links:
+                        try:
+                            sb.open(product_link['url'])
+                            sb.sleep(2)  # ✅ DELAY REDUZIDO
+                            
+                            # ✅ EXTRAÇÃO SIMPLIFICADA (SEM VARIAÇÕES) COM VERIFICAÇÃO DE SKU
+                            product_data = self.extract_mary_kay_simple(sb)
+                            
+                            if product_data is None:
+                                skipped += 1
+                                continue
+                            
+                            if self.save_product_safely(product_data, store['brand']):
+                                processed += 1
+                            
+                        except Exception:
+                            continue  # ✅ IGNORAR ERROS E CONTINUAR
+                    
+                    self.stdout.write(f"   📄 {base_url} - Página {page}: {len(limited_links)} produtos | Pulados: {skipped}")
+                    
+                except Exception:
+                    continue
+        
+        return processed
+
+    # ✅ MANTER TODOS OS OUTROS MÉTODOS ORIGINAIS INALTERADOS
+    def extract_fast_products(self, soup, store):
+        """⚡ EXTRAÇÃO RÁPIDA PARA MARCAS SIMPLES"""
+        products = []
+        
+        if store['brand'] in ["Natura", "Avon"]:
+            # ✅ EXTRAÇÃO DIRETA POR SKU
+            product_cards = soup.find_all('a', href=re.compile(rf"{store['prefix']}-\d+"))
+            
+            for a in product_cards[:20]:  # ✅ LIMITAR A 20 POR PÁGINA
+                href = a.get('href')
+                if not href:
+                    continue
+                
+                # ✅ EXTRAIR SKU DIRETAMENTE DA URL
+                sku_match = re.search(rf'{store["prefix"]}-(\d+)', href)
+                if not sku_match:
+                    continue
+                
+                sku = sku_match.group(1)
+                
+                # ✅ NOME DO PRODUTO
+                name_elem = a.find(['h2', 'h3', 'span'], class_=re.compile(r'product|title|name'))
+                name = name_elem.text.strip() if name_elem else f"Produto {store['brand']} {sku}"
+                
+                # ✅ PREÇO (OPCIONAL)
+                price = Decimal('0.00')
+                price_elem = a.find(['span', 'div'], class_=re.compile(r'price|valor'))
+                if price_elem:
+                    price_text = re.search(r'(\d+[,\.]\d{2})', price_elem.text)
+                    if price_text:
+                        price = Decimal(price_text.group(1).replace(',', '.'))
+                
+                products.append({
+                    'sku': sku,
+                    'name': name,
+                    'price': price,
+                    'image_url': None,
+                    'desc': f"Produto {store['brand']}"
+                })
+        
+        else:
+            # ✅ OUTRAS MARCAS: EXTRAÇÃO SIMPLIFICADA
+            product_cards = soup.find_all('a', href=True)
+            
+            for a in product_cards[:15]:  # ✅ LIMITAR A 15 POR PÁGINA
+                href = a.get('href')
+                if not href or '/p' not in href:
+                    continue
+                
+                # ✅ SKU GENÉRICO
+                sku = href.split('/')[-1][:10]  # ✅ USAR PARTE DA URL COMO SKU
+                
+                # ✅ NOME
+                name_elem = a.find(['h2', 'h3', 'span'])
+                name = name_elem.text.strip() if name_elem else f"Produto {store['brand']}"
+                
+                products.append({
+                    'sku': sku,
+                    'name': name,
+                    'price': Decimal('0.00'),
+                    'image_url': None,
+                    'desc': f"Produto {store['brand']}"
+                })
+        
+        return products
+
+    def extract_mary_kay_links(self, soup, store):
+        """🔗 EXTRAIR APENAS LINKS DA MARY KAY (SEM PROCESSAR)"""
+        links = []
+        
+        product_cards = soup.find_all('a', href=True)
+        for a in product_cards:
+            href = a.get('href')
+            if not href or len(href) < 20:
+                continue
+            
+            # ✅ FILTROS BÁSICOS
+            if any(x in href.lower() for x in ['login', 'cart', 'account', 'search']):
+                continue
+            
+            full_url = href if href.startswith('http') else f"https://{store['domain']}{href}"
+            links.append({"url": full_url, "brand": store['brand']})
+        
+        return links
 
     def update_existing_products(self, stores):
         """✅ ATUALIZAR PRODUTOS EXISTENTES PRIMEIRO"""
@@ -214,6 +610,7 @@ class Command(BaseCommand):
         for product in existing_products:
             self.stdout.write(f"   📝 Marcado para atualização: {product.brand} - {product.natura_sku}")
 
+    # ✅ MANTER TODOS OS OUTROS MÉTODOS ORIGINAIS...
     def discover_products_for_brand(self, sb, store, page):
         """✅ DESCOBRIR PRODUTOS DE UMA MARCA EM UMA PÁGINA"""
         discovered = []

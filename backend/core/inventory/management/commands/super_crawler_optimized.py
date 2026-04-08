@@ -50,45 +50,56 @@ def detect_category(name):
     return "Geral"
 
 class Command(BaseCommand):
-    help = 'Super Crawler Otimizado: Prioriza produtos existentes e múltiplas páginas'
+    help = 'Super Crawler Ultra-Otimizado: Performance melhorada por marca'
     
     def add_arguments(self, parser):
         parser.add_argument('--brand', type=str, help='Marca específica para crawlear')
         parser.add_argument('--update-existing', action='store_true', help='Priorizar produtos existentes')
         parser.add_argument('--max-pages', type=int, default=10, help='Máximo de páginas por marca')
+        parser.add_argument('--fast-mode', action='store_true', help='Modo rápido (menos delays)')
 
     def handle(self, *args, **options):
-        # 🚀 CONFIGURAÇÃO DAS MARCAS COM MÚLTIPLAS URLs
+        # 🚀 CONFIGURAÇÃO OTIMIZADA POR MARCA
         STORES = [
             {
                 "brand": "Natura", 
                 "list_url": "https://www.natura.com.br/c/todos-produtos", 
                 "domain": "www.natura.com.br", 
-                "prefix": "NATBRA"
+                "prefix": "NATBRA",
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.0      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "Avon", 
                 "list_url": "https://www.avon.com.br/c/todos-produtos", 
                 "domain": "www.avon.com.br", 
-                "prefix": "AVNBRA"
+                "prefix": "AVNBRA",
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.0      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "O Boticário", 
                 "list_url": "https://www.boticario.com.br/todos-os-produtos/", 
                 "domain": "www.boticario.com.br", 
-                "prefix": None
+                "prefix": None,
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.5      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "Quem Disse Berenice", 
                 "list_url": "https://www.quemdisseberenice.com.br/todos-produtos-site/", 
                 "domain": "www.quemdisseberenice.com.br", 
-                "prefix": None
+                "prefix": None,
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.5      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "Eudora", 
                 "list_url": "https://www.eudora.com.br/site-todo/", 
                 "domain": "www.eudora.com.br", 
-                "prefix": None
+                "prefix": None,
+                "speed": "fast",  # ✅ MARCA RÁPIDA
+                "delay": 1.5      # ✅ DELAY MÍNIMO
             },
             {
                 "brand": "Mary Kay",
@@ -96,107 +107,291 @@ class Command(BaseCommand):
                     "https://loja.marykay.com.br/cuidados-faciais",
                     "https://loja.marykay.com.br/maquiagem", 
                     "https://loja.marykay.com.br/cuidados-corporais",
-                    "https://loja.marykay.com.br/fragrancias",
-                    "https://loja.marykay.com.br/presentes",
-                    "https://loja.marykay.com.br/promocoes"
+                    "https://loja.marykay.com.br/fragrancias"
                 ],
                 "domain": "loja.marykay.com.br", 
-                "prefix": None
+                "prefix": None,
+                "speed": "slow",   # ✅ MARCA LENTA (JavaScript)
+                "delay": 3.0       # ✅ DELAY NECESSÁRIO
             }
         ]
-        
-        # ✅ FILTRAR MARCA ESPECÍFICA SE SOLICITADO
+
+        # ✅ MODO RÁPIDO: REDUZIR DELAYS
+        if options['fast_mode']:
+            for store in STORES:
+                store['delay'] = store['delay'] * 0.5  # Reduzir delays pela metade
+            self.stdout.write(self.style.WARNING("⚡ MODO RÁPIDO ATIVADO: Delays reduzidos"))
+
+        # ✅ FILTRAR MARCA ESPECÍFICA
         if options['brand']:
             STORES = [s for s in STORES if s['brand'].lower() == options['brand'].lower()]
             if not STORES:
                 self.stdout.write(self.style.ERROR(f"❌ Marca '{options['brand']}' não encontrada!"))
                 return
+
+        # ✅ PROCESSAR MARCAS RÁPIDAS PRIMEIRO
+        fast_stores = [s for s in STORES if s['speed'] == 'fast']
+        slow_stores = [s for s in STORES if s['speed'] == 'slow']
         
+        self.stdout.write(f"🚀 Marcas rápidas: {len(fast_stores)} | 🐌 Marcas lentas: {len(slow_stores)}")
+
         # ✅ PRIORIZAR PRODUTOS EXISTENTES
         if options['update_existing']:
             self.stdout.write(self.style.WARNING("🎯 MODO PRIORITÁRIO: Atualizando produtos existentes primeiro..."))
             self.update_existing_products(STORES)
-        
+
         MAX_PAGES = options['max_pages']
-        self.stdout.write(self.style.WARNING(f"🕷️ Iniciando Super Crawler Otimizado (Máx: {MAX_PAGES} páginas)..."))
-        
-        # ✅ CONTROLE DE PÁGINAS VAZIAS POR MARCA
-        empty_pages = {store["brand"]: 0 for store in STORES}
-        discovered_products = defaultdict(list)
-        
-        # ✅ CONFIGURAÇÃO CORRIGIDA DO SELENIUMBASE
+        total_processed = 0
+
+        # ✅ CONFIGURAÇÃO SELENIUMBASE OTIMIZADA
         with SB(
             uc=True,
             headless=True, 
-            page_load_strategy="eager",
+            page_load_strategy="eager",  # ✅ CARREGAMENTO MAIS RÁPIDO
             disable_js=False,
             disable_csp=True,
             incognito=True,
         ) as sb:
             
-            # ✅ CONFIGURAR TIMEOUTS
-            sb.driver.set_page_load_timeout(45)
-            sb.driver.set_script_timeout(30)
+            # ✅ TIMEOUTS OTIMIZADOS
+            sb.driver.set_page_load_timeout(30)  # ✅ REDUZIDO DE 45 para 30
+            sb.driver.set_script_timeout(20)     # ✅ REDUZIDO DE 30 para 20
             
-            # ✅ CONFIGURAR TRATAMENTO DE ERROS GLOBAL
-            sb.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-                'source': '''
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined,
-                    });
-                    
-                    window.addEventListener('error', function(e) {
-                        if (e.message && e.message.includes('return')) {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            return true;
-                        }
-                    }, true);
-                    
-                    window.onerror = function(msg, url, line, col, error) {
-                        if (msg && msg.includes('Illegal return statement')) {
-                            return true;
-                        }
-                        return false;
-                    };
-                '''
-            })
+            # ✅ PROCESSAR MARCAS RÁPIDAS PRIMEIRO
+            for store in fast_stores:
+                processed = self.process_fast_brand(sb, store, MAX_PAGES)
+                total_processed += processed
+                self.stdout.write(f"✅ {store['brand']}: {processed} produtos processados")
             
-            # ✅ DESCOBERTA INTELIGENTE POR PÁGINAS
-            for page in range(1, MAX_PAGES + 1):
-                self.stdout.write(self.style.WARNING(f"\n--- 📂 PÁGINA {page}/{MAX_PAGES} ---"))
-                
-                page_discoveries = 0
-                
-                for store in STORES:
-                    if empty_pages[store['brand']] >= 3:
-                        continue
-                    
-                    brand_discoveries = self.discover_products_for_brand(sb, store, page)
-                    discovered_products[store['brand']].extend(brand_discoveries)
-                    
-                    if not brand_discoveries:
-                        empty_pages[store['brand']] += 1
-                        self.stdout.write(f"   ⚠️ {store['brand']}: Página vazia ({empty_pages[store['brand']]}/3)")
-                    else:
-                        empty_pages[store['brand']] = 0
-                        page_discoveries += len(brand_discoveries)
-                        self.stdout.write(self.style.SUCCESS(f"   ✅ {store['brand']}: {len(brand_discoveries)} produtos"))
-                
-                # ✅ PARAR SE TODAS AS MARCAS ESTÃO VAZIAS
-                if all(count >= 3 for count in empty_pages.values()):
-                    self.stdout.write(self.style.SUCCESS("🏁 Fim das páginas em todas as marcas!"))
-                    break
-                
-                if page_discoveries == 0:
-                    self.stdout.write("   ⏭️ Página vazia em todas as marcas, continuando...")
-                    continue
-            
-            # ✅ PROCESSAMENTO INTELIGENTE DOS PRODUTOS DESCOBERTOS
-            self.process_discovered_products(sb, discovered_products)
-        
-        self.stdout.write(self.style.SUCCESS("🎉 Super Crawler Otimizado Finalizado!"))
+            # ✅ PROCESSAR MARCAS LENTAS POR ÚLTIMO
+            for store in slow_stores:
+                processed = self.process_slow_brand(sb, store, MAX_PAGES)
+                total_processed += processed
+                self.stdout.write(f"✅ {store['brand']}: {processed} produtos processados")
 
+        self.stdout.write(self.style.SUCCESS(f"🎉 Total processado: {total_processed} produtos"))
+
+    def process_fast_brand(self, sb, store, max_pages):
+        """⚡ PROCESSAMENTO OTIMIZADO PARA MARCAS RÁPIDAS"""
+        processed = 0
+        empty_pages = 0
+        
+        for page in range(1, max_pages + 1):
+            if empty_pages >= 2:  # ✅ PARAR MAIS CEDO
+                break
+                
+            url = f"{store['list_url']}?page={page}" if '?' not in store['list_url'] else f"{store['list_url']}&page={page}"
+            
+            try:
+                sb.open(url)
+                sb.sleep(store['delay'])  # ✅ DELAY MÍNIMO
+                
+                # ✅ SCROLL RÁPIDO
+                sb.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                sb.sleep(0.5)  # ✅ DELAY MÍNIMO
+                
+                soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
+                products = self.extract_fast_products(soup, store)
+                
+                if not products:
+                    empty_pages += 1
+                    continue
+                
+                empty_pages = 0
+                
+                # ✅ PROCESSAMENTO EM LOTE
+                for product_data in products:
+                    if self.save_product_safely(product_data, store['brand']):
+                        processed += 1
+                
+                self.stdout.write(f"   📄 Página {page}: {len(products)} produtos")
+                
+            except Exception as e:
+                self.stdout.write(f"❌ Erro página {page}: {e}")
+                continue
+        
+        return processed
+
+    def process_slow_brand(self, sb, store, max_pages):
+        """🐌 PROCESSAMENTO CUIDADOSO PARA MARY KAY"""
+        processed = 0
+        
+        # ✅ LIMITAR MARY KAY A MENOS PÁGINAS
+        mary_kay_pages = min(max_pages, 5)  # ✅ MÁXIMO 5 PÁGINAS
+        
+        urls_to_visit = store.get('list_urls', [store.get('list_url')])
+        
+        for base_url in urls_to_visit:
+            for page in range(1, mary_kay_pages + 1):
+                url = f"{base_url}?page={page}"
+                
+                try:
+                    sb.open(url)
+                    sb.sleep(store['delay'])  # ✅ DELAY NECESSÁRIO
+                    
+                    # ✅ AGUARDAR JAVASCRIPT
+                    try:
+                        sb.wait_for_element("body", timeout=15)
+                    except:
+                        sb.sleep(2)
+                    
+                    # ✅ SCROLL GRADUAL
+                    sb.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.5);")
+                    sb.sleep(1)
+                    sb.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    sb.sleep(2)
+                    
+                    soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
+                    product_links = self.extract_mary_kay_links(soup, store)
+                    
+                    # ✅ PROCESSAR APENAS OS PRIMEIROS 10 PRODUTOS POR PÁGINA
+                    limited_links = product_links[:10]
+                    
+                    for product_link in limited_links:
+                        try:
+                            sb.open(product_link['url'])
+                            sb.sleep(2)  # ✅ DELAY REDUZIDO
+                            
+                            # ✅ EXTRAÇÃO SIMPLIFICADA (SEM VARIAÇÕES)
+                            product_data = self.extract_mary_kay_simple(sb)
+                            
+                            if product_data and self.save_product_safely(product_data, store['brand']):
+                                processed += 1
+                            
+                        except Exception:
+                            continue  # ✅ IGNORAR ERROS E CONTINUAR
+                    
+                    self.stdout.write(f"   📄 {base_url} - Página {page}: {len(limited_links)} produtos")
+                    
+                except Exception:
+                    continue
+        
+        return processed
+
+    def extract_fast_products(self, soup, store):
+        """⚡ EXTRAÇÃO RÁPIDA PARA MARCAS SIMPLES"""
+        products = []
+        
+        if store['brand'] in ["Natura", "Avon"]:
+            # ✅ EXTRAÇÃO DIRETA POR SKU
+            product_cards = soup.find_all('a', href=re.compile(rf"{store['prefix']}-\d+"))
+            
+            for a in product_cards[:20]:  # ✅ LIMITAR A 20 POR PÁGINA
+                href = a.get('href')
+                if not href:
+                    continue
+                
+                # ✅ EXTRAIR SKU DIRETAMENTE DA URL
+                sku_match = re.search(rf'{store["prefix"]}-(\d+)', href)
+                if not sku_match:
+                    continue
+                
+                sku = sku_match.group(1)
+                
+                # ✅ NOME DO PRODUTO
+                name_elem = a.find(['h2', 'h3', 'span'], class_=re.compile(r'product|title|name'))
+                name = name_elem.text.strip() if name_elem else f"Produto {store['brand']} {sku}"
+                
+                # ✅ PREÇO (OPCIONAL)
+                price = Decimal('0.00')
+                price_elem = a.find(['span', 'div'], class_=re.compile(r'price|valor'))
+                if price_elem:
+                    price_text = re.search(r'(\d+[,\.]\d{2})', price_elem.text)
+                    if price_text:
+                        price = Decimal(price_text.group(1).replace(',', '.'))
+                
+                products.append({
+                    'sku': sku,
+                    'name': name,
+                    'price': price,
+                    'image_url': None,
+                    'desc': f"Produto {store['brand']}"
+                })
+        
+        else:
+            # ✅ OUTRAS MARCAS: EXTRAÇÃO SIMPLIFICADA
+            product_cards = soup.find_all('a', href=True)
+            
+            for a in product_cards[:15]:  # ✅ LIMITAR A 15 POR PÁGINA
+                href = a.get('href')
+                if not href or '/p' not in href:
+                    continue
+                
+                # ✅ SKU GENÉRICO
+                sku = href.split('/')[-1][:10]  # ✅ USAR PARTE DA URL COMO SKU
+                
+                # ✅ NOME
+                name_elem = a.find(['h2', 'h3', 'span'])
+                name = name_elem.text.strip() if name_elem else f"Produto {store['brand']}"
+                
+                products.append({
+                    'sku': sku,
+                    'name': name,
+                    'price': Decimal('0.00'),
+                    'image_url': None,
+                    'desc': f"Produto {store['brand']}"
+                })
+        
+        return products
+
+    def extract_mary_kay_links(self, soup, store):
+        """🔗 EXTRAIR APENAS LINKS DA MARY KAY (SEM PROCESSAR)"""
+        links = []
+        
+        product_cards = soup.find_all('a', href=True)
+        for a in product_cards:
+            href = a.get('href')
+            if not href or len(href) < 20:
+                continue
+            
+            # ✅ FILTROS BÁSICOS
+            if any(x in href.lower() for x in ['login', 'cart', 'account', 'search']):
+                continue
+            
+            full_url = href if href.startswith('http') else f"https://{store['domain']}{href}"
+            links.append({"url": full_url, "brand": store['brand']})
+        
+        return links
+
+    def extract_mary_kay_simple(self, sb):
+        """⚡ EXTRAÇÃO SIMPLIFICADA MARY KAY (SEM VARIAÇÕES)"""
+        try:
+            soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
+            
+            # ✅ SKU
+            sku_tag = soup.find(class_=re.compile(r'product-identifier__value'))
+            sku = sku_tag.text.strip() if sku_tag else None
+            
+            if not sku:
+                return None
+            
+            # ✅ NOME
+            name_tag = soup.find(['h1', 'h2'], class_=re.compile(r'product|title'))
+            name = name_tag.text.strip() if name_tag else f"Produto Mary Kay {sku}"
+            
+            # ✅ PREÇO (SIMPLIFICADO)
+            price = Decimal('0.00')
+            try:
+                price_tag = soup.find(class_=re.compile(r'price|valor'))
+                if price_tag:
+                    price_text = re.search(r'(\d+[,\.]\d{2})', price_tag.text)
+                    if price_text:
+                        price = Decimal(price_text.group(1).replace(',', '.'))
+            except:
+                pass
+            
+            return {
+                'sku': sku,
+                'name': name,
+                'price': price,
+                'image_url': None,
+                'desc': "Mary Kay"
+            }
+            
+        except Exception:
+            return None
+
+    # ✅ MANTER TODOS OS MÉTODOS ORIGINAIS INALTERADOS
     def update_existing_products(self, stores):
         """✅ ATUALIZAR PRODUTOS EXISTENTES PRIMEIRO"""
         brand_names = [store['brand'] for store in stores]
