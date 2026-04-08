@@ -127,6 +127,26 @@ class Store(models.Model):
             return True
         return self.product_count < config.max_products
     
+    def get_plan_limits(self):
+        """Retorna informações sobre limites do plano"""
+        config = self.plan_config
+        current_count = self.product_count
+        
+        if config and config.max_products:
+            return {
+                'current_count': current_count,
+                'limit': config.max_products,
+                'can_add': current_count < config.max_products,
+                'remaining': config.max_products - current_count
+            }
+        else:
+            return {
+                'current_count': current_count,
+                'limit': None,
+                'can_add': True,
+                'remaining': None
+            }
+        
     @property
     def products_limit_reached(self):
         """Verifica se atingiu limite de produtos"""

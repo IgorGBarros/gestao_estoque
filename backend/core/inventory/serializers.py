@@ -243,49 +243,17 @@ class StockEntrySerializer(serializers.Serializer):
     natura_sku = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     image_url = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     
-    def validate(self, attrs):
-        """✅ NOVO: Validação de limites de plano"""
-        # Pegar store do contexto
-        store = self.context.get('store')
-        if not store:
-            raise ValidationError("Store não encontrada no contexto")
-        
-        # Verificar se é um produto novo (sem bar_code existente)
-        bar_code = attrs.get('bar_code')
-        is_new_product = False
-        
-        if bar_code:
-            # Verificar se produto existe globalmente
-            existing_product = Product.objects.filter(bar_code=bar_code).first()
-            if not existing_product:
-                is_new_product = True
-            else:
-                # Verificar se já existe no estoque da loja
-                existing_item = InventoryItem.objects.filter(
-                    store=store, 
-                    product=existing_product
-                ).first()
-                if not existing_item:
-                    is_new_product = True
-        else:
-            # Sem código de barras = produto novo
-            is_new_product = True
-        
-        # ✅ VALIDAÇÃO DE LIMITE
-        if is_new_product and not store.can_add_products:
-            config = store.plan_config
-            limit = config.max_products if config else 20
-            
-            raise ValidationError({
-                'error': 'PLAN_LIMIT_REACHED',
-                'message': f'Você atingiu o limite de {limit} produtos do plano {store.plan.upper()}.',
-                'current_plan': store.plan,
-                'current_count': store.product_count,
-                'limit': limit,
-                'upgrade_required': True
-            })
-        
-        return attrs
+    # ✅ APENAS validações básicas de formato
+    def validate_quantity(self, value):
+        if value <= 0:
+            raise ValidationError("Quantidade deve ser maior que zero")
+        return value
+    
+    def validate_bar_code(self, value):
+        # Validar formato se necessário
+        if value and len(value) > 50:
+            raise ValidationError("Código de barras muito longo")
+        return value
 
 # ==========================================
 # 5. SERIALIZERS DE VENDA (mantidos)
