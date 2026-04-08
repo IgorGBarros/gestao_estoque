@@ -241,8 +241,6 @@ class TenantModelMixin:
     
     def perform_create(self, serializer):
         store = self.get_store()
-
-
         
         # VALIDAÇÃO DE LIMITE (novo)
         if hasattr(self, 'check_plan_limits'):
