@@ -681,3 +681,121 @@ class UserPlanCache(models.Model):
             self.save()
         except:
             pass  # Se não tem store, mantém defaults
+
+
+# inventory/models.py - ADICIONAR
+
+class UserBehaviorLog(models.Model):
+    """Log comportamental agregado (LGPD-compliant)"""
+    
+    ACTION_TYPES = [
+        ('product_scan', 'Produto Escaneado'),
+        ('product_add', 'Produto Adicionado'),
+        ('product_edit', 'Produto Editado'),
+        ('stock_update', 'Estoque Atualizado'),
+        ('sale_record', 'Venda Registrada'),
+        ('report_view', 'Relatório Visualizado'),
+        ('storefront_access', 'Vitrine Acessada'),
+        ('plan_view', 'Página de Planos Visualizada'),
+    ]
+    
+    # ✅ LGPD: Não armazena dados pessoais, apenas padrões
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='behavior_logs')
+    action_type = models.CharField(max_length=20, choices=ACTION_TYPES)
+    
+    # Dados contextuais (não pessoais)
+    plan_at_time = models.CharField(max_length=10)  # free/pro no momento da ação
+    products_count_at_time = models.IntegerField()
+    day_of_week = models.IntegerField()  # 0-6 (segunda a domingo)
+    hour_of_day = models.IntegerField()  # 0-23
+    
+    # Metadados para ML
+    session_duration_minutes = models.IntegerField(null=True, blank=True)
+    feature_used = models.CharField(max_length=50, blank=True)  # scanner, vitrine, etc
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'user_behavior_logs'
+        indexes = [
+            models.Index(fields=['action_type', 'plan_at_time']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['store', 'action_type']),
+        ]
+        # ✅ LGPD: Retenção automática de dados
+        # Implementar job para deletar logs > 2 anos
+        
+    def __str__(self):
+        return f"{self.action_type} - {self.plan_at_time} - {self.created_at.date()}"
+
+class MLInsight(models.Model):
+    """Insights gerados por Machine Learning (agregados)"""
+    
+    INSIGHT_TYPES = [
+        ('conversion_prediction', 'Predição de Conversão'),
+        ('churn_risk', 'Risco de Churn'),
+        ('product_recommendation', 'Recomendação de Produto'),
+        ('optimal_pricing', 'Precificação Otimizada'),
+        ('seasonal_trend', 'Tendência Sazonal'),
+    ]
+    
+    insight_type = models.CharField(max_length=30, choices=INSIGHT_TYPES)
+    
+    # ✅ LGPD: Dados agregados, não individuais
+    target_segment = models.CharField(max_length=50)  # 'free_users_week_1', 'pro_users_cosmetics'
+    
+    # Dados do insight
+    confidence_score = models.FloatField()  # 0.0 - 1.0
+    insight_data = models.JSONField()  # Dados estruturados do insight
+    
+    # Metadados
+    model_version = models.CharField(max_length=20, default='v1.0')
+    training_data_size = models.IntegerField()
+    generated_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()  # Insights têm validade
+    
+    is_active = models.BooleanField(default=True)
+    
+    class Meta:
+        db_table = 'ml_insights'
+        indexes = [
+            models.Index(fields=['insight_type', 'target_segment']),
+            models.Index(fields=['generated_at']),
+        ]
+        
+    def __str__(self):
+        return f"{self.get_insight_type_display()} - {self.target_segment} ({self.confidence_score:.2f})"
+
+class DataPrivacyConsent(models.Model):
+    """Controle de consentimento LGPD"""
+    
+    CONSENT_TYPES = [
+        ('analytics', 'Analytics e Métricas'),
+        ('ml_training', 'Treinamento de IA'),
+        ('personalization', 'Personalização'),
+        ('marketing', 'Marketing Direcionado'),
+    ]
+    
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='privacy_consents')
+    consent_type = models.CharField(max_length=20, choices=CONSENT_TYPES)
+    
+    # Controle de consentimento
+    granted = models.BooleanField(default=False)
+    granted_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    
+    # Auditoria LGPD
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    consent_version = models.CharField(max_length=10, default='1.0')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'data_privacy_consents'
+        unique_together = ['store', 'consent_type']
+        
+    def __str__(self):
+        status = "Concedido" if self.granted else "Negado"
+        return f"{self.store.name} - {self.get_consent_type_display()} ({status})"
