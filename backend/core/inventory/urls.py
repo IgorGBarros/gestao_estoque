@@ -1,5 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+
+from backend.core.inventory.admin_views import get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription
 from .views import (
     CustomUserCreateView,
     FirebaseLoginView,
@@ -74,6 +76,14 @@ urlpatterns = [
     path('dashboard/inventory/', dashboard_inventory_analysis, name='dashboard-inventory'),
     path('cash-flow/summary/', cash_flow_summary, name='cash-flow-summary'),
     path('cash-flow/detailed/', cash_flow_detailed, name='cash-flow-detailed'),
+
+
+    path('admin/plan-configs/', list_plan_configs, name='admin_plan_configs'),
+    path('admin/promotions/', list_promotions, name='admin_promotions'),
+    path('admin/stats/', get_system_stats, name='admin_stats'),
+    path('admin/users/', list_users, name='admin_users'),
+    path('admin/users/<int:user_id>/plan/', update_plan, name='admin_update_plan'),
+    path('admin/users/<int:user_id>/subscription/', update_subscription, name='admin_update_subscription'),
     
 
     # --- Rotas Automáticas (Router) ---

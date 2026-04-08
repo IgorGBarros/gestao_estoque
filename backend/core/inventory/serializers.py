@@ -119,8 +119,9 @@ class PlanConfigSerializer(serializers.ModelSerializer):
             return round((obj.monthly_price * 12) - obj.yearly_price, 2)
         return 0
 
+# inventory/serializers.py - CORRIGIR PromotionSerializer
+
 class PromotionSerializer(serializers.ModelSerializer):
-    """Serializer para promoções"""
     is_valid = serializers.SerializerMethodField()
     
     class Meta:
@@ -128,16 +129,13 @@ class PromotionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'message', 'target_audience',
             'discount_percent', 'discount_amount', 'is_active',
-            'starts_at', 'ends_at', 'is_valid'
+            'starts_at', 'ends_at', 'is_valid', 'created_at'
         ]
     
     def get_is_valid(self, obj):
-        """Verifica se promoção está válida"""
-        # Precisa do contexto da store para validação completa
-        store = self.context.get('store')
-        if store:
-            return obj.is_valid_for_store(store)
-        return obj.is_active
+        """Método corrigido para verificar validade"""
+        # Usar a property is_valid em vez do método is_valid_for_store
+        return obj.is_valid
 
 # ==========================================
 # 3. SERIALIZERS DE PRODUTO E ESTOQUE (melhorados)

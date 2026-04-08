@@ -565,6 +565,51 @@ class Promotion(models.Model):
     def __str__(self):
         return self.title
     
+    def is_valid_for_store(self, store):
+        """Verifica se promoção é válida para uma loja específica"""
+        from django.utils import timezone
+        
+        now = timezone.now()
+        
+        # Verificações básicas
+        if not self.is_active:
+            return False
+        if now < self.starts_at:
+            return False
+        if self.ends_at and now > self.ends_at:
+            return False
+            
+        # Verificação por target_audience
+        if self.target_audience == 'free' and store.plan != 'free':
+            return False
+        if self.target_audience == 'pro' and store.plan != 'pro':
+            return False
+        if self.target_audience == 'new_stores':
+            days_since_creation = (now - store.created_at).days
+            if days_since_creation > 7:
+                return False
+        if self.target_audience == 'inactive':
+            # Verificar se loja está inativa (sem atividade recente)
+            # Implementar lógica de inatividade se necessário
+            pass
+                
+        return True
+    
+    @property
+    def is_valid(self):
+        """Verifica se a promoção está válida (sem contexto de loja)"""
+        from django.utils import timezone
+        
+        now = timezone.now()
+        if not self.is_active:
+            return False
+        if now < self.starts_at:
+            return False
+        if self.ends_at and now > self.ends_at:
+            return False
+        if self.max_views and self.current_views >= self.max_views:
+            return False
+        return True
     @property
     def is_valid(self):
         """Verifica se a promoção está válida"""
