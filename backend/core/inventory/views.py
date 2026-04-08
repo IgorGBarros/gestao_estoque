@@ -3232,3 +3232,59 @@ def check_plan_limits_simple(request):
             'can_add_products': True,
             'remaining': 20
         }, status=200)  # Retornar 200 com dados padrão para não quebrar
+ # inventory/views.py - VERSÃO DINÂMICA
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def check_plan_limits_complete(request):
+    try:
+        store = get_current_store(request.user)
+        current_count = store.items.values('product').distinct().count()
+        
+        # ✅ BUSCAR CONFIGURAÇÃO NA TABELA plan_configs
+        try:
+            from .models import PlanConfig
+            plan_config = PlanConfig.objects.filter(plan_type=store.plan).first()
+            
+            if plan_config:
+                limit = plan_config.max_products  # ← VINDO DO BANCO
+                features = {
+                    'scanner': plan_config.can_use_scanner,
+                    'storefront': plan_config.can_use_storefront,
+                    'alerts': plan_config.can_use_alerts,
+                    'ai_assistant': plan_config.can_use_ai_assistant,
+                    'analytics': plan_config.can_use_analytics,
+                }
+            else:
+                raise Exception("PlanConfig não encontrado")
+                
+        except Exception as e:
+            print(f"⚠️ Usando limites hardcoded: {e}")
+            # Fallback hardcoded (se tabela não existir)
+            if store.plan == 'free':
+                limit = 20
+                features = {'scanner': True, 'storefront': False}
+            else:
+                limit = None
+                features = {'scanner': True, 'storefront': True}
+        
+        can_add = (limit is None) or (current_count < limit)
+        
+        return Response({
+            'current_plan': store.plan,
+            'current_count': current_count,
+            'limit': limit,  # ← VALOR DINÂMICO DO BANCO
+            'can_add_products': can_add,
+            'remaining': (limit - current_count) if limit else None,
+            'features': features  # ← RECURSOS DINÂMICOS
+        })
+    except Exception as e:
+        print(f"❌ Erro ao verificar limites completo: {e}")
+        return Response({
+            'error': 'Erro ao verificar limites',
+            'current_plan': 'free',
+            'current_count': 0,
+            'limit': 20,
+            'can_add_products': True,
+            'remaining': 20,
+            'features': {'scanner': True, 'storefront': False}
+        }, status=200)
