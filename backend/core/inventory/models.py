@@ -194,21 +194,43 @@ class Store(models.Model):
         self.payment_external_id = None
         self.save()
     
-    def get_active_promotions(self, obj):
-        """Método corrigido para obter promoções"""
+    def get_active_promotions(self):
+        """Retorna promoções ativas para esta loja"""
+        from django.utils import timezone
+        
+        active_promotions = []
+        now = timezone.now()
+        
         try:
-            # Usar método corrigido ou versão simplificada
-            return [
-                {
-                    'id': promo.id,
+            for promo in Promotion.objects.filter(is_active=True):
+                # Verificações básicas
+                if now < promo.starts_at:
+                    continue
+                if promo.ends_at and now > promo.ends_at:
+                    continue
+                    
+                # Verificação por target_audience
+                if hasattr(promo, 'target_audience'):
+                    if promo.target_audience == 'free' and self.plan != 'free':
+                        continue
+                    if promo.target_audience == 'pro' and self.plan != 'pro':
+                        continue
+                    if promo.target_audience == 'new_stores':
+                        days_since_creation = (now - self.created_at).days
+                        if days_since_creation > 7:
+                            continue
+                
+                active_promotions.append({
+                    'id': str(promo.id),
                     'title': promo.title,
                     'message': promo.message,
-                    'discount_percent': getattr(promo, 'discount_percent', 0)
-                }
-                for promo in obj.get_active_promotions()
-            ]
+                    'discount_percent': promo.discount_percent
+                })
+            
+            return active_promotions
+            
         except Exception as e:
-            print(f"❌ Erro ao obter promoções: {e}")
+            print(f"❌ Erro ao buscar promoções: {e}")
             return []
     
     def __str__(self):
