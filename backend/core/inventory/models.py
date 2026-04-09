@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
@@ -105,6 +107,99 @@ class Store(models.Model):
                 counter += 1
             self.slug = slug
         super().save(*args, **kwargs)
+
+    # inventory/models.py - ATUALIZAR Store    
+    @property
+    def product_count(self):
+        """Conta produtos da loja"""
+        return self.items.count()
+    
+    @property
+    def plan_config(self):
+        """Retorna configuração do plano atual"""
+        return PlanConfig.objects.filter(plan_type=self.plan).first()
+    
+    @property
+    def can_add_products(self):
+        """Verifica se pode adicionar mais produtos"""
+        config = self.plan_config
+        if not config or config.max_products is None:
+            return True
+        return self.product_count < config.max_products
+    
+    @property
+    def products_limit_reached(self):
+        """Verifica se atingiu limite de produtos"""
+        return not self.can_add_products
+    
+    @property
+    def can_use_feature(self):
+        """Retorna dict com recursos disponíveis"""
+        config = self.plan_config
+        if not config:
+            return {
+                'scanner': True,
+                'storefront': False,
+                'alerts': False,
+                'ai_assistant': False,
+                'analytics': False
+            }
+        
+        return {
+            'scanner': config.can_use_scanner,
+            'storefront': config.can_use_storefront,
+            'alerts': config.can_use_alerts,
+            'ai_assistant': config.can_use_ai_assistant,
+            'analytics': config.can_use_analytics
+        }
+    
+    @property
+    def subscription_status(self):
+        """Status da assinatura"""
+        if not self.subscription_expires_at:
+            return 'active' if self.plan == 'pro' else 'free'
+        
+        if timezone.now() > self.subscription_expires_at:
+            return 'expired'
+        
+        return 'active'
+    
+    @property
+    def days_until_expiry(self):
+        """Dias até expirar"""
+        if not self.subscription_expires_at:
+            return None
+        
+        delta = self.subscription_expires_at - timezone.now()
+        return max(0, delta.days)
+    
+    def upgrade_to_pro(self, billing_cycle='monthly'):
+        """Upgrade para PRO"""
+        self.plan = 'pro'
+        self.subscription_started_at = timezone.now()
+        
+        if billing_cycle == 'yearly':
+            self.subscription_expires_at = timezone.now() + timezone.timedelta(days=365)
+        else:
+            # Para assinatura mensal, não definir expiração (renovação automática)
+            self.subscription_expires_at = None
+            
+        self.save()
+    
+    def downgrade_to_free(self):
+        """Downgrade para Free"""
+        self.plan = 'free'
+        self.subscription_expires_at = None
+        self.payment_provider = None
+        self.payment_external_id = None
+        self.save()
+    
+    def get_active_promotions(self):
+        """Retorna promoções ativas para esta loja"""
+        return [
+            promo for promo in Promotion.objects.filter(is_active=True)
+            if promo.is_valid_for_store(self)
+        ]
     
     def __str__(self):
         return f"{self.name} ({self.owner.email if self.owner else 'Sem dono'})"
@@ -324,3 +419,220 @@ class RegistrationSession(models.Model):
     
     def __str__(self):
         return f"Sessão {self.id} - {self.store.name} ({self.products_count} produtos)"
+    
+# inventory/models.py - ADICIONAR no final do arquivo
+
+from django.core.validators import MinValueValidator, MaxValueValidator
+from decimal import Decimal
+
+class PlanConfig(models.Model):
+    """Configuração dinâmica de planos"""
+    
+    PLAN_CHOICES = [
+        ('free', 'Free'),
+        ('pro', 'Pro'),
+        ('premium', 'Premium'),
+    ]
+    
+    plan_type = models.CharField(max_length=20, choices=PLAN_CHOICES, unique=True)
+    display_name = models.CharField(max_length=50)
+    description = models.TextField(blank=True)
+    
+    # Limites configuráveis
+    max_products = models.IntegerField(
+        null=True, 
+        blank=True,
+        help_text="NULL = ilimitado"
+    )
+    max_storage_mb = models.IntegerField(default=100)
+    
+    # Recursos habilitados
+    can_use_scanner = models.BooleanField(default=True)
+    can_use_storefront = models.BooleanField(default=False)
+    can_use_alerts = models.BooleanField(default=False)
+    can_use_ai_assistant = models.BooleanField(default=False)
+    can_use_analytics = models.BooleanField(default=False)
+    can_export_data = models.BooleanField(default=False)
+    can_use_api = models.BooleanField(default=False)
+    
+    # Configurações de pagamento
+    monthly_price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=Decimal('0.00')
+    )
+    yearly_price = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=Decimal('0.00')
+    )
+    yearly_discount_percent = models.IntegerField(
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    
+    # Configurações de UI
+    highlight_color = models.CharField(max_length=7, default='#3B82F6')  # hex color
+    is_popular = models.BooleanField(default=False)
+    is_visible = models.BooleanField(default=True)
+    sort_order = models.IntegerField(default=0)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'plan_configs'
+        ordering = ['sort_order', 'plan_type']
+        verbose_name = 'Configuração de Plano'
+        verbose_name_plural = 'Configurações de Planos'
+        
+    def __str__(self):
+        return f"{self.display_name} (R$ {self.monthly_price}/mês)"
+    
+    @property
+    def yearly_price_monthly(self):
+        """Preço anual dividido por 12"""
+        if self.yearly_price > 0:
+            return self.yearly_price / 12
+        return self.monthly_price
+    
+    @property
+    def yearly_savings(self):
+        """Economia anual em reais"""
+        if self.yearly_price > 0 and self.monthly_price > 0:
+            return (self.monthly_price * 12) - self.yearly_price
+        return Decimal('0.00')
+
+class Promotion(models.Model):
+    """Promoções e banners configuráveis"""
+    
+    TARGET_CHOICES = [
+        ('all', 'Todos os usuários'),
+        ('free', 'Apenas plano Free'),
+        ('pro', 'Apenas plano Pro'),
+        ('new_users', 'Usuários novos (< 7 dias)'),
+        ('inactive', 'Usuários inativos (> 30 dias)'),
+    ]
+    
+    TYPE_CHOICES = [
+        ('banner', 'Banner'),
+        ('modal', 'Modal'),
+        ('notification', 'Notificação'),
+        ('email', 'Email'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=100)
+    message = models.TextField()
+    
+    # Configuração de exibição
+    promotion_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='banner')
+    target_audience = models.CharField(max_length=20, choices=TARGET_CHOICES, default='free')
+    
+    # Configuração de desconto
+    discount_percent = models.IntegerField(
+        default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)]
+    )
+    discount_amount = models.DecimalField(
+        max_digits=10, 
+        decimal_places=2, 
+        default=Decimal('0.00')
+    )
+    
+    # Controle de tempo
+    starts_at = models.DateTimeField(default=timezone.now)
+    ends_at = models.DateTimeField(null=True, blank=True)
+    
+    # Controle de exibição
+    is_active = models.BooleanField(default=True)
+    max_views = models.IntegerField(null=True, blank=True)
+    current_views = models.IntegerField(default=0)
+    
+    # Estilo
+    background_color = models.CharField(max_length=7, default='#3B82F6')
+    text_color = models.CharField(max_length=7, default='#FFFFFF')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'promotions'
+        ordering = ['-created_at']
+        verbose_name = 'Promoção'
+        verbose_name_plural = 'Promoções'
+        
+    def __str__(self):
+        return self.title
+    
+    @property
+    def is_valid(self):
+        """Verifica se a promoção está válida"""
+        now = timezone.now()
+        if not self.is_active:
+            return False
+        if now < self.starts_at:
+            return False
+        if self.ends_at and now > self.ends_at:
+            return False
+        if self.max_views and self.current_views >= self.max_views:
+            return False
+        return True
+
+# inventory/models.py - CORRIGIR o modelo UserPlanCache
+
+class UserPlanCache(models.Model):
+    """Cache de limites por usuário (performance)"""
+    
+    # ✅ CORREÇÃO: Usar settings.AUTH_USER_MODEL em vez de string
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,  # Em vez de 'CustomUser'
+        on_delete=models.CASCADE, 
+        related_name='plan_cache'
+    )
+    
+    # Cache dos limites atuais
+    current_plan = models.CharField(max_length=20, default='free')
+    max_products = models.IntegerField(null=True, blank=True)
+    products_used = models.IntegerField(default=0)
+    
+    # Recursos
+    can_use_scanner = models.BooleanField(default=True)
+    can_use_storefront = models.BooleanField(default=False)
+    can_use_alerts = models.BooleanField(default=False)
+    can_use_ai_assistant = models.BooleanField(default=False)
+    can_use_analytics = models.BooleanField(default=False)
+    
+    last_updated = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'user_plan_cache'
+        verbose_name = 'Cache de Plano'
+        verbose_name_plural = 'Cache de Planos'
+        
+    def __str__(self):
+        return f"{self.user.email} - {self.current_plan}"
+    
+    def refresh_from_store(self):
+        """Atualiza cache baseado na Store do usuário"""
+        try:
+            store = self.user.store
+            self.current_plan = store.plan
+            
+            # Busca configuração do plano
+            plan_config = PlanConfig.objects.filter(plan_type=store.plan).first()
+            if plan_config:
+                self.max_products = plan_config.max_products
+                self.can_use_scanner = plan_config.can_use_scanner
+                self.can_use_storefront = plan_config.can_use_storefront
+                self.can_use_alerts = plan_config.can_use_alerts
+                self.can_use_ai_assistant = plan_config.can_use_ai_assistant
+                self.can_use_analytics = plan_config.can_use_analytics
+            
+            # Conta produtos atuais
+            if hasattr(store, 'items'):
+                self.products_used = store.items.count()
+            
+            self.save()
+        except:
+            pass  # Se não tem store, mantém defaults

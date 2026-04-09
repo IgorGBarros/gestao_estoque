@@ -221,10 +221,10 @@ def ensure_user_has_store(user):
         import traceback
         traceback.print_exc()
         raise
+# inventory/mixins.py ou views.py
+
 class TenantModelMixin:
-    """
-    Mixin para ViewSets. Filtra automaticamente os dados pela loja do usuário.
-    """
+    """Mixin tenant-aware com validação de limites"""
     permission_classes = [IsAuthenticated]
     
     def get_store(self):
@@ -232,14 +232,47 @@ class TenantModelMixin:
     
     def get_queryset(self):
         try:
-            store = ensure_user_has_store(self.request.user)
+            store = self.get_store()
             return InventoryItem.objects.filter(store=store).select_related('product')
         except Exception as e:
             print(f"❌ Erro no get_queryset: {e}")
             return InventoryItem.objects.none()
     
     def perform_create(self, serializer):
-        serializer.save(store=self.get_store())
+        store = self.get_store()
+        
+        # VALIDAÇÃO DE LIMITE (novo)
+        if hasattr(self, 'check_plan_limits'):
+            self.check_plan_limits(store)
+        
+        serializer.save(store=store)
+    
+    def check_plan_limits(self, store):
+        """Valida limites do plano antes de criar"""
+        if not store.can_add_products:
+            from rest_framework.exceptions import ValidationError
+            
+            config = store.plan_config
+            limit = config.max_products if config else 20
+            
+            raise ValidationError({
+                'error': 'PLAN_LIMIT_REACHED',
+                'message': f'Você atingiu o limite de {limit} produtos do plano {store.plan.upper()}.',
+                'current_plan': store.plan,
+                'current_count': store.product_count,
+                'limit': limit
+            })
+
+# Usar no ViewSet de produtos:
+class InventoryItemViewSet(TenantModelMixin, viewsets.ModelViewSet):
+    # ... seu código atual ...
+    
+    def create(self, request, *args, **kwargs):
+        """Override para validar limites"""
+        store = self.get_store()
+        self.check_plan_limits(store)  # Valida antes de criar
+        
+        return super().create(request, *args, **kwargs)
 
 
 # ==========================================
@@ -2035,7 +2068,70 @@ class AdminUpdateSubscriptionView(APIView):
         except Store.DoesNotExist:
             return Response({"error": "Loja não encontrada para este usuário"}, status=404)
         
+# Atualizar seu admin panel para usar Store diretamente
 
+def get_admin_stores():
+    """Retorna dados para admin panel (baseado em Store)"""
+    stores = []
+    
+    for store in Store.objects.select_related('owner').prefetch_related('items'):
+        owner = store.owner
+        
+        stores.append({
+            'id': store.id,
+            'store_name': store.name,
+            'store_slug': store.slug,
+            'owner_email': owner.email if owner else 'Sem dono',
+            'owner_name': owner.name if owner else 'Sem nome',
+            'plan': store.plan,
+            'product_count': store.product_count,
+            'storefront_enabled': store.storefront_enabled,
+            'whatsapp': store.whatsapp,
+            'created_at': store.created_at,
+            'last_updated': store.updated_at,
+            'payment_provider': store.payment_provider,
+            'payment_external_id': store.payment_external_id,
+            'subscription_started_at': store.subscription_started_at,
+            'subscription_expires_at': store.subscription_expires_at,
+            'subscription_status': store.subscription_status,
+            'days_until_expiry': store.days_until_expiry,
+            'can_add_products': store.can_add_products,
+            'features': store.can_use_feature
+        })
+    
+    return stores
+
+# API endpoint para admin
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_stores_list(request):
+    """Lista lojas para admin panel"""
+    if not request.user.is_staff:
+        return Response({'error': 'Sem permissão'}, status=403)
+    
+    stores = get_admin_stores()
+    return Response(stores)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_update_store_plan(request, store_id):
+    """Atualiza plano de uma loja"""
+    if not request.user.is_staff:
+        return Response({'error': 'Sem permissão'}, status=403)
+    
+    try:
+        store = Store.objects.get(id=store_id)
+        new_plan = request.data.get('plan')
+        
+        if new_plan == 'pro':
+            store.upgrade_to_pro()
+        else:
+            store.downgrade_to_free()
+        
+        return Response({'success': True, 'new_plan': store.plan})
+    
+    except Store.DoesNotExist:
+        return Response({'error': 'Loja não encontrada'}, status=404)
 # inventory/views.py - ADICIONAR
 # inventory/views.py - CORRIGIR SessionControlView
 
