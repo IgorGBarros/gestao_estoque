@@ -1,4 +1,4 @@
-// components/Dashboard.tsx - VERSÃO COM GRÁFICOS
+// components/Dashboard.tsx - VERSÃO CORRIGIDA COM FLUXO DE CAIXA
 
 import { useState, useEffect } from 'react';
 import { 
@@ -12,7 +12,8 @@ import {
   PieChart,
   Target,
   Percent,
-  Clock
+  ArrowUpDown,
+  Wallet
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { 
@@ -101,16 +102,49 @@ interface DashboardData {
     low_stock: Array<any>;
     expiring_soon: Array<any>;
   };
+  // ✅ NOVO: Fluxo de caixa
+  cash_flow: {
+    total_income: number;
+    total_expenses: number;
+    net_flow: number;
+    daily_average: number;
+    growth_rate: number;
+  };
+}
+
+interface CashFlowData {
+  period: {
+    selected: string;
+    days: number;
+    start_date: string;
+    end_date: string;
+  };
+  summary: {
+    total_income: number;
+    total_expenses: number;
+    net_flow: number;
+    total_transactions: number;
+    daily_average: number;
+  };
+  daily_flow: Array<{
+    date: string;
+    day_name: string;
+    income: number;
+    expenses: number;
+    net_flow: number;
+  }>;
 }
 
 export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [cashFlowData, setCashFlowData] = useState<CashFlowData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<'7d' | '30d' | '90d'>('30d');
 
   useEffect(() => {
     loadDashboardData();
+    loadCashFlowData();
   }, [selectedPeriod]);
 
   const loadDashboardData = async () => {
@@ -126,6 +160,15 @@ export default function Dashboard() {
       setError(err.response?.data?.error || 'Erro ao carregar dados');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadCashFlowData = async () => {
+    try {
+      const response = await api.get(`/cash-flow/detailed/?period=${selectedPeriod}`);
+      setCashFlowData(response.data);
+    } catch (err: any) {
+      console.error('❌ Erro ao carregar fluxo de caixa:', err);
     }
   };
 
@@ -189,7 +232,7 @@ export default function Dashboard() {
       </div>
 
       {/* KPIs Principais */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Receita ({selectedPeriod})</CardTitle>
@@ -249,11 +292,76 @@ export default function Dashboard() {
             </p>
           </CardContent>
         </Card>
+
+        {/* ✅ NOVO: Card de Fluxo de Caixa */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Fluxo de Caixa</CardTitle>
+            <Wallet className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold ${
+              data.cash_flow.net_flow >= 0 ? 'text-green-600' : 'text-red-600'
+            }`}>
+              {formatCurrency(data.cash_flow.net_flow)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Média diária: {formatCurrency(data.cash_flow.daily_average)}
+            </p>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* ✅ NOVO: Gráfico de Fluxo de Caixa */}
+      {cashFlowData && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ArrowUpDown className="h-5 w-5" />
+              Fluxo de Caixa Diário
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={cashFlowData.daily_flow}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day_name" />
+                <YAxis />
+                <Tooltip formatter={(value: any) => [formatCurrency(value), '']} />
+                <Area 
+                  type="monotone" 
+                  dataKey="income" 
+                  stackId="1" 
+                  stroke="#10B981" 
+                  fill="#10B981" 
+                  fillOpacity={0.6}
+                  name="Receitas"
+                />
+                <Area 
+                  type="monotone" 
+                  dataKey="expenses" 
+                  stackId="2" 
+                  stroke="#EF4444" 
+                  fill="#EF4444" 
+                  fillOpacity={0.6}
+                  name="Despesas"
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="net_flow" 
+                  stroke="#3B82F6" 
+                  strokeWidth={3}
+                  name="Fluxo Líquido"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Gráficos Principais */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Gráfico de Vendas por Semana */}
+        {/* ✅ CORRIGIDO: Gráfico de Vendas por Semana */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -263,14 +371,16 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={data.sales.weekly_sales}>
+              <BarChart data={data.sales.weekly_sales || []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="week" />
                 <YAxis />
                 <Tooltip 
                   formatter={(value: any, name: string) => [
-                    name === 'revenue' ? formatCurrency(value) : value,
-                    name === 'revenue' ? 'Receita' : name === 'quantity' ? 'Quantidade' : 'Lucro'
+                    name === 'revenue' ? formatCurrency(value) : 
+                    name === 'profit' ? formatCurrency(value) : value,
+                    name === 'revenue' ? 'Receita' : 
+                    name === 'profit' ? 'Lucro' : 'Quantidade'
                   ]}
                 />
                 <Bar dataKey="revenue" fill="#8884d8" name="revenue" />
