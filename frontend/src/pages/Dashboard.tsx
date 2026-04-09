@@ -1,4 +1,4 @@
-// components/Dashboard.tsx - VERSÃO CORRIGIDA COM FLUXO DE CAIXA
+// components/Dashboard.tsx - VERSÃO MELHORADA COM GRÁFICOS AVANÇADOS
 
 import { useState, useEffect } from 'react';
 import { 
@@ -13,7 +13,11 @@ import {
   Target,
   Percent,
   ArrowUpDown,
-  Wallet
+  Wallet,
+  TrendingDown,
+  Activity,
+  Zap,
+  Loader2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { 
@@ -30,14 +34,25 @@ import {
   Line,
   Area,
   AreaChart,
-  Pie
+  Pie,
+  ComposedChart,
+  RadialBarChart,
+  RadialBar,
+  Legend
 } from 'recharts';
 import { api } from '../services/api';
 
-// Cores para gráficos
-const CHART_COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#d084d0'];
+// ✅ CORES EXPANDIDAS PARA GRÁFICOS
+const CHART_COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7c7c', '#8dd1e1', '#d084d0', '#ffb347', '#87ceeb'];
 
+// ✅ INTERFACE EXPANDIDA COM NOVOS INDICADORES
 interface DashboardData {
+  period_info?: {
+    selected: string;
+    days: number;
+    start_date: string;
+    end_date: string;
+  };
   store_info: {
     name: string;
     plan: string;
@@ -50,6 +65,8 @@ interface DashboardData {
     total_revenue_30d: number;
     avg_ticket: number;
     margin_percent: number;
+    real_profit?: number;
+    cost_of_goods_sold?: number;
   };
   inventory: {
     total_products: number;
@@ -62,19 +79,27 @@ interface DashboardData {
     daily_sales: Array<{
       date: string;
       day_name: string;
+      day_full?: string;
       revenue: number;
       quantity: number;
+      profit?: number;
+      cost?: number;
     }>;
-    weekly_sales: Array<{
+    weekly_sales?: Array<{
       week: string;
+      week_label?: string;
       revenue: number;
       quantity: number;
       profit: number;
+      cost?: number;
     }>;
-    monthly_comparison: Array<{
+    monthly_comparison?: Array<{
       month: string;
+      month_short?: string;
       revenue: number;
       profit: number;
+      cost?: number;
+      quantity?: number;
     }>;
   };
   charts: {
@@ -83,32 +108,39 @@ interface DashboardData {
       total_products: number;
       total_quantity: number;
       total_value: number;
-      percentage: number;
+      percentage?: number;
+      sales_revenue?: number;
+      sales_quantity?: number;
+      sales_percentage?: number;
     }>;
     top_products: Array<{
       name: string;
       id: number;
       total_sold: number;
       revenue: number;
-      profit: number;
+      profit?: number;
+      margin?: number;
     }>;
-    performance_metrics: {
+    performance_metrics?: {
       turnover_rate: number;
       stock_rotation_days: number;
       sell_through_rate: number;
+      inventory_value?: number;
+      inventory_cost?: number;
     };
   };
   alerts: {
     low_stock: Array<any>;
     expiring_soon: Array<any>;
   };
-  // ✅ NOVO: Fluxo de caixa
-  cash_flow: {
+  // ✅ FLUXO DE CAIXA INTEGRADO
+  cash_flow?: {
     total_income: number;
     total_expenses: number;
     net_flow: number;
     daily_average: number;
-    growth_rate: number;
+    growth_rate?: number;
+    margin_percent?: number;
   };
 }
 
@@ -140,7 +172,7 @@ export default function Dashboard() {
   const [cashFlowData, setCashFlowData] = useState<CashFlowData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedPeriod, setSelectedPeriod] = useState<'7d' | '30d' | '90d'>('30d');
+  const [selectedPeriod, setSelectedPeriod] = useState<'7d' | '30d' | '90d' | '180d'>('30d');
 
   useEffect(() => {
     loadDashboardData();
@@ -152,7 +184,9 @@ export default function Dashboard() {
       setLoading(true);
       setError(null);
       
+      console.log('🔄 Carregando dashboard...');
       const response = await api.get(`/dashboard/overview/?period=${selectedPeriod}`);
+      console.log('✅ Dados recebidos:', response.data);
       setData(response.data);
       
     } catch (err: any) {
@@ -175,7 +209,10 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Carregando dashboard...</p>
+        </div>
       </div>
     );
   }
@@ -184,8 +221,12 @@ export default function Dashboard() {
     return (
       <div className="text-center p-8">
         <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
-        <p className="text-destructive">{error}</p>
-        <button onClick={loadDashboardData} className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md">
+        <h3 className="text-lg font-semibold text-foreground mb-2">Erro ao carregar dashboard</h3>
+        <p className="text-destructive mb-4">{error}</p>
+        <button 
+          onClick={loadDashboardData}
+          className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+        >
           Tentar Novamente
         </button>
       </div>
@@ -198,23 +239,28 @@ export default function Dashboard() {
   const formatPercent = (value: number) => 
     `${(value || 0).toFixed(1)}%`;
 
+  const formatNumber = (value: number) => 
+    new Intl.NumberFormat('pt-BR').format(value || 0);
+
   return (
     <div className="space-y-6 p-6">
       {/* Header com Seletor de Período */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
+          <h1 className="text-3xl font-bold text-foreground">Dashboard Financeiro</h1>
           <p className="text-muted-foreground">
             {data.store_info.name} • Plano {data.store_info.plan.toUpperCase()}
+            {data.period_info && ` • ${data.period_info.days} dias`}
           </p>
         </div>
         
-        {/* Seletor de Período */}
+        {/* ✅ SELETOR DE PERÍODO EXPANDIDO */}
         <div className="flex gap-2">
           {[
             { key: '7d', label: '7 dias' },
             { key: '30d', label: '30 dias' },
-            { key: '90d', label: '90 dias' }
+            { key: '90d', label: '90 dias' },
+            { key: '180d', label: '6 meses' }
           ].map((period) => (
             <button
               key={period.key}
@@ -231,31 +277,31 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* KPIs Principais */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* ✅ KPIs PRINCIPAIS - EXPANDIDO PARA 6 COLUNAS */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Receita ({selectedPeriod})</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Receita Total</CardTitle>
+            <DollarSign className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">
               {formatCurrency(data.financial.total_revenue_30d)}
             </div>
             <p className="text-xs text-muted-foreground">
-              {data.sales.total_sales_30d} vendas • Ticket médio: {formatCurrency(data.financial.avg_ticket)}
+              {formatNumber(data.sales.total_sales_30d)} vendas
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Lucro Potencial</CardTitle>
-            <Target className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Lucro Real</CardTitle>
+            <TrendingUp className="h-4 w-4 text-blue-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">
-              {formatCurrency(data.financial.profit_potential)}
+              {formatCurrency(data.financial.real_profit || data.financial.profit_potential)}
             </div>
             <p className="text-xs text-muted-foreground">
               Margem: {formatPercent(data.financial.margin_percent || 0)}
@@ -265,48 +311,60 @@ export default function Dashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Giro de Estoque</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Investido</CardTitle>
+            <TrendingDown className="h-4 w-4 text-red-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-600">
+              {formatCurrency(data.financial.total_invested)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Custo dos produtos
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Ticket Médio</CardTitle>
+            <Target className="h-4 w-4 text-purple-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-purple-600">
-              {data.charts.performance_metrics?.turnover_rate?.toFixed(1) || '0.0'}x
+              {formatCurrency(data.financial.avg_ticket)}
             </div>
             <p className="text-xs text-muted-foreground">
-              Rotação a cada {data.charts.performance_metrics?.stock_rotation_days || 0} dias
+              Por venda
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Taxa de Conversão</CardTitle>
-            <Percent className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Giro Estoque</CardTitle>
+            <Activity className="h-4 w-4 text-orange-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600">
-              {formatPercent(data.charts.performance_metrics?.sell_through_rate || 0)}
+              {data.charts.performance_metrics?.turnover_rate?.toFixed(1) || '0.0'}x
             </div>
             <p className="text-xs text-muted-foreground">
-              Produtos vendidos vs estoque
+              Taxa de rotação
             </p>
           </CardContent>
         </Card>
 
-        {/* ✅ NOVO: Card de Fluxo de Caixa */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Fluxo de Caixa</CardTitle>
-            <Wallet className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Itens Vendidos</CardTitle>
+            <Package className="h-4 w-4 text-teal-600" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${
-              data.cash_flow.net_flow >= 0 ? 'text-green-600' : 'text-red-600'
-            }`}>
-              {formatCurrency(data.cash_flow.net_flow)}
+            <div className="text-2xl font-bold text-teal-600">
+              {formatNumber(data.sales.total_items_sold_30d)}
             </div>
             <p className="text-xs text-muted-foreground">
-              Média diária: {formatCurrency(data.cash_flow.daily_average)}
+              Unidades no período
             </p>
           </CardContent>
         </Card>
@@ -322,8 +380,8 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={cashFlowData.daily_flow}>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={cashFlowData.daily_flow}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="day_name" />
                 <YAxis />
@@ -331,8 +389,6 @@ export default function Dashboard() {
                 <Area 
                   type="monotone" 
                   dataKey="income" 
-                  stackId="1" 
-                  stroke="#10B981" 
                   fill="#10B981" 
                   fillOpacity={0.6}
                   name="Receitas"
@@ -340,8 +396,6 @@ export default function Dashboard() {
                 <Area 
                   type="monotone" 
                   dataKey="expenses" 
-                  stackId="2" 
-                  stroke="#EF4444" 
                   fill="#EF4444" 
                   fillOpacity={0.6}
                   name="Despesas"
@@ -353,15 +407,16 @@ export default function Dashboard() {
                   strokeWidth={3}
                   name="Fluxo Líquido"
                 />
-              </AreaChart>
+              </ComposedChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
       )}
 
-      {/* Gráficos Principais */}
+      {/* ✅ GRÁFICOS PRINCIPAIS MELHORADOS - 2 COLUNAS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ✅ CORRIGIDO: Gráfico de Vendas por Semana */}
+        
+        {/* ✅ Gráfico de Vendas por Semana - MELHORADO */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -370,27 +425,31 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={data.sales.weekly_sales || []}>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={data.sales.weekly_sales || []}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="week" />
-                <YAxis />
+                <YAxis yAxisId="left" />
+                <YAxis yAxisId="right" orientation="right" />
                 <Tooltip 
                   formatter={(value: any, name: string) => [
                     name === 'revenue' ? formatCurrency(value) : 
-                    name === 'profit' ? formatCurrency(value) : value,
+                    name === 'profit' ? formatCurrency(value) : 
+                    name === 'cost' ? formatCurrency(value) : formatNumber(value),
                     name === 'revenue' ? 'Receita' : 
-                    name === 'profit' ? 'Lucro' : 'Quantidade'
+                    name === 'profit' ? 'Lucro' : 
+                    name === 'cost' ? 'Custo' : 'Quantidade'
                   ]}
                 />
-                <Bar dataKey="revenue" fill="#8884d8" name="revenue" />
-                <Bar dataKey="profit" fill="#82ca9d" name="profit" />
-              </BarChart>
+                <Bar yAxisId="left" dataKey="revenue" fill="#10B981" name="revenue" />
+                <Bar yAxisId="left" dataKey="cost" fill="#EF4444" name="cost" />
+                <Line yAxisId="right" type="monotone" dataKey="quantity" stroke="#8B5CF6" strokeWidth={3} name="quantity" />
+              </ComposedChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        {/* Gráfico de Pizza - Vendas por Categoria */}
+        {/* ✅ Gráfico de Rosca - Vendas por Categoria */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -399,70 +458,111 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={320}>
               <RechartsPieChart>
                 <Pie
-                  data={data.charts.by_category}
+                  data={data.charts.by_category.filter(cat => cat.total_value > 0)}
                   cx="50%"
                   cy="50%"
-                  labelLine={false}
-                  label={({ category, percentage }) => `${category} (${percentage?.toFixed(1)}%)`}
-                  outerRadius={80}
-                  fill="#8884d8"
+                  innerRadius={60}
+                  outerRadius={120}
+                  paddingAngle={5}
                   dataKey="total_value"
                 >
                   {data.charts.by_category.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: any) => [formatCurrency(value), 'Valor']} />
+                <Tooltip 
+                  formatter={(value: any) => [formatCurrency(value), 'Valor']}
+                  labelFormatter={(label) => `${label}`}
+                />
               </RechartsPieChart>
             </ResponsiveContainer>
+            {/* ✅ LEGENDA PERSONALIZADA */}
+            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+              {data.charts.by_category.slice(0, 6).map((cat, index) => (
+                <div key={cat.category} className="flex items-center gap-2">
+                  <div 
+                    className="w-3 h-3 rounded-full" 
+                    style={{ backgroundColor: CHART_COLORS[index % CHART_COLORS.length] }}
+                  />
+                  <span className="truncate">{cat.category}</span>
+                  <span className="text-muted-foreground">
+                    {formatPercent(cat.percentage || 0)}
+                  </span>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Gráfico de Linha - Evolução Mensal */}
+      {/* ✅ GRÁFICO DE EVOLUÇÃO MENSAL - LARGURA COMPLETA */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5" />
-            Evolução de Receita e Lucro
+            Evolução Mensal - Receita vs Lucro vs Custos
           </CardTitle>
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={400}>
-            <AreaChart data={data.sales.monthly_comparison}>
+            <ComposedChart data={data.sales.monthly_comparison || []}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip formatter={(value: any) => [formatCurrency(value), '']} />
+              <XAxis dataKey="month_short" />
+              <YAxis yAxisId="left" />
+              <YAxis yAxisId="right" orientation="right" />
+              <Tooltip 
+                formatter={(value: any, name: string) => [
+                  name === 'quantity' ? formatNumber(value) : formatCurrency(value),
+                  name === 'revenue' ? 'Receita' : 
+                  name === 'profit' ? 'Lucro' : 
+                  name === 'cost' ? 'Custo' : 'Quantidade'
+                ]}
+              />
               <Area 
+                yAxisId="left"
                 type="monotone" 
                 dataKey="revenue" 
-                stackId="1" 
-                stroke="#8884d8" 
-                fill="#8884d8" 
-                fillOpacity={0.6}
-                name="Receita"
+                fill="#10B981" 
+                fillOpacity={0.3}
+                name="revenue"
               />
               <Area 
+                yAxisId="left"
+                type="monotone" 
+                dataKey="cost" 
+                fill="#EF4444" 
+                fillOpacity={0.3}
+                name="cost"
+              />
+              <Line 
+                yAxisId="left"
                 type="monotone" 
                 dataKey="profit" 
-                stackId="1" 
-                stroke="#82ca9d" 
-                fill="#82ca9d" 
-                fillOpacity={0.6}
-                name="Lucro"
+                stroke="#3B82F6" 
+                strokeWidth={3}
+                name="profit"
               />
-            </AreaChart>
+              <Line 
+                yAxisId="right"
+                type="monotone" 
+                dataKey="quantity" 
+                stroke="#8B5CF6" 
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                name="quantity"
+              />
+            </ComposedChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
 
-      {/* Métricas Avançadas */}
+      {/* ✅ MÉTRICAS AVANÇADAS - 3 COLUNAS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Análise Financeira */}
+        
+        {/* ✅ Análise Financeira Expandida */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -491,10 +591,21 @@ export default function Dashboard() {
                 </span>
               </div>
             </div>
+            {/* ✅ NOVO: Fluxo de Caixa Resumido */}
+            {data.cash_flow && (
+              <div className="pt-2 border-t">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium">Fluxo Líquido</span>
+                  <span className={`font-bold ${data.cash_flow.net_flow >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatCurrency(data.cash_flow.net_flow)}
+                  </span>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* Performance de Estoque */}
+        {/* ✅ Performance de Estoque Expandida */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -517,6 +628,12 @@ export default function Dashboard() {
                 {data.charts.performance_metrics?.turnover_rate?.toFixed(1) || '0.0'}x/mês
               </span>
             </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Taxa de Conversão</span>
+              <span className="font-bold text-orange-600">
+                {formatPercent(data.charts.performance_metrics?.sell_through_rate || 0)}
+              </span>
+            </div>
             <div className="pt-2 border-t">
               <div className="flex justify-between items-center">
                 <span className="text-sm font-medium">Eficiência</span>
@@ -528,7 +645,7 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Alertas e Riscos */}
+        {/* ✅ Gestão de Riscos */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -556,11 +673,21 @@ export default function Dashboard() {
                  data.alerts.low_stock.length + data.alerts.expiring_soon.length > 2 ? 'Médio' : 'Baixo'}
               </span>
             </div>
+            {/* ✅ NOVO: Indicador de Saúde Geral */}
+            <div className="pt-2 border-t">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">Saúde Geral</span>
+                <span className="font-bold text-blue-600">
+                  {data.financial.margin_percent && data.financial.margin_percent > 20 ? 'Excelente' :
+                   data.financial.margin_percent && data.financial.margin_percent > 10 ? 'Boa' : 'Regular'}
+                </span>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Gráfico de Vendas Diárias */}
+      {/* ✅ GRÁFICO DE VENDAS DIÁRIAS - MELHORADO */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -570,38 +697,37 @@ export default function Dashboard() {
         </CardHeader>
         <CardContent>
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={data.sales.daily_sales}>
+            <ComposedChart data={data.sales.daily_sales}>
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="day_name" />
-              <YAxis />
+              <YAxis yAxisId="left" />
+              <YAxis yAxisId="right" orientation="right" />
               <Tooltip 
                 formatter={(value: any, name: string) => [
-                  name === 'revenue' ? formatCurrency(value) : `${value} itens`,
-                  name === 'revenue' ? 'Receita' : 'Quantidade'
+                  name === 'revenue' || name === 'profit' ? formatCurrency(value) : `${value} itens`,
+                  name === 'revenue' ? 'Receita' : 
+                  name === 'profit' ? 'Lucro' : 'Quantidade'
                 ]}
               />
+              <Bar yAxisId="left" dataKey="revenue" fill="#10B981" name="revenue" />
+              {data.sales.daily_sales[0]?.profit !== undefined && (
+                <Bar yAxisId="left" dataKey="profit" fill="#3B82F6" name="profit" />
+              )}
               <Line 
-                type="monotone" 
-                dataKey="revenue" 
-                stroke="#8884d8" 
-                strokeWidth={3}
-                dot={{ fill: '#8884d8', strokeWidth: 2, r: 4 }}
-                name="revenue"
-              />
-              <Line 
+                yAxisId="right"
                 type="monotone" 
                 dataKey="quantity" 
-                stroke="#82ca9d" 
-                strokeWidth={2}
-                dot={{ fill: '#82ca9d', strokeWidth: 2, r: 3 }}
+                stroke="#8B5CF6" 
+                strokeWidth={3}
+                dot={{ fill: '#8B5CF6', strokeWidth: 2, r: 4 }}
                 name="quantity"
               />
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         </CardContent>
       </Card>
 
-      {/* Top Produtos com Gráfico de Barras Horizontal */}
+      {/* ✅ TOP PRODUTOS COM GRÁFICO HORIZONTAL MELHORADO */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
