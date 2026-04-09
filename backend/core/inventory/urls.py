@@ -9,8 +9,6 @@ from .views import (
     SessionSummaryView,
     apply_fifo_withdrawal,
     associate_user_store,
-    cash_flow_detailed,
-    cash_flow_summary,
     debug_user_store,
     feature_gates_view,
     inventory_item_batches_view, 
@@ -72,8 +70,6 @@ urlpatterns = [
     path('dashboard/overview/', dashboard_overview, name='dashboard-overview'),
     path('dashboard/financial/', dashboard_financial_summary, name='dashboard-financial'),
     path('dashboard/inventory/', dashboard_inventory_analysis, name='dashboard-inventory'),
-    path('cash-flow/summary/', cash_flow_summary, name='cash-flow-summary'),
-    path('cash-flow/detailed/', cash_flow_detailed, name='cash-flow-detailed'),
     
 
     # --- Rotas Automáticas (Router) ---
