@@ -10,7 +10,8 @@ import { api } from "../services/api";
 import { useToast } from "../hooks/use-toast";
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
-
+import appPreview1 from "../assets/app-preview-1.png";
+import appPreview2 from "../assets/app-preview-2.png";
 const fadeUp = {
   hidden: { opacity: 0, y: 32 },
   visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.1, duration: 0.55, ease: [0.25, 0.46, 0.45, 0.94] as const } }),
@@ -373,6 +374,109 @@ export default function LandingPage() {
           </motion.div>
         </div>
         
+      </section>
+
+            {/* ─── APP PREVIEW / SHOWCASE ─── */}
+      <section className="py-20 overflow-hidden">
+        <div className="mx-auto max-w-6xl px-6">
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeUp}
+            className="text-center mb-14"
+          >
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#871745]/20 bg-[#871745]/8 px-4 py-1.5 mb-4">
+              <Zap className="h-3.5 w-3.5 text-[#871745]" />
+              <span className="text-xs font-semibold text-[#871745]">Veja na prática</span>
+            </div>
+            <h2 className="font-display text-3xl font-bold text-foreground md:text-4xl">
+              Tudo na palma da sua mão
+            </h2>
+            <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
+              Interface pensada para consultoras de verdade. Simples, bonita e poderosa — com a 
+              <strong className="text-[#871745]"> Amorinha</strong> sempre ao seu lado.
+            </p>
+          </motion.div>
+
+          {/* ─── IMAGENS ─── */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+            {/* Imagem 1 — Visão geral do app */}
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-50px" }}
+              variants={fadeUp}
+              custom={0}
+              className="relative group"
+            >
+              <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-[#871745]/10 to-[#FDF2F7]/60 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+              <div className="relative rounded-2xl overflow-hidden border border-border bg-card shadow-xl shadow-[#871745]/5 hover:shadow-2xl hover:shadow-[#871745]/10 transition-all duration-500">
+                <img
+                  src={appPreview1}
+                  alt="Minha Amora — Interface principal com scanner, produtos e estatísticas"
+                  className="w-full h-auto object-cover"
+                  loading="lazy"
+                />
+              </div>
+              {/* Label flutuante */}
+              <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#871745] text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg shadow-[#871745]/30 whitespace-nowrap">
+                ✨ Sua consultoria organizada
+              </div>
+            </motion.div>
+
+            {/* Imagem 2 — Scanner em ação */}
+            <motion.div
+              initial="hidden"
+              whileInView="visible"
+              viewport={{ once: true, margin: "-50px" }}
+              variants={fadeUp}
+              custom={0.3}
+              className="relative group"
+            >
+              <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-[#FDF2F7]/60 to-[#871745]/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+              <div className="relative rounded-2xl overflow-hidden border border-border bg-card shadow-xl shadow-[#871745]/5 hover:shadow-2xl hover:shadow-[#871745]/10 transition-all duration-500">
+                <img
+                  src={appPreview2}
+                  alt="Minha Amora — Scanner inteligente reconhecendo código de barras de produto"
+                  className="w-full h-auto object-cover"
+                  loading="lazy"
+                />
+              </div>
+              {/* Label flutuante */}
+              <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#871745] text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg shadow-[#871745]/30 whitespace-nowrap">
+                📦 Escaneou? Cadastrou!
+              </div>
+            </motion.div>
+          </div>
+
+          {/* ─── MINI STATS abaixo das imagens ─── */}
+          <motion.div
+            initial="hidden"
+            whileInView="visible"
+            viewport={{ once: true }}
+            variants={fadeUp}
+            custom={0.6}
+            className="mt-14 flex flex-wrap justify-center gap-6 md:gap-12"
+          >
+            {[
+              { icon: ScanBarcode, label: "Scanner Inteligente", desc: "Reconhece qualquer marca" },
+              { icon: Bot, label: "Amorinha IA", desc: "Sua assistente pessoal" },
+              { icon: Store, label: "Vitrine Digital", desc: "Venda 24h pelo WhatsApp" },
+              { icon: Shield, label: "100% Seguro", desc: "Dados criptografados" },
+            ].map((item, i) => (
+              <div key={item.label} className="flex items-center gap-3 text-left">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#871745]/10 shrink-0">
+                  <item.icon className="h-5 w-5 text-[#871745]" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{item.label}</p>
+                  <p className="text-xs text-muted-foreground">{item.desc}</p>
+                </div>
+              </div>
+            ))}
+          </motion.div>
+        </div>
       </section>
       {/* ─── FEATURES ─── */}
       <section className="bg-[#FDF2F7]/30 py-20">
