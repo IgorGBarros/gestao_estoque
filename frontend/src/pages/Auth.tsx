@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Package, Mail, Lock, User, Loader2, Eye, EyeOff } from "lucide-react";
+import { Mail, Lock, User, Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../hooks/use-toast";
+import logoMinhaAmora from "../assets/logo-minhaamora.png";
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -12,6 +13,7 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
   const { toast } = useToast();
   const navigate = useNavigate();
   const { signIn, signUp, signInWithGoogle } = useAuth();
@@ -19,14 +21,13 @@ export default function Auth() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-
     try {
       if (isLogin) {
         await signIn(email, password);
         navigate("/");
       } else {
         await signUp(email, password, name);
-        toast({ title: "Conta criada!", description: "Bem-vindo ao sistema." });
+        toast({ title: "Conta criada!", description: "Bem-vindo ao Minha Amora 🍇" });
         navigate("/");
       }
     } catch (err: any) {
@@ -57,25 +58,32 @@ export default function Auth() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+    <div className="flex min-h-screen items-center justify-center bg-[#FDF2F7] px-4">
       <div className="w-full max-w-sm space-y-6">
-        {/* Logo */}
-        <div className="flex flex-col items-center gap-2">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary">
-            <Package className="h-7 w-7 text-primary-foreground" />
+
+        {/* ─── Logo + Branding ─── */}
+        <div className="flex flex-col items-center gap-3">
+          <img
+            src={logoMinhaAmora}
+            alt="Minha Amora"
+            className="h-20 w-20 rounded-2xl object-contain shadow-md"
+          />
+          <div className="text-center">
+            <h1 className="font-display text-2xl font-bold text-[#2D292E]">
+              Minha Amora
+            </h1>
+            <p className="mt-1 text-sm text-[#2D292E]/60">
+              {isLogin ? "Entre na sua conta" : "Crie sua conta gratuita"}
+            </p>
           </div>
-          <h1 className="font-display text-xl font-bold text-foreground">Estoque Natura</h1>
-          <p className="text-sm text-muted-foreground">
-            {isLogin ? "Entre na sua conta" : "Crie sua conta"}
-          </p>
         </div>
 
-        {/* Google Sign-In */}
+        {/* ─── Google Sign-In ─── */}
         <button
           type="button"
           onClick={handleGoogleSignIn}
           disabled={googleLoading}
-          className="flex w-full items-center justify-center gap-3 rounded-xl border border-input bg-background py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-3 rounded-xl border border-[#2D292E]/10 bg-white py-3 text-sm font-medium text-[#2D292E] shadow-sm transition-all hover:shadow-md active:scale-[0.98] disabled:opacity-50"
         >
           {googleLoading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -90,44 +98,46 @@ export default function Auth() {
           Continuar com Google
         </button>
 
-        {/* Divider */}
+        {/* ─── Divider ─── */}
         <div className="relative">
           <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t border-border" />
+            <span className="w-full border-t border-[#2D292E]/10" />
           </div>
           <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-background px-2 text-muted-foreground">ou</span>
+            <span className="bg-[#FDF2F7] px-2 text-[#2D292E]/40">ou</span>
           </div>
         </div>
 
-        {/* Form */}
+        {/* ─── Form ─── */}
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
             <div className="relative">
-              <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <User className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#871745]/50" />
               <input
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Seu nome"
                 required={!isLogin}
-                className="w-full rounded-xl border border-input bg-background py-3 pl-10 pr-4 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+                className="w-full rounded-xl border border-[#871745]/15 bg-white py-3 pl-10 pr-4 text-sm text-[#2D292E] outline-none placeholder:text-[#2D292E]/40 focus:border-[#871745] focus:ring-2 focus:ring-[#871745]/20"
               />
             </div>
           )}
+
           <div className="relative">
-            <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#871745]/50" />
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
               required
-              className="w-full rounded-xl border border-input bg-background py-3 pl-10 pr-4 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              className="w-full rounded-xl border border-[#871745]/15 bg-white py-3 pl-10 pr-4 text-sm text-[#2D292E] outline-none placeholder:text-[#2D292E]/40 focus:border-[#871745] focus:ring-2 focus:ring-[#871745]/20"
             />
           </div>
+
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#871745]/50" />
             <input
               type={showPassword ? "text" : "password"}
               value={password}
@@ -135,35 +145,42 @@ export default function Auth() {
               placeholder="Senha"
               required
               minLength={6}
-              className="w-full rounded-xl border border-input bg-background py-3 pl-10 pr-10 text-sm outline-none focus:border-primary focus:ring-1 focus:ring-primary/20"
+              className="w-full rounded-xl border border-[#871745]/15 bg-white py-3 pl-10 pr-10 text-sm text-[#2D292E] outline-none placeholder:text-[#2D292E]/40 focus:border-[#871745] focus:ring-2 focus:ring-[#871745]/20"
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[#2D292E]/40 hover:text-[#871745]"
             >
               {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
 
+          {/* ─── Botão Principal (Magenta Baga) ─── */}
           <button
             type="submit"
             disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#871745] py-3 text-sm font-bold text-white shadow-lg shadow-[#871745]/25 transition-all hover:bg-[#871745]/90 hover:shadow-[#871745]/40 active:scale-[0.98] disabled:opacity-50"
           >
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             {isLogin ? "Entrar" : "Criar Conta"}
           </button>
         </form>
 
-        <p className="text-center text-sm text-muted-foreground">
+        {/* ─── Toggle Login/Cadastro ─── */}
+        <p className="text-center text-sm text-[#2D292E]/60">
           {isLogin ? "Não tem conta?" : "Já tem conta?"}{" "}
           <button
             onClick={() => setIsLogin(!isLogin)}
-            className="font-medium text-primary hover:underline"
+            className="font-semibold text-[#871745] hover:underline"
           >
             {isLogin ? "Criar conta" : "Fazer login"}
           </button>
+        </p>
+
+        {/* ─── Footer sutil ─── */}
+        <p className="text-center text-[10px] text-[#2D292E]/30">
+          100% gratuito para começar · Sem cartão de crédito
         </p>
       </div>
     </div>
