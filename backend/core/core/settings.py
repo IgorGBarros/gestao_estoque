@@ -85,6 +85,9 @@ ALLOWED_HOSTS = [
     'dev-brih.onrender.com',
     '.vercel.app',
     '.onrender.com',
+    'minhaamora.com.br',
+    'www.minhaamora.com.br'
+
 ]
 
 # ✅ CORREÇÃO: Apps completos com JWT
