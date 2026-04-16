@@ -142,6 +142,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://gestao-estoque-one.vercel.app",
     "https://gestao-estoque-k5vy.onrender.com",
+    "https://minhaamora.com.br",
+    "https://wwwm.minhaamora.com.br"
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
@@ -159,6 +161,8 @@ SECURE_CROSS_ORIGIN_OPENER_POLICY = None  # ✅ Permite popups do Firebase
 CSRF_TRUSTED_ORIGINS = [
     "https://gestao-estoque-one.vercel.app",
     "https://gestao-estoque-k5vy.onrender.com",
+    "https://minhaamora.com.br",
+    "https://wwwm.minhaamora.com.br"
 ]
 
 WSGI_APPLICATION = 'core.wsgi.application'
