@@ -35,6 +35,8 @@ import PGBA from "./pages/pgba/PGBA";
 import PGBANeural from "./pages/pgba/PGBANeural";
 import PGBASite from "./pages/pgba/PGBASite";
 
+
+
 const queryClient = new QueryClient();
 
 // ✅ NOVO: Componente Layout com SessionHeader

@@ -1,9 +1,9 @@
-// pages/AddProduct.tsx — VERSÃO COMPLETA REESTRUTURADA
+// pages/AddProduct.tsx — VERSÃO COMPLETA REFATORADA COM TEMA DINÂMICO
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  ScanBarcode, Camera, Hash, DollarSign, ChevronRight, ChevronLeft,
+  ScanBarcode, Camera, DollarSign, ChevronRight, ChevronLeft,
   Check, Loader2, X, Package, Search, Lock, ImageIcon, Clock,
   CreditCard, AlertTriangle, Crown, RotateCcw, Home
 } from "lucide-react";
@@ -11,14 +11,16 @@ import BarcodeScanner from "../components/BarcodeScanner";
 import ProductSearchModal from "../components/ProductSearchModal";
 import UpgradeModal from "../components/UpgradeModal";
 import ProBadge from "../components/ProBadge";
-import { ocrApi, GlobalProduct, formatMoney, sessionApi } from "../lib/api";
+import { ocrApi, formatMoney, sessionApi } from "../lib/api";
 import { productService } from "../lib/productService";
 import { useAuth } from "../hooks/useAuth";
-import { usePlan } from "../hooks/usePlan";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import { useToast } from "../hooks/use-toast";
 import { useStockEntry } from "../hooks/useStockEntry";
 
+// ══════════════════════════════════════════
+// CONSTANTES
+// ══════════════════════════════════════════
 const STEPS = [
   { id: "scan", label: "Código", icon: ScanBarcode },
   { id: "expiry", label: "Validade", icon: Camera },
@@ -28,9 +30,12 @@ const STEPS = [
 
 const CATEGORIES = [
   "Perfumaria", "Corpo", "Rosto", "Cabelos",
-  "Maquiagem", "Infantil", "Casa", "Outro"
+  "Maquiagem", "Infantil", "Casa", "Outro",
 ];
 
+// ══════════════════════════════════════════
+// INTERFACES
+// ══════════════════════════════════════════
 interface EntryData {
   bar_code: string;
   name: string;
@@ -63,18 +68,28 @@ interface SessionStatus {
   duration_minutes?: number;
 }
 
-// ==========================================
-// DADOS INICIAIS (factory para reset)
-// ==========================================
+// ══════════════════════════════════════════
+// FACTORY
+// ══════════════════════════════════════════
 const createEmptyEntry = (): EntryData => ({
-  bar_code: "", name: "", category: "Perfumaria", natura_sku: "",
-  image_url: "", official_price: 0, sale_price: 0, cost_price: 0,
-  quantity: 1, batch_code: "", expiry_date: "", expiry_photo_url: "", brand: "",
+  bar_code: "",
+  name: "",
+  category: "Perfumaria",
+  natura_sku: "",
+  image_url: "",
+  official_price: 0,
+  sale_price: 0,
+  cost_price: 0,
+  quantity: 1,
+  batch_code: "",
+  expiry_date: "",
+  expiry_photo_url: "",
+  brand: "",
 });
 
-// ==========================================
+// ══════════════════════════════════════════
 // COMPONENTE PRINCIPAL
-// ==========================================
+// ══════════════════════════════════════════
 export default function AddProduct() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -95,51 +110,52 @@ export default function AddProduct() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
 
-  // ✅ Sessão
+  // Sessão
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({ has_session: false });
   const [showContinueModal, setShowContinueModal] = useState(false);
 
-  // ✅ Limites do plano
+  // Limites do plano
   const [planLimits, setPlanLimits] = useState<PlanLimits | null>(null);
   const [limitsLoading, setLimitsLoading] = useState(false);
 
-  // Resumo da sessão (ao finalizar)
+  // Resumo da sessão
   const [showSessionSummary, setShowSessionSummary] = useState(false);
   const [sessionSummaryData, setSessionSummaryData] = useState<any>(null);
   const [showInvestmentModal, setShowInvestmentModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ==========================================
+  // ══════════════════════════════════════════
   // API HELPERS
-  // ==========================================
-
-  const API_BASE = ((import.meta as any).env?.VITE_API_BASE_URL || "https://gestao-estoque-k5vy.onrender.com").replace(/\/$/, "");
+  // ══════════════════════════════════════════
+  const API_BASE = (
+    (import.meta as any).env?.VITE_API_BASE_URL ||
+    "https://gestao-estoque-k5vy.onrender.com"
+  ).replace(/\/$/, "");
 
   const checkPlanLimits = useCallback(async (): Promise<boolean> => {
     setLimitsLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/check-plan-limits/`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          'Content-Type': 'application/json'
-        }
+          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+          "Content-Type": "application/json",
+        },
       });
       const limits = await response.json();
       setPlanLimits(limits);
-
       if (!limits.can_add_products) {
         setUpgradeFeature({
           feature: "Limite de Produtos Atingido",
-          description: `Você atingiu o limite de ${limits.limit} produtos do plano ${limits.current_plan.toUpperCase()}.`
+          description: `Você atingiu o limite de ${limits.limit} produtos do plano ${limits.current_plan.toUpperCase()}.`,
         });
         setShowUpgrade(true);
         return false;
       }
       return true;
     } catch (error) {
-      console.error('Erro ao verificar limites:', error);
-      return true; // Não bloquear em caso de erro
+      console.error("Erro ao verificar limites:", error);
+      return true;
     } finally {
       setLimitsLoading(false);
     }
@@ -150,67 +166,54 @@ export default function AddProduct() {
       const status = await sessionApi.getStatus();
       setSessionStatus(status);
     } catch (error) {
-      console.error('Erro ao verificar sessão:', error);
+      console.error("Erro ao verificar sessão:", error);
     }
   }, []);
-
-  // ==========================================
-  // ✅ ENCERRAR SESSÃO AUTOMATICAMENTE AO SAIR
-  // ==========================================
 
   const finishSession = useCallback(async () => {
     try {
       const result = await sessionApi.finishSession();
       setSessionStatus({ has_session: false });
-
       if (result?.summary && result.summary.products_count > 0) {
         setSessionSummaryData(result.summary);
         setShowSessionSummary(true);
-        return true; // Tem resumo para mostrar
+        return true;
       }
-      return false; // Sem resumo
+      return false;
     } catch (error) {
-      console.error('Erro ao finalizar sessão:', error);
+      console.error("Erro ao finalizar sessão:", error);
       return false;
     }
   }, []);
 
-  // ✅ Cleanup: encerrar sessão ao desmontar o componente (sair da página)
+  // ══════════════════════════════════════════
+  // LIFECYCLE — sessão
+  // ══════════════════════════════════════════
   useEffect(() => {
     checkSessionStatus();
     checkPlanLimits();
-
-    // Cleanup ao sair da página via React Router
     return () => {
-      // Fire-and-forget: encerra a sessão silenciosamente
       sessionApi.finishSession().catch(() => {});
     };
   }, [checkSessionStatus, checkPlanLimits]);
 
-  // ✅ Cleanup: encerrar sessão ao fechar aba/navegar fora do SPA
   useEffect(() => {
     const handleBeforeUnload = () => {
-      // Usar sendBeacon para garantir que o request saia antes da aba fechar
-      const token = localStorage.getItem('auth_token');
+      const token = localStorage.getItem("auth_token");
       if (token) {
         navigator.sendBeacon(
           `${API_BASE}/api/session-control/`,
-          new Blob(
-            [JSON.stringify({ action: 'finish' })],
-            { type: 'application/json' }
-          )
+          new Blob([JSON.stringify({ action: "finish" })], { type: "application/json" })
         );
       }
     };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [API_BASE]);
 
-  // ==========================================
+  // ══════════════════════════════════════════
   // HANDLERS
-  // ==========================================
-
+  // ══════════════════════════════════════════
   const triggerProGate = (feature: string, description: string) => {
     setUpgradeFeature({ feature, description });
     setShowUpgrade(true);
@@ -218,7 +221,10 @@ export default function AddProduct() {
 
   const handleScannerClick = async () => {
     if (isLocked("barcode_scanner")) {
-      triggerProGate("Scanner de Código de Barras", "Mais rápido e preciso! O Scanner é exclusivo PRO.");
+      triggerProGate(
+        "Scanner de Código de Barras",
+        "Mais rápido e preciso! O Scanner é exclusivo PRO."
+      );
       return;
     }
     const canAdd = await checkPlanLimits();
@@ -234,10 +240,9 @@ export default function AddProduct() {
       if (result.found) {
         const canAdd = await checkPlanLimits();
         if (!canAdd) return;
-
         const resData = result.data as any;
         const remote = resData.remote || resData;
-        setData(prev => ({
+        setData((prev) => ({
           ...prev,
           bar_code: barcode,
           name: remote?.name || resData?.name || prev.name,
@@ -247,7 +252,7 @@ export default function AddProduct() {
           image_url: remote?.image_url || resData?.image_url || prev.image_url,
           category: remote?.category || resData?.category || prev.category,
           official_price: remote?.official_price || resData?.official_price || 0,
-          brand: remote?.brand || resData?.brand || prev.brand || ""
+          brand: remote?.brand || resData?.brand || prev.brand || "",
         }));
         toast({ title: "Produto Identificado!", description: "Dados carregados com sucesso." });
       } else {
@@ -264,7 +269,7 @@ export default function AddProduct() {
 
   const handleBarcodeScan = async (barcode: string) => {
     setShowScanner(false);
-    setData(prev => ({ ...prev, bar_code: barcode }));
+    setData((prev) => ({ ...prev, bar_code: barcode }));
     const canAdd = await checkPlanLimits();
     if (!canAdd) return;
     await handleLookup(barcode);
@@ -274,7 +279,6 @@ export default function AddProduct() {
   const selectSuggestion = async (product: any) => {
     const canAdd = await checkPlanLimits();
     if (!canAdd) return;
-
     setData((prev) => ({
       ...prev,
       bar_code: product.bar_code || product.barcode || prev.bar_code,
@@ -310,16 +314,14 @@ export default function AddProduct() {
     }
   };
 
-  // ==========================================
-  // ✅ SAVE: Após sucesso, mostrar popup "Cadastrar mais?"
-  // ==========================================
-
+  // ══════════════════════════════════════════
+  // SAVE + CONTINUE FLOW
+  // ══════════════════════════════════════════
   const handleSave = async () => {
     if (!data.bar_code?.trim()) {
       toast({ title: "Código obrigatório", description: "Digite ou escaneie o EAN.", variant: "destructive" });
       return;
     }
-
     try {
       const payload: any = {
         bar_code: data.bar_code.trim(),
@@ -333,31 +335,21 @@ export default function AddProduct() {
         sale_price: data.sale_price,
         batch_code: data.batch_code,
       };
-
       if (data.brand && data.brand.trim() !== "") {
         payload.brand = data.brand.trim();
       }
-
       await saveEntry(payload);
-
-      // Atualizar limites e sessão após salvar
       await Promise.all([checkPlanLimits(), checkSessionStatus()]);
-
-      // Mostrar animação de sucesso
       setIsSuccess(true);
-
-      // Após 1.5s, mostrar popup "Cadastrar mais?"
       setTimeout(() => {
         setIsSuccess(false);
         setShowContinueModal(true);
       }, 1500);
-
     } catch (error) {
-      console.error('Erro ao salvar:', error);
+      console.error("Erro ao salvar:", error);
     }
   };
 
-  // ✅ Cadastrar mais: reset e volta ao Step 0
   const handleContinueRegistering = () => {
     setShowContinueModal(false);
     setData(createEmptyEntry());
@@ -365,38 +357,34 @@ export default function AddProduct() {
     setIsSuccess(false);
   };
 
-  // ✅ Finalizar: encerra sessão e volta para Index
   const handleFinishRegistering = async () => {
     setShowContinueModal(false);
     const hasSummary = await finishSession();
     if (!hasSummary) {
       navigate("/");
     }
-    // Se tem summary, o modal de resumo será exibido automaticamente
   };
 
   const confirmInvestment = async (paymentData: any) => {
     try {
       const response = await fetch(`${API_BASE}/api/session-summary/`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
         },
         body: JSON.stringify({
           session_id: sessionSummaryData.session_id,
-          ...paymentData
-        })
+          ...paymentData,
+        }),
       });
-
-      if (!response.ok) throw new Error('Falha ao registrar investimento');
-
+      if (!response.ok) throw new Error("Falha ao registrar investimento");
       setShowInvestmentModal(false);
       setShowSessionSummary(false);
       toast({ title: "Sucesso!", description: "Investimento registrado com sucesso." });
       navigate("/");
     } catch (error) {
-      console.error('Erro ao confirmar investimento:', error);
+      console.error("Erro ao confirmar investimento:", error);
       toast({ title: "Erro", description: "Falha ao registrar investimento.", variant: "destructive" });
     }
   };
@@ -408,22 +396,21 @@ export default function AddProduct() {
     return true;
   };
 
-  // ==========================================
-  // ✅ COMPONENTE INLINE: Contador de Produtos
-  // ==========================================
-
+  // ══════════════════════════════════════════
+  // COMPONENTE INLINE: Contador de Produtos
+  // ══════════════════════════════════════════
   const ProductCounter = () => {
     if (!planLimits && !limitsLoading) return null;
-
-    const isPro = planLimits?.current_plan === 'pro';
-    const isNearLimit = planLimits?.remaining !== null && planLimits?.remaining !== undefined && planLimits.remaining <= 5;
+    const isNearLimit =
+      planLimits?.remaining !== null &&
+      planLimits?.remaining !== undefined &&
+      planLimits.remaining <= 5;
     const isAtLimit = planLimits?.can_add_products === false;
+    const isPro = planLimits?.current_plan === "pro";
 
     return (
       <div className="flex items-center justify-between mb-2">
-        <label className="text-sm font-medium text-foreground">
-          Código de Barras (EAN) *
-        </label>
+        <label className="text-sm font-medium text-foreground">Código de Barras (EAN) *</label>
         <div className="flex items-center gap-1.5">
           {limitsLoading ? (
             <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
@@ -434,14 +421,14 @@ export default function AddProduct() {
             <span
               className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
                 isAtLimit
-                  ? 'bg-red-100 text-red-700'
+                  ? "bg-destructive/10 text-destructive"
                   : isNearLimit
-                  ? 'bg-orange-100 text-orange-700'
-                  : 'bg-green-100 text-green-700'
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-success/10 text-success"
               }`}
             >
               <Package size={10} />
-              {planLimits.current_count}/{planLimits.limit || '∞'} produtos
+              {planLimits.current_count}/{planLimits.limit || "∞"} produtos
               {isPro && (
                 <span className="ml-1 text-[9px] bg-amber-100 text-amber-700 px-1 rounded font-bold">
                   PRO
@@ -454,18 +441,16 @@ export default function AddProduct() {
     );
   };
 
-  // ==========================================
+  // ══════════════════════════════════════════
   // RENDER
-  // ==========================================
-
+  // ══════════════════════════════════════════
   return (
     <div className="min-h-screen bg-background">
-      {/* Header simples — SEM banner de sessão/limites */}
+      {/* ── HEADER ── */}
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
           <button
             onClick={async () => {
-              // Ao clicar X, encerrar sessão e sair
               await finishSession();
               navigate("/");
             }}
@@ -474,30 +459,36 @@ export default function AddProduct() {
             <X className="h-5 w-5" />
           </button>
           <h1 className="font-display text-base font-bold text-foreground">Entrada Mágica</h1>
-          {/* Indicador de sessão compacto */}
-          {sessionStatus.has_session && (
-            <div className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+          {sessionStatus.has_session ? (
+            <div className="flex items-center gap-1 text-xs text-brand bg-brand-soft px-2 py-1 rounded-full">
               <Clock size={10} />
               <span className="font-medium">{sessionStatus.products_count || 0}</span>
             </div>
+          ) : (
+            <div className="w-9" />
           )}
-          {!sessionStatus.has_session && <div className="w-9" />}
         </div>
       </header>
 
-      {/* STEPS HEADER */}
+      {/* ── STEPS PROGRESS ── */}
       <div className="mx-auto max-w-lg px-4 pt-4">
         <div className="flex items-center gap-1">
           {STEPS.map((s, i) => (
             <div key={s.id} className="flex flex-1 flex-col items-center gap-1">
               <div
                 className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-colors ${
-                  i <= step ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                  i <= step
+                    ? "bg-brand text-white"
+                    : "bg-muted text-muted-foreground"
                 }`}
               >
                 {i < step ? <Check className="h-4 w-4" /> : i + 1}
               </div>
-              <span className={`text-[10px] ${i <= step ? "text-primary font-medium" : "text-muted-foreground"}`}>
+              <span
+                className={`text-[10px] ${
+                  i <= step ? "text-brand font-medium" : "text-muted-foreground"
+                }`}
+              >
                 {s.label}
               </span>
             </div>
@@ -505,13 +496,19 @@ export default function AddProduct() {
         </div>
       </div>
 
+      {/* ── MAIN CONTENT ── */}
       <main className="mx-auto max-w-lg px-4 py-6">
         <AnimatePresence mode="wait">
-          {/* ==========================================
+          {/* ════════════════════════════════
               STEP 0: SCAN & IDENTIFICAÇÃO
-              ========================================== */}
+              ════════════════════════════════ */}
           {step === 0 && (
-            <motion.div key="scan" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div
+              key="scan"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
               {showScanner && !isLocked("barcode_scanner") ? (
                 <div className="space-y-4">
                   <BarcodeScanner
@@ -530,7 +527,7 @@ export default function AddProduct() {
                 </div>
               ) : (
                 <div className="space-y-6 rounded-xl border border-border bg-card p-5">
-                  {/* ✅ CONTADOR INLINE — acima do campo EAN */}
+                  {/* Contador + Campo EAN */}
                   <div>
                     <ProductCounter />
                     <input
@@ -539,23 +536,24 @@ export default function AddProduct() {
                       onChange={(e) => setData((p) => ({ ...p, bar_code: e.target.value }))}
                       onBlur={(e) => handleLookup(e.target.value)}
                       placeholder="Escaneie ou digite..."
-                      className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary"
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:border-brand"
                       disabled={limitsLoading || planLimits?.can_add_products === false}
                     />
                     {(lookupLoading || limitsLoading) && (
-                      <p className="text-xs text-primary mt-1 animate-pulse flex items-center gap-1">
+                      <p className="text-xs text-brand mt-1 animate-pulse flex items-center gap-1">
                         <Loader2 size={12} className="animate-spin" />
                         {limitsLoading ? "Verificando limites..." : "Buscando informações..."}
                       </p>
                     )}
-                    {/* Alerta se atingiu o limite */}
+
+                    {/* Alerta de limite atingido */}
                     {planLimits && !planLimits.can_add_products && (
                       <motion.div
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg"
+                        className="mt-2 p-3 bg-destructive/5 border border-destructive/20 rounded-lg"
                       >
-                        <div className="flex items-center gap-2 text-red-700">
+                        <div className="flex items-center gap-2 text-destructive">
                           <AlertTriangle size={14} />
                           <span className="text-xs font-bold">
                             Limite de {planLimits.limit} produtos atingido
@@ -565,11 +563,11 @@ export default function AddProduct() {
                           onClick={() => {
                             setUpgradeFeature({
                               feature: "Upgrade Necessário",
-                              description: `Limite de ${planLimits.limit} produtos atingido no plano ${planLimits.current_plan.toUpperCase()}.`
+                              description: `Limite de ${planLimits.limit} produtos atingido no plano ${planLimits.current_plan.toUpperCase()}.`,
                             });
                             setShowUpgrade(true);
                           }}
-                          className="mt-2 w-full text-xs bg-red-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-red-700 flex items-center justify-center gap-1"
+                          className="mt-2 w-full text-xs bg-destructive text-white px-3 py-1.5 rounded-lg font-bold hover:bg-destructive/90 flex items-center justify-center gap-1"
                         >
                           <Crown size={12} />
                           Fazer Upgrade para PRO
@@ -578,12 +576,14 @@ export default function AddProduct() {
                     )}
                   </div>
 
+                  {/* Separador */}
                   <div className="flex items-center gap-3">
                     <div className="h-px flex-1 bg-border" />
                     <span className="text-xs text-muted-foreground">OU</span>
                     <div className="h-px flex-1 bg-border" />
                   </div>
 
+                  {/* Botão Scanner */}
                   <button
                     onClick={handleScannerClick}
                     disabled={limitsLoading || planLimits?.can_add_products === false}
@@ -597,7 +597,7 @@ export default function AddProduct() {
                       <div
                         className={`p-2 rounded-lg ${
                           !isLocked("barcode_scanner") && !limitsLoading
-                            ? "bg-primary/10 text-primary"
+                            ? "bg-brand/10 text-brand"
                             : "bg-muted text-muted-foreground"
                         }`}
                       >
@@ -615,16 +615,17 @@ export default function AddProduct() {
                         </p>
                       </div>
                     </div>
-                    <ChevronRight className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
+                    <ChevronRight className="text-muted-foreground/30 group-hover:text-brand transition-colors" />
                   </button>
 
+                  {/* Botão Busca por Nome */}
                   <button
                     onClick={() => setIsSearchOpen(true)}
                     disabled={limitsLoading || planLimits?.can_add_products === false}
                     className="w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="p-2 bg-primary/10 text-primary rounded-lg">
+                      <div className="p-2 bg-brand/10 text-brand rounded-lg">
                         <Search size={20} />
                       </div>
                       <div>
@@ -632,22 +633,27 @@ export default function AddProduct() {
                         <p className="text-xs text-muted-foreground">Catálogo Global</p>
                       </div>
                     </div>
-                    <ChevronRight className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
+                    <ChevronRight className="text-muted-foreground/30 group-hover:text-brand transition-colors" />
                   </button>
                 </div>
               )}
             </motion.div>
           )}
 
-          {/* ==========================================
+          {/* ════════════════════════════════
               STEP 1: VALIDADE
-              ========================================== */}
+              ════════════════════════════════ */}
           {step === 1 && (
-            <motion.div key="expiry" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div
+              key="expiry"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
               <div className="space-y-4 rounded-xl border border-border bg-card p-5">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <Camera className="h-5 w-5 text-primary" />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10">
+                    <Camera className="h-5 w-5 text-brand" />
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-foreground">Foto da Validade</p>
@@ -668,7 +674,7 @@ export default function AddProduct() {
                         setData((p) => ({ ...p, expiry_photo_url: "" }));
                         fileInputRef.current?.click();
                       }}
-                      className="text-xs text-primary underline"
+                      className="text-xs text-brand underline"
                     >
                       Tirar outra
                     </button>
@@ -677,7 +683,7 @@ export default function AddProduct() {
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-10 text-muted-foreground hover:border-primary hover:text-primary"
+                    className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-10 text-muted-foreground hover:border-brand hover:text-brand"
                   >
                     <Camera className="h-8 w-8" />
                     <span className="text-sm">Tirar foto da validade (Opcional)</span>
@@ -694,7 +700,7 @@ export default function AddProduct() {
                 />
 
                 {ocrLoading && (
-                  <div className="flex items-center justify-center gap-2 text-sm text-primary">
+                  <div className="flex items-center justify-center gap-2 text-sm text-brand">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Analisando imagem...
                   </div>
@@ -706,18 +712,22 @@ export default function AddProduct() {
                     type="month"
                     value={data.expiry_date}
                     onChange={(e) => setData((p) => ({ ...p, expiry_date: e.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-brand"
                   />
                 </div>
               </div>
             </motion.div>
           )}
-
-          {/* ==========================================
-              STEP 2: DETALHES GERAIS
-              ========================================== */}
+            {/* ════════════════════════════════
+              STEP 2: DETALHES
+              ════════════════════════════════ */}
           {step === 2 && (
-            <motion.div key="details" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div
+              key="details"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
               <div className="space-y-5 rounded-xl border border-border bg-card p-5">
                 <div className="flex gap-4 items-start">
                   <div className="flex-1">
@@ -727,11 +737,15 @@ export default function AddProduct() {
                       type="text"
                       value={data.name}
                       onChange={(e) => setData((p) => ({ ...p, name: e.target.value }))}
-                      className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                      className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-brand"
                     />
                   </div>
                   {data.image_url ? (
-                    <img src={data.image_url} alt="" className="w-16 h-16 rounded-lg object-cover border mt-6" />
+                    <img
+                      src={data.image_url}
+                      alt=""
+                      className="w-16 h-16 rounded-lg object-cover border mt-6"
+                    />
                   ) : (
                     <div className="w-16 h-16 bg-muted rounded-lg border mt-6 flex items-center justify-center">
                       <ImageIcon className="text-muted-foreground" size={20} />
@@ -761,7 +775,9 @@ export default function AddProduct() {
                       className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none bg-background"
                     >
                       {CATEGORIES.map((c) => (
-                        <option key={c} value={c}>{c}</option>
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -776,27 +792,35 @@ export default function AddProduct() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 p-4 border rounded-lg bg-primary/5">
+                <div className="grid grid-cols-2 gap-4 p-4 border rounded-lg bg-brand/5">
                   <div>
-                    <label className="text-sm font-bold text-primary">Qtd Entrada *</label>
+                    <label className="text-sm font-bold text-brand">Qtd Entrada *</label>
                     <div className="mt-1 flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setData((p) => ({ ...p, quantity: Math.max(1, p.quantity - 1) }))}
+                        onClick={() =>
+                          setData((p) => ({ ...p, quantity: Math.max(1, p.quantity - 1) }))
+                        }
                         className="h-8 w-8 rounded bg-background border font-bold"
-                      >-</button>
+                      >
+                        -
+                      </button>
                       <input
                         type="number"
                         min={1}
                         value={data.quantity}
-                        onChange={(e) => setData((p) => ({ ...p, quantity: parseInt(e.target.value) || 1 }))}
+                        onChange={(e) =>
+                          setData((p) => ({ ...p, quantity: parseInt(e.target.value) || 1 }))
+                        }
                         className="h-8 w-12 rounded border text-center font-bold outline-none"
                       />
                       <button
                         type="button"
                         onClick={() => setData((p) => ({ ...p, quantity: p.quantity + 1 }))}
                         className="h-8 w-8 rounded bg-background border font-bold"
-                      >+</button>
+                      >
+                        +
+                      </button>
                     </div>
                   </div>
                   <div>
@@ -817,7 +841,9 @@ export default function AddProduct() {
                       type="number"
                       step="0.01"
                       value={data.cost_price || ""}
-                      onChange={(e) => setData((p) => ({ ...p, cost_price: parseFloat(e.target.value) || 0 }))}
+                      onChange={(e) =>
+                        setData((p) => ({ ...p, cost_price: parseFloat(e.target.value) || 0 }))
+                      }
                       className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none"
                     />
                   </div>
@@ -827,7 +853,9 @@ export default function AddProduct() {
                       type="number"
                       step="0.01"
                       value={data.sale_price || ""}
-                      onChange={(e) => setData((p) => ({ ...p, sale_price: parseFloat(e.target.value) || 0 }))}
+                      onChange={(e) =>
+                        setData((p) => ({ ...p, sale_price: parseFloat(e.target.value) || 0 }))
+                      }
                       className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none"
                     />
                   </div>
@@ -836,26 +864,37 @@ export default function AddProduct() {
             </motion.div>
           )}
 
-          {/* ==========================================
+          {/* ════════════════════════════════
               STEP 3: CONFIRMAR
-              ========================================== */}
+              ════════════════════════════════ */}
           {step === 3 && (
-            <motion.div key="confirm" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div
+              key="confirm"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
               <div className="space-y-4 rounded-xl border border-border bg-card p-5 overflow-hidden">
                 <AnimatePresence mode="wait">
                   {!isSuccess ? (
                     <motion.div key="summary" exit={{ opacity: 0, scale: 0.9 }}>
                       <div className="flex items-center gap-3 mb-4">
                         {data.image_url ? (
-                          <img src={data.image_url} alt="Produto" className="h-12 w-12 rounded-lg object-cover border" />
+                          <img
+                            src={data.image_url}
+                            alt="Produto"
+                            className="h-12 w-12 rounded-lg object-cover border"
+                          />
                         ) : (
-                          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                            <Package className="text-primary" />
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-brand/10">
+                            <Package className="text-brand" />
                           </div>
                         )}
                         <div>
                           <p className="text-sm font-semibold text-foreground">Confirmar Entrada</p>
-                          <p className="text-xs text-muted-foreground">{data.name || "Sem Nome"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {data.name || "Sem Nome"}
+                          </p>
                         </div>
                       </div>
 
@@ -870,14 +909,16 @@ export default function AddProduct() {
                         <Row label="Venda" value={formatMoney(data.sale_price)} />
                       </div>
 
-                      {/* Resumo da sessão (se ativa) */}
+                      {/* Resumo da sessão */}
                       {sessionStatus.has_session && (
-                        <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
+                        <div className="rounded-lg bg-brand-soft border border-brand/20 p-4">
                           <div className="flex items-center gap-2 mb-2">
-                            <Package className="text-blue-600" size={16} />
-                            <span className="text-sm font-semibold text-blue-900">Sessão Ativa</span>
+                            <Package className="text-brand" size={16} />
+                            <span className="text-sm font-semibold text-foreground">
+                              Sessão Ativa
+                            </span>
                           </div>
-                          <div className="text-xs text-blue-700 space-y-1">
+                          <div className="text-xs text-muted-foreground space-y-1">
                             <p>• Produtos nesta sessão: {sessionStatus.products_count}</p>
                             <p>• Tempo: {sessionStatus.duration_minutes}min</p>
                           </div>
@@ -895,7 +936,7 @@ export default function AddProduct() {
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
                         transition={{ type: "spring", stiffness: 200, damping: 10, delay: 0.1 }}
-                        className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg"
+                        className="flex h-24 w-24 items-center justify-center rounded-full bg-success text-white shadow-lg"
                       >
                         <Check size={48} strokeWidth={3} />
                       </motion.div>
@@ -906,7 +947,9 @@ export default function AddProduct() {
                         className="text-center space-y-1"
                       >
                         <h3 className="text-xl font-bold text-foreground">Sucesso!</h3>
-                        <p className="text-sm text-muted-foreground">Produto adicionado ao estoque.</p>
+                        <p className="text-sm text-muted-foreground">
+                          Produto adicionado ao estoque.
+                        </p>
                       </motion.div>
                     </motion.div>
                   )}
@@ -916,9 +959,9 @@ export default function AddProduct() {
           )}
         </AnimatePresence>
 
-        {/* ==========================================
+        {/* ══════════════════════════════════════════
             NAVIGATION BUTTONS
-            ========================================== */}
+            ══════════════════════════════════════════ */}
         {(!showScanner || step > 0) && !isSuccess && !showContinueModal && (
           <div className="mt-6 flex gap-3">
             {step > 0 && (
@@ -934,7 +977,7 @@ export default function AddProduct() {
               <button
                 onClick={() => setStep((s) => s + 1)}
                 disabled={!canAdvance()}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Próximo <ChevronRight className="h-4 w-4" />
               </button>
@@ -942,7 +985,7 @@ export default function AddProduct() {
               <button
                 onClick={handleSave}
                 disabled={loading}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50 transition-all active:scale-95"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50 transition-all active:scale-95"
               >
                 {loading ? <Loader2 className="animate-spin" /> : <Check />} Confirmar
               </button>
@@ -951,9 +994,9 @@ export default function AddProduct() {
         )}
       </main>
 
-      {/* ==========================================
+      {/* ══════════════════════════════════════════
           POPUP: CADASTRAR MAIS PRODUTOS?
-          ========================================== */}
+          ══════════════════════════════════════════ */}
       <AnimatePresence>
         {showContinueModal && (
           <motion.div
@@ -969,11 +1012,9 @@ export default function AddProduct() {
               className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-border"
             >
               <div className="text-center space-y-4">
-                {/* Ícone de sucesso */}
-                <div className="flex h-16 w-16 mx-auto items-center justify-center rounded-full bg-emerald-100">
-                  <Check className="h-8 w-8 text-emerald-600" />
+                <div className="flex h-16 w-16 mx-auto items-center justify-center rounded-full bg-success/10">
+                  <Check className="h-8 w-8 text-success" />
                 </div>
-
                 <div>
                   <h3 className="text-lg font-bold text-foreground">Produto cadastrado!</h3>
                   <p className="text-sm text-muted-foreground mt-1">
@@ -981,18 +1022,17 @@ export default function AddProduct() {
                   </p>
                 </div>
 
-                {/* Contador da sessão */}
                 {planLimits && (
                   <div className="bg-secondary/50 rounded-lg p-3">
                     <p className="text-xs text-muted-foreground">
-                      Produtos cadastrados: <span className="font-bold text-foreground">
-                        {planLimits.current_count}/{planLimits.limit || '∞'}
+                      Produtos cadastrados:{" "}
+                      <span className="font-bold text-foreground">
+                        {planLimits.current_count}/{planLimits.limit || "∞"}
                       </span>
                     </p>
                   </div>
                 )}
 
-                {/* Botões */}
                 <div className="flex gap-3 pt-2">
                   <button
                     onClick={handleFinishRegistering}
@@ -1003,7 +1043,7 @@ export default function AddProduct() {
                   </button>
                   <button
                     onClick={handleContinueRegistering}
-                    className="flex-1 flex items-center justify-center gap-2 bg-primary rounded-xl py-3 text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-colors"
+                    className="flex-1 flex items-center justify-center gap-2 bg-brand rounded-xl py-3 text-sm font-bold text-white hover:opacity-90 transition-colors"
                   >
                     <RotateCcw size={16} />
                     Sim, mais um!
@@ -1015,20 +1055,26 @@ export default function AddProduct() {
         )}
       </AnimatePresence>
 
-      {/* ==========================================
-          MODAL: RESUMO DA SESSÃO (ao finalizar)
-          ========================================== */}
+      {/* ══════════════════════════════════════════
+          MODAL: RESUMO DA SESSÃO
+          ══════════════════════════════════════════ */}
       {showSessionSummary && sessionSummaryData && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-2xl p-6 max-w-md w-full shadow-2xl border border-border">
             <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-              <Package className="text-primary" size={20} />
+              <Package className="text-brand" size={20} />
               Resumo da Sessão
             </h3>
             <div className="space-y-2 mb-6 bg-secondary/50 rounded-lg p-4">
               <Row label="Produtos cadastrados" value={String(sessionSummaryData.products_count)} />
-              <Row label="Valor estimado" value={formatMoney(sessionSummaryData.total_estimated_cost)} />
-              <Row label="Tempo de cadastro" value={`${sessionSummaryData.duration_minutes}min`} />
+              <Row
+                label="Valor estimado"
+                value={formatMoney(sessionSummaryData.total_estimated_cost)}
+              />
+              <Row
+                label="Tempo de cadastro"
+                value={`${sessionSummaryData.duration_minutes}min`}
+              />
             </div>
             <div className="flex gap-3">
               <button
@@ -1045,7 +1091,7 @@ export default function AddProduct() {
                   setShowInvestmentModal(true);
                   setShowSessionSummary(false);
                 }}
-                className="flex-1 bg-primary text-primary-foreground rounded-xl py-2.5 text-sm font-bold hover:bg-primary/90 flex items-center justify-center gap-1"
+                className="flex-1 bg-brand text-white rounded-xl py-2.5 text-sm font-bold hover:opacity-90 flex items-center justify-center gap-1"
               >
                 <CreditCard size={14} />
                 Registrar Investimento
@@ -1055,9 +1101,9 @@ export default function AddProduct() {
         </div>
       )}
 
-      {/* ==========================================
+      {/* ══════════════════════════════════════════
           MODAL: INVESTIMENTO
-          ========================================== */}
+          ══════════════════════════════════════════ */}
       {showInvestmentModal && (
         <InvestmentModal
           estimatedCost={sessionSummaryData?.total_estimated_cost || 0}
@@ -1069,15 +1115,14 @@ export default function AddProduct() {
         />
       )}
 
-      {/* ==========================================
+      {/* ══════════════════════════════════════════
           MODAIS EXISTENTES
-          ========================================== */}
+          ══════════════════════════════════════════ */}
       <ProductSearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
         onSelect={(p) => selectSuggestion(p)}
       />
-
       <UpgradeModal
         isOpen={showUpgrade}
         onClose={() => setShowUpgrade(false)}
@@ -1088,10 +1133,9 @@ export default function AddProduct() {
   );
 }
 
-// ==========================================
+// ══════════════════════════════════════════════════
 // COMPONENTES AUXILIARES
-// ==========================================
-
+// ══════════════════════════════════════════════════
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between border-b border-border/50 pb-1 last:border-0">
@@ -1126,10 +1170,9 @@ function InvestmentModal({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-card rounded-2xl p-6 max-w-md w-full shadow-2xl border border-border">
         <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
-          <CreditCard className="text-primary" size={20} />
+          <CreditCard className="text-brand" size={20} />
           Registrar Investimento
         </h3>
-
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">Como você pagou?</label>
@@ -1143,7 +1186,6 @@ function InvestmentModal({
               <option value="cash">Dinheiro</option>
             </select>
           </div>
-
           <div>
             <label className="block text-sm font-medium mb-1">Valor total pago</label>
             <input
@@ -1154,7 +1196,6 @@ function InvestmentModal({
               className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background"
             />
           </div>
-
           {paymentMethod === "credit_card" && (
             <div>
               <label className="block text-sm font-medium mb-1">Parcelas</label>
@@ -1168,7 +1209,6 @@ function InvestmentModal({
             </div>
           )}
         </div>
-
         <div className="flex gap-3 mt-6">
           <button
             onClick={onClose}
@@ -1178,7 +1218,7 @@ function InvestmentModal({
           </button>
           <button
             onClick={handleConfirm}
-            className="flex-1 bg-emerald-600 text-white rounded-xl py-2.5 text-sm font-bold hover:bg-emerald-700"
+            className="flex-1 bg-success text-white rounded-xl py-2.5 text-sm font-bold hover:opacity-90"
           >
             Confirmar
           </button>

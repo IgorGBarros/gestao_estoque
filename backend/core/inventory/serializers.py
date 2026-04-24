@@ -575,3 +575,17 @@ class AdminStoreSerializer(serializers.ModelSerializer):
             'subscription_started_at', 'subscription_expires_at',
             'subscription_status', 'days_until_expiry', 'can_add_products'
         ]
+
+
+# backend/core/inventory/serializers.py (adicionar)
+
+class ThemeConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ThemeConfig
+        fields = [
+            'color_primary', 'color_primary_light', 'color_success',
+            'color_text', 'color_accent', 'color_destructive',
+            'color_warning', 'color_background', 'color_card',
+            'color_border', 'app_name', 'logo_url', 'updated_at',
+        ]
+        read_only_fields = ['updated_at']

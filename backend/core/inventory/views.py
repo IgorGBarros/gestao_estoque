@@ -3242,3 +3242,42 @@ def check_plan_limits_complete(request):
             'remaining': 20,
             'features': {'scanner': True, 'storefront': False}
         }, status=200)
+
+# backend/core/inventory/views.py (adicionar)
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework import status
+
+class ThemeConfigPublicView(APIView):
+    """
+    GET público — qualquer pessoa pode ler o tema.
+    Não requer autenticação (landing page precisa).
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        theme = ThemeConfig.load()
+        serializer = ThemeConfigSerializer(theme)
+        return Response(serializer.data)
+
+
+class ThemeConfigAdminView(APIView):
+    """
+    GET/PATCH protegido — apenas admin pode alterar.
+    """
+    permission_classes = [IsAdminUser]
+    
+    def get(self, request):
+        theme = ThemeConfig.load()
+        serializer = ThemeConfigSerializer(theme)
+        return Response(serializer.data)
+    
+    def patch(self, request):
+        theme = ThemeConfig.load()
+        serializer = ThemeConfigSerializer(theme, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

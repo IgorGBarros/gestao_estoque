@@ -879,3 +879,85 @@ class ExternalBarcodeCatalog(models.Model):
     
     def __str__(self):
         return f"{self.brand} - {self.gtin} - {self.description[:50]} (SKU: {self.searched_product_sku})"
+
+
+# backend/core/inventory/models.py (adicionar ao arquivo existente)
+
+class ThemeConfig(models.Model):
+    """
+    Singleton — Configuração global de tema/cores do sistema.
+    Apenas 1 registro deve existir.
+    """
+    # Cores principais
+    color_primary = models.CharField(
+        max_length=7, default="#871745",
+        help_text="Cor principal (CTA, botões, destaques). Ex: #871745"
+    )
+    color_primary_light = models.CharField(
+        max_length=7, default="#FDF2F7",
+        help_text="Cor de fundo suave (cards, inputs). Ex: #FDF2F7"
+    )
+    color_success = models.CharField(
+        max_length=7, default="#2E8B57",
+        help_text="Cor de sucesso/lucro (scanner, indicadores positivos). Ex: #2E8B57"
+    )
+    color_text = models.CharField(
+        max_length=7, default="#2D292E",
+        help_text="Cor do texto principal. Ex: #2D292E"
+    )
+    
+    # Cores secundárias (opcionais, com defaults inteligentes)
+    color_accent = models.CharField(
+        max_length=7, default="#A91B60",
+        help_text="Cor de acento/gradiente. Ex: #A91B60"
+    )
+    color_destructive = models.CharField(
+        max_length=7, default="#DC2626",
+        help_text="Cor de erro/alerta. Ex: #DC2626"
+    )
+    color_warning = models.CharField(
+        max_length=7, default="#F59E0B",
+        help_text="Cor de aviso. Ex: #F59E0B"
+    )
+    color_background = models.CharField(
+        max_length=7, default="#FFFFFF",
+        help_text="Cor de fundo geral. Ex: #FFFFFF"
+    )
+    color_card = models.CharField(
+        max_length=7, default="#FFFFFF",
+        help_text="Cor de fundo dos cards. Ex: #FFFFFF"
+    )
+    color_border = models.CharField(
+        max_length=7, default="#E5E7EB",
+        help_text="Cor das bordas. Ex: #E5E7EB"
+    )
+    
+    # Metadados
+    app_name = models.CharField(
+        max_length=100, default="Minha Amora",
+        help_text="Nome exibido no app"
+    )
+    logo_url = models.URLField(
+        blank=True, null=True,
+        help_text="URL do logotipo (opcional)"
+    )
+    
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Configuração de Tema"
+        verbose_name_plural = "Configuração de Tema"
+    
+    def __str__(self):
+        return f"Tema — {self.app_name}"
+    
+    def save(self, *args, **kwargs):
+        """Garante que só existe 1 registro (Singleton)."""
+        self.pk = 1
+        super().save(*args, **kwargs)
+    
+    @classmethod
+    def load(cls):
+        """Carrega ou cria a configuração padrão."""
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

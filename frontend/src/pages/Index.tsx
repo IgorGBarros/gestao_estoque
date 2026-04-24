@@ -13,6 +13,7 @@ import ProBadge from "../components/ProBadge";
 import UpgradeModal from "../components/UpgradeModal";
 import ProfileCompletionBanner from "../components/ProfileCompletionBanner";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
+
 interface Stats {
   investedValue: number;
   potentialValue: number;
@@ -25,7 +26,6 @@ export default function Index() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isLocked } = useFeatureGates();
-
   const [stats, setStats] = useState<Stats>({
     investedValue: 0,
     potentialValue: 0,
@@ -33,7 +33,6 @@ export default function Index() {
     monthSales: 0,
     monthProfit: 0,
   });
-
   const [loading, setLoading] = useState(true);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeCtx, setUpgradeCtx] = useState({ feature: "", description: "" });
@@ -42,7 +41,6 @@ export default function Index() {
 
   useEffect(() => {
     if (!user) return;
-
     profileApi
       .get()
       .then((p) => setStoreSlug(p.store_slug))
@@ -51,19 +49,13 @@ export default function Index() {
     Promise.all([inventoryApi.list(), movementsApi.list()])
       .then(([items, movements]) => {
         const now = new Date();
-
         const monthMovements = movements.filter((m) => {
           const d = new Date(m.created_at);
           return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
         }).map(m => {
           const rawType = (m.transaction_type || (m as any).movement_type || "").toUpperCase();
           const uiType = rawType === "ENTRADA" ? "entrada" : "saida";
-          return {
-            ...m,
-            raw_type: rawType,
-            ui_type: uiType,
-            profit: (m as any).profit ?? 0
-          };
+          return { ...m, raw_type: rawType, ui_type: uiType, profit: (m as any).profit ?? 0 };
         });
 
         const salesMovements = monthMovements.filter((m) => m.ui_type === "saida" && m.raw_type === "VENDA");
@@ -74,7 +66,6 @@ export default function Index() {
           const qty = i.total_quantity ?? i.quantity ?? 0;
           return s + (qty * i.cost_price);
         }, 0);
-
         const totalPotential = items.reduce((s, i) => {
           const qty = i.total_quantity ?? i.quantity ?? 0;
           const salePrice = i.sale_price || i.product?.official_price || 0;
@@ -88,7 +79,6 @@ export default function Index() {
           monthSales,
           monthProfit,
         });
-
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -98,27 +88,28 @@ export default function Index() {
 
   const statCards = [
     { label: "Valor Investido", value: fmt(stats.investedValue), icon: Package, color: "text-muted-foreground" },
-    { label: "Potencial de Venda", value: fmt(stats.potentialValue), icon: DollarSign, color: "text-primary" },
-    { label: "Lucro Estimado Geral", value: fmt(stats.projectedProfit), icon: BarChart3, color: "text-green-600" },
+    { label: "Potencial de Venda", value: fmt(stats.potentialValue), icon: DollarSign, color: "text-brand" },
+    { label: "Lucro Estimado Geral", value: fmt(stats.projectedProfit), icon: BarChart3, color: "text-success" },
     { label: "Vendas deste Mês", value: fmt(stats.monthSales), icon: TrendingDown, color: "text-foreground" },
-    { label: "Lucro Real do Mês", value: fmt(stats.monthProfit), icon: BarChart3, color: "text-emerald-600" },
+    { label: "Lucro Real do Mês", value: fmt(stats.monthProfit), icon: BarChart3, color: "text-success" },
   ];
 
   return (
     <div className="min-h-screen bg-background pb-20">
+      {/* ══ HEADER ══ */}
       <header className="sticky top-0 z-20 border-b border-border bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full overflow-hidden border-2 border-[#871745]/20 shadow-sm">
+            {/* ✅ border-brand/20 em vez de border-[#871745]/20 */}
+            <div className="h-10 w-10 rounded-full overflow-hidden border-2 border-brand/20 shadow-sm">
               <img
                 src={amorinhaAvatar}
                 alt="Minha Amora"
                 className="h-full w-full object-cover"
                 onError={(e) => {
-                  // Fallback se imagem não carregar
                   const parent = (e.target as HTMLImageElement).parentElement!;
                   parent.innerHTML = '';
-                  parent.className = "flex h-10 w-10 items-center justify-center rounded-full bg-[#871745] shadow-sm";
+                  parent.className = "flex h-10 w-10 items-center justify-center rounded-full bg-brand shadow-sm";
                   const icon = document.createElement('span');
                   icon.textContent = '🍇';
                   icon.className = 'text-lg';
@@ -131,6 +122,7 @@ export default function Index() {
               <p className="text-xs text-muted-foreground">Gestão inteligente de estoque</p>
             </div>
           </div>
+
           <div className="flex items-center gap-1 relative">
             <button
               onClick={() => setShowNotif(!showNotif)}
@@ -147,10 +139,12 @@ export default function Index() {
                   className="absolute right-0 top-12 mt-2 w-72 bg-card border border-border rounded-xl shadow-xl p-4 z-50"
                 >
                   <div className="flex items-start gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                    <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
                     <div>
                       <p className="text-sm font-bold text-foreground">Tudo tranquilo por aqui!</p>
-                      <p className="text-xs text-muted-foreground mt-1">Você não possui nenhum alerta de estoque baixo ou validade no momento.</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Você não possui nenhum alerta de estoque baixo ou validade no momento.
+                      </p>
                     </div>
                   </div>
                 </motion.div>
@@ -166,6 +160,7 @@ export default function Index() {
         </div>
       </header>
 
+      {/* ══ MAIN ══ */}
       <main className="mx-auto max-w-6xl px-6 py-8 space-y-6">
         <ProfileCompletionBanner />
 
@@ -186,19 +181,11 @@ export default function Index() {
 
         {/* BOTÕES DE AÇÃO */}
         <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          {/* ✅ Navega direto — AddProduct gerencia a sessão internamente */}
-          <ActionBtn
-            onClick={() => navigate("/add")}
-            icon={ScanBarcode}
-            label="Cadastrar"
-            desc="Escanear entrada"
-            primary
-          />
+          <ActionBtn onClick={() => navigate("/add")} icon={ScanBarcode} label="Cadastrar" desc="Escanear entrada" primary />
           <ActionBtn onClick={() => navigate("/withdraw")} icon={ArrowDownCircle} label="Baixa" desc="Registrar saída" />
           <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" />
           <ActionBtn onClick={() => navigate("/history")} icon={History} label="Extrato" desc="Movimentações" />
           <ActionBtn onClick={() => navigate("/dashboard")} icon={PieChart} label="Dashboard" desc="Gráficos e análises" proBadge={isLocked("dashboard_charts")} />
-
           <ActionBtn
             onClick={() => {
               if (isLocked("storefront")) {
@@ -216,28 +203,25 @@ export default function Index() {
             proBadge={isLocked("storefront")}
           />
         </div>
-            <div className="mt-10 text-center text-sm text-muted-foreground bg-[#FDF2F7] p-4 rounded-xl border border-[#871745]/10">
-              {!isLocked("chat_assistant") ? (
-                <div className="flex items-center justify-center gap-2">
-                  <div className="h-6 w-6 rounded-full overflow-hidden border border-[#871745]/20">
-                    <img
-                      src={amorinhaAvatar}
-                      alt="Amorinha"
-                      className="h-full w-full object-cover"
-                    />
-                  </div>
-                  <span>
-                    Converse com a <strong className="text-[#871745]">Amorinha</strong> no canto inferior direito 💜
-                  </span>
-                </div>
-              ) : (
-                <span>🔒 A Amorinha é uma funcionalidade exclusiva do plano PRO</span>
-              )}
+
+        {/* ✅ Banner Amorinha — bg-brand-soft em vez de bg-[#FDF2F7] */}
+        <div className="mt-10 text-center text-sm text-muted-foreground bg-brand-soft p-4 rounded-xl border border-brand/10">
+          {!isLocked("chat_assistant") ? (
+            <div className="flex items-center justify-center gap-2">
+              <div className="h-6 w-6 rounded-full overflow-hidden border border-brand/20">
+                <img src={amorinhaAvatar} alt="Amorinha" className="h-full w-full object-cover" />
+              </div>
+              <span>
+                Converse com a <strong className="text-brand">Amorinha</strong> no canto inferior direito 💜
+              </span>
             </div>
+          ) : (
+            <span>🔒 A Amorinha é uma funcionalidade exclusiva do plano PRO</span>
+          )}
+        </div>
       </main>
 
       {!isLocked("chat_assistant") && <ChatAssistant />}
-
       <UpgradeModal
         isOpen={showUpgrade}
         onClose={() => setShowUpgrade(false)}
@@ -248,6 +232,7 @@ export default function Index() {
   );
 }
 
+/* ══ ACTION BUTTON ══ */
 function ActionBtn({
   onClick,
   icon: Icon,
@@ -267,17 +252,20 @@ function ActionBtn({
     <button
       onClick={onClick}
       className={`flex items-center gap-3 rounded-xl p-4 text-left transition-all hover:scale-[1.02] hover:shadow-md ${
-       primary ? "border-2 border-[#871745] bg-gradient-to-br from-[#871745] to-[#A91B60] shadow-sm" : "border border-border bg-card hover:bg-secondary/50" }`}
+        primary
+          ? "border-2 border-brand bg-gradient-to-br from-brand to-brand-hover shadow-sm"
+          : "border border-border bg-card hover:bg-secondary/50"
+      }`}
     >
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${primary ? "bg-white/20" : "bg-primary/10"}`}>
-        <Icon className={`h-5 w-5 ${primary ? "text-primary-foreground" : "text-primary"}`} />
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${primary ? "bg-white/20" : "bg-brand/10"}`}>
+        <Icon className={`h-5 w-5 ${primary ? "text-white" : "text-brand"}`} />
       </div>
       <div className="min-w-0">
-        <p className={`text-sm font-bold flex items-center gap-1.5 ${primary ? "text-primary-foreground" : "text-foreground"}`}>
+        <p className={`text-sm font-bold flex items-center gap-1.5 ${primary ? "text-white" : "text-foreground"}`}>
           {label}
           {proBadge && <ProBadge />}
         </p>
-        <p className={`text-xs truncate mt-0.5 ${primary ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
+        <p className={`text-xs truncate mt-0.5 ${primary ? "text-white/80" : "text-muted-foreground"}`}>
           {desc}
         </p>
       </div>

@@ -802,3 +802,40 @@ export const sessionApi = {
     return response.data;
   }
 };
+
+// lib/api.ts (adicionar)
+
+export interface ThemeConfig {
+  color_primary: string;
+  color_primary_light: string;
+  color_success: string;
+  color_text: string;
+  color_accent: string;
+  color_destructive: string;
+  color_warning: string;
+  color_background: string;
+  color_card: string;
+  color_border: string;
+  app_name: string;
+  logo_url: string | null;
+  updated_at: string;
+}
+
+// Público — sem auth (para landing page e carregamento inicial)
+export const themeApi = {
+  get: async (): Promise<ThemeConfig> => {
+    const response = await fetch(`${API_BASE_URL}/api/public/theme/`);
+    if (!response.ok) throw new Error('Erro ao carregar tema');
+    return response.json();
+  },
+};
+
+// Admin — com auth
+export const adminThemeApi = {
+  get: () => apiRequest<ThemeConfig>('/admin/theme/'),
+  update: (data: Partial<ThemeConfig>) =>
+    apiRequest<ThemeConfig>('/admin/theme/', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+};

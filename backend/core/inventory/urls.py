@@ -85,7 +85,13 @@ urlpatterns = [
     path('admin/analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
 
     path('check-plan-limits/', check_plan_limits_complete, name='check-plan-limits'),
-    
+
+    # Endpoint público (sem auth)
+    path('public/theme/', ThemeConfigPublicView.as_view(), name='theme-public'),
+
+    # Endpoint admin (com auth)
+    path('admin/theme/', ThemeConfigAdminView.as_view(), name='theme-admin'),
+        
 
     # --- Rotas Automáticas (Router) ---
     path('', include(router.urls)),
