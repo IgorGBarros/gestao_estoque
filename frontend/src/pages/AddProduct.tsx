@@ -3,8 +3,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  ScanBarcode, Camera, Hash, DollarSign, ChevronRight, ChevronLeft,
-  Check, Loader2, X, Package, Search, Lock, ImageIcon, Clock, CreditCard, AlertTriangle
+  ScanBarcode, Camera, DollarSign, ChevronRight, ChevronLeft,
+  Check, Loader2, X, Package, Search, Lock, ImageIcon, Clock,
+  CreditCard, AlertTriangle, Crown, RotateCcw, Home
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import ProductSearchModal from "../components/ProductSearchModal";
@@ -25,8 +26,6 @@ const STEPS = [
   { id: "expiry", label: "Validade", icon: Camera },
   { id: "details", label: "Detalhes", icon: DollarSign },
   { id: "confirm", label: "Confirmar", icon: Check },
-
-  
 ];
 
 const CATEGORIES = [
@@ -53,15 +52,6 @@ interface EntryData {
   brand?: string;
 }
 
-interface SessionStatus {
-  has_session: boolean;
-  session_id?: number;
-  products_count?: number;
-  total_estimated_cost?: number;
-  duration_minutes?: number;
-}
-
-// ✅ NOVO: Interface para limites do plano
 interface PlanLimits {
   current_plan: string;
   current_count: number;
@@ -70,42 +60,36 @@ interface PlanLimits {
   remaining: number | null;
 }
 
-// ✅ NOVO: API de sessão
-const sessionApi = {
-  getStatus: async (): Promise<SessionStatus> => {
-    const response = await fetch('/api/session-control/', {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('token')}`,
-      }
-    });
-    return response.json();
-  },
-  
-  finish: async () => {
-    const response = await fetch('/api/session-control/', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`,
-      },
-      body: JSON.stringify({ action: 'finish' })
-    });
-    return response.json();
-  },
-  
-  confirmInvestment: async (sessionId: number, data: any) => {
-    const response = await fetch('/api/session-summary/', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('token')}`,
-      },
-      body: JSON.stringify({ session_id: sessionId, ...data })
-    });
-    return response.json();
-  }
-};
+interface SessionStatus {
+  has_session: boolean;
+  session_id?: number;
+  products_count?: number;
+  total_estimated_cost?: number;
+  duration_minutes?: number;
+}
 
+// ══════════════════════════════════════════
+// FACTORY
+// ══════════════════════════════════════════
+const createEmptyEntry = (): EntryData => ({
+  bar_code: "",
+  name: "",
+  category: "Perfumaria",
+  natura_sku: "",
+  image_url: "",
+  official_price: 0,
+  sale_price: 0,
+  cost_price: 0,
+  quantity: 1,
+  batch_code: "",
+  expiry_date: "",
+  expiry_photo_url: "",
+  brand: "",
+});
+
+// ══════════════════════════════════════════
+// COMPONENTE PRINCIPAL
+// ══════════════════════════════════════════
 export default function AddProduct() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -128,64 +112,54 @@ export default function AddProduct() {
 
   // Sessão
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({ has_session: false });
+  const [showContinueModal, setShowContinueModal] = useState(false);
+
+  // Limites do plano
+  const [planLimits, setPlanLimits] = useState<PlanLimits | null>(null);
+  const [limitsLoading, setLimitsLoading] = useState(false);
+
+  // Resumo da sessão
   const [showSessionSummary, setShowSessionSummary] = useState(false);
   const [sessionSummaryData, setSessionSummaryData] = useState<any>(null);
   const [showInvestmentModal, setShowInvestmentModal] = useState(false);
-  
-  // ✅ NOVOS ESTADOS: Controle de limites
-  const [planLimits, setPlanLimits] = useState<PlanLimits | null>(null);
-  const [limitsLoading, setLimitsLoading] = useState(false);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [data, setData] = useState<EntryData>({
-    bar_code: "", name: "", category: "Perfumaria", natura_sku: "",
-    image_url: "", official_price: 0, sale_price: 0, cost_price: 0,
-    quantity: 1, batch_code: "", expiry_date: "", expiry_photo_url: "", brand: "",
-  });
 
-  // ✅ NOVO: Função para verificar limites
-  const checkPlanLimits = async (): Promise<boolean> => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // ══════════════════════════════════════════
+  // API HELPERS
+  // ══════════════════════════════════════════
+  const API_BASE = (
+    (import.meta as any).env?.VITE_API_BASE_URL ||
+    "https://gestao-estoque-k5vy.onrender.com"
+  ).replace(/\/$/, "");
+
+  const checkPlanLimits = useCallback(async (): Promise<boolean> => {
     setLimitsLoading(true);
     try {
-      const response = await fetch('/api/check-plan-limits/', {
+      const response = await fetch(`${API_BASE}/api/check-plan-limits/`, {
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        }
+          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+          "Content-Type": "application/json",
+        },
       });
-      
       const limits = await response.json();
       setPlanLimits(limits);
-      
-      // Se não pode adicionar produtos, mostrar modal de upgrade
       if (!limits.can_add_products) {
         setUpgradeFeature({
           feature: "Limite de Produtos Atingido",
-          description: `Você atingiu o limite de ${limits.limit} produtos do plano ${limits.current_plan.toUpperCase()}. Faça upgrade para continuar cadastrando produtos.`
+          description: `Você atingiu o limite de ${limits.limit} produtos do plano ${limits.current_plan.toUpperCase()}.`,
         });
         setShowUpgrade(true);
         return false;
       }
-      
       return true;
     } catch (error) {
-      console.error('Erro ao verificar limites:', error);
-      toast({
-        title: "Erro",
-        description: "Falha ao verificar limites do plano.",
-        variant: "destructive"
-      });
-      return false;
+      console.error("Erro ao verificar limites:", error);
+      return true;
     } finally {
       setLimitsLoading(false);
     }
-  };
-
-  // ✅ NOVO: Verificar status da sessão e limites ao carregar
-  useEffect(() => {
-    checkSessionStatus();
-    checkPlanLimits();
-  }, []);
+  }, [API_BASE]);
 
   const checkSessionStatus = useCallback(async () => {
     try {
@@ -245,7 +219,7 @@ export default function AddProduct() {
     setShowUpgrade(true);
   };
 
-  const handleScannerClick = () => {
+  const handleScannerClick = async () => {
     if (isLocked("barcode_scanner")) {
       triggerProGate(
         "Scanner de Código de Barras",
@@ -253,87 +227,58 @@ export default function AddProduct() {
       );
       return;
     }
-    
-    // ✅ NOVO: Verificar limites antes de abrir scanner
     const canAdd = await checkPlanLimits();
-    if (!canAdd) {
-      return;
-    }
-    
+    if (!canAdd) return;
     setShowScanner(true);
   };
 
-  // ✅ CORRIGIR handleLookup - remover campo inexistente
-const handleLookup = async (barcode: string) => {
-  if (!barcode.trim()) return;
-  setLookupLoading(true);
-  
-  try {
-    const result = await productService.lookupByEan(barcode);
-    
-    if (result.found) {
-      // ✅ NOVO: Assumir que é produto novo se não há dados específicos
-      // (API não retorna existing_in_store, então validamos sempre)
-      const canAdd = await checkPlanLimits();
-      if (!canAdd) {
-        return;
+  const handleLookup = async (barcode: string) => {
+    if (!barcode.trim()) return;
+    setLookupLoading(true);
+    try {
+      const result = await productService.lookupByEan(barcode);
+      if (result.found) {
+        const canAdd = await checkPlanLimits();
+        if (!canAdd) return;
+        const resData = result.data as any;
+        const remote = resData.remote || resData;
+        setData((prev) => ({
+          ...prev,
+          bar_code: barcode,
+          name: remote?.name || resData?.name || prev.name,
+          sale_price: remote?.sale_price || resData?.sale_price || prev.sale_price,
+          cost_price: prev.cost_price,
+          natura_sku: remote?.natura_sku || resData?.natura_sku || prev.natura_sku,
+          image_url: remote?.image_url || resData?.image_url || prev.image_url,
+          category: remote?.category || resData?.category || prev.category,
+          official_price: remote?.official_price || resData?.official_price || 0,
+          brand: remote?.brand || resData?.brand || prev.brand || "",
+        }));
+        toast({ title: "Produto Identificado!", description: "Dados carregados com sucesso." });
+      } else {
+        const canAdd = await checkPlanLimits();
+        if (!canAdd) return;
+        toast({ title: "Novo Código", description: "Preencha os dados no próximo passo." });
       }
-      
-      const resData = result.data as any;
-      const remote = resData.remote || resData;
-      setData(prev => ({
-        ...prev,
-        bar_code: barcode,
-        name: remote?.name || resData?.name || prev.name,
-        sale_price: remote?.sale_price || resData?.sale_price || prev.sale_price,
-        cost_price: prev.cost_price,
-        natura_sku: remote?.natura_sku || resData?.natura_sku || prev.natura_sku,
-        image_url: remote?.image_url || resData?.image_url || prev.image_url,
-        category: remote?.category || resData?.category || prev.category,
-        official_price: remote?.official_price || resData?.official_price || 0,
-        brand: remote?.brand || resData?.brand || prev.brand || ""
-      }));
-      
-      toast({ title: "Produto Identificado!", description: "Dados carregados com sucesso." });
-    } else {
-      // ✅ PRODUTO NOVO: Sempre verificar limites
-      const canAdd = await checkPlanLimits();
-      if (!canAdd) {
-        return;
-      }
-      
-      toast({ title: "Novo Código", description: "Preencha os dados no próximo passo." });
+    } catch {
+      toast({ title: "Aviso", description: "Falha na busca remota. Preencha manualmente." });
+    } finally {
+      setLookupLoading(false);
     }
-  } catch {
-    toast({ title: "Aviso", description: "Falha na busca remota. Preencha manualmente." });
-  } finally {
-    setLookupLoading(false);
-  }
-};
+  };
 
-  // ✅ MODIFICADO: handleBarcodeScan com verificação de limites
   const handleBarcodeScan = async (barcode: string) => {
     setShowScanner(false);
-    setData(prev => ({ ...prev, bar_code: barcode }));
-    
-    // ✅ VERIFICAR LIMITES antes de fazer lookup
+    setData((prev) => ({ ...prev, bar_code: barcode }));
     const canAdd = await checkPlanLimits();
-    if (!canAdd) {
-      return;
-    }
-    
+    if (!canAdd) return;
     await handleLookup(barcode);
     setStep(1);
   };
 
-  // ✅ MODIFICADO: selectSuggestion com verificação de limites
   const selectSuggestion = async (product: any) => {
-    // ✅ VERIFICAR LIMITES antes de selecionar
     const canAdd = await checkPlanLimits();
-    if (!canAdd) {
-      return;
-    }
-    
+    if (!canAdd) return;
     setData((prev) => ({
       ...prev,
       bar_code: product.bar_code || product.barcode || prev.bar_code,
@@ -345,7 +290,6 @@ const handleLookup = async (barcode: string) => {
       sale_price: product.official_price || prev.sale_price,
       brand: product.brand || prev.brand || "",
     }));
-    
     setIsSearchOpen(false);
     setStep(1);
   };
@@ -370,14 +314,15 @@ const handleLookup = async (barcode: string) => {
     }
   };
 
+  // ══════════════════════════════════════════
+  // SAVE + CONTINUE FLOW
+  // ══════════════════════════════════════════
   const handleSave = async () => {
     if (!data.bar_code?.trim()) {
       toast({ title: "Código obrigatório", description: "Digite ou escaneie o EAN.", variant: "destructive" });
       return;
     }
-    
     try {
-      // ✅ CORREÇÃO: Construir payload dinamicamente
       const payload: any = {
         bar_code: data.bar_code.trim(),
         name: data.name || "Produto sem nome",
@@ -390,24 +335,57 @@ const handleLookup = async (barcode: string) => {
         sale_price: data.sale_price,
         batch_code: data.batch_code,
       };
-      
-      // ✅ ADICIONAR brand apenas se existir e não for vazio
       if (data.brand && data.brand.trim() !== "") {
         payload.brand = data.brand.trim();
       }
-      
       await saveEntry(payload);
-      
-      // ✅ NOVO: Atualizar limites após salvar
-      await checkPlanLimits();
-      
+      await Promise.all([checkPlanLimits(), checkSessionStatus()]);
       setIsSuccess(true);
       setTimeout(() => {
-        navigate("/");
-      }, 2000);
+        setIsSuccess(false);
+        setShowContinueModal(true);
+      }, 1500);
     } catch (error) {
-      console.error('Erro ao salvar:', error);
-      // O Toast de erro já vem do useStockEntry
+      console.error("Erro ao salvar:", error);
+    }
+  };
+
+  const handleContinueRegistering = () => {
+    setShowContinueModal(false);
+    setData(createEmptyEntry());
+    setStep(0);
+    setIsSuccess(false);
+  };
+
+  const handleFinishRegistering = async () => {
+    setShowContinueModal(false);
+    const hasSummary = await finishSession();
+    if (!hasSummary) {
+      navigate("/");
+    }
+  };
+
+  const confirmInvestment = async (paymentData: any) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/session-summary/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("auth_token")}`,
+        },
+        body: JSON.stringify({
+          session_id: sessionSummaryData.session_id,
+          ...paymentData,
+        }),
+      });
+      if (!response.ok) throw new Error("Falha ao registrar investimento");
+      setShowInvestmentModal(false);
+      setShowSessionSummary(false);
+      toast({ title: "Sucesso!", description: "Investimento registrado com sucesso." });
+      navigate("/");
+    } catch (error) {
+      console.error("Erro ao confirmar investimento:", error);
+      toast({ title: "Erro", description: "Falha ao registrar investimento.", variant: "destructive" });
     }
   };
 
@@ -418,62 +396,44 @@ const handleLookup = async (barcode: string) => {
     return true;
   };
 
-  return (
-    <div className="min-h-screen bg-background">
-      {/* ✅ NOVO: Header com informações dos limites */}
-      {planLimits && (
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className={`px-4 py-2 flex items-center justify-between text-sm border-b ${
-            planLimits.can_add_products 
-              ? 'bg-green-50 text-green-800 border-green-200' 
-              : 'bg-red-50 text-red-800 border-red-200'
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <Package size={14} />
-            <span className="font-medium">
-              {planLimits.current_count}/{planLimits.limit || '∞'} produtos
-            </span>
-            <span className="text-xs opacity-75">
-              ({planLimits.current_plan.toUpperCase()})
-            </span>
-          </div>
-          
-          {!planLimits.can_add_products ? (
-            <button 
-              onClick={() => {
-                setUpgradeFeature({
-                  feature: "Upgrade Necessário",
-                  description: `Limite de ${planLimits.limit} produtos atingido no plano ${planLimits.current_plan.toUpperCase()}.`
-                });
-                setShowUpgrade(true);
-              }}
-              className="text-xs bg-red-600 text-white px-2 py-1 rounded font-medium hover:bg-red-700 transition-colors flex items-center gap-1"
-            >
-              <AlertTriangle size={12} />
-              Fazer Upgrade
-            </button>
-          ) : planLimits.remaining !== null && planLimits.remaining <= 5 ? (
-            <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded font-medium">
-              {planLimits.remaining} restantes
-            </span>
-          ) : null}
-        </motion.div>
-      )}
+  // ══════════════════════════════════════════
+  // COMPONENTE INLINE: Contador de Produtos
+  // ══════════════════════════════════════════
+  const ProductCounter = () => {
+    if (!planLimits && !limitsLoading) return null;
+    const isNearLimit =
+      planLimits?.remaining !== null &&
+      planLimits?.remaining !== undefined &&
+      planLimits.remaining <= 5;
+    const isAtLimit = planLimits?.can_add_products === false;
+    const isPro = planLimits?.current_plan === "pro";
 
-      {/* ✅ NOVO: Header com status da sessão */}
-      {sessionStatus.has_session && (
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-blue-600 text-white px-4 py-2 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-3">
-            <Package size={16} />
-            <span className="text-sm font-medium">
-              Cadastrando... {sessionStatus.products_count} produtos
+    return (
+      <div className="flex items-center justify-between mb-2">
+        <label className="text-sm font-medium text-foreground">Código de Barras (EAN) *</label>
+        <div className="flex items-center gap-1.5">
+          {limitsLoading ? (
+            <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
+              <Loader2 size={10} className="animate-spin" />
+              ...
+            </span>
+          ) : planLimits ? (
+            <span
+              className={`text-xs font-bold px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                isAtLimit
+                  ? "bg-destructive/10 text-destructive"
+                  : isNearLimit
+                  ? "bg-amber-100 text-amber-700"
+                  : "bg-success/10 text-success"
+              }`}
+            >
+              <Package size={10} />
+              {planLimits.current_count}/{planLimits.limit || "∞"} produtos
+              {isPro && (
+                <span className="ml-1 text-[9px] bg-amber-100 text-amber-700 px-1 rounded font-bold">
+                  PRO
+                </span>
+              )}
             </span>
           ) : null}
         </div>
@@ -576,28 +536,71 @@ const handleLookup = async (barcode: string) => {
                       onChange={(e) => setData((p) => ({ ...p, bar_code: e.target.value }))}
                       onBlur={(e) => handleLookup(e.target.value)}
                       placeholder="Escaneie ou digite..."
-                      className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary"
-                      disabled={limitsLoading}
+                      className="w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:border-brand"
+                      disabled={limitsLoading || planLimits?.can_add_products === false}
                     />
                     {(lookupLoading || limitsLoading) && (
-                      <p className="text-xs text-primary mt-1 animate-pulse flex items-center gap-1">
+                      <p className="text-xs text-brand mt-1 animate-pulse flex items-center gap-1">
                         <Loader2 size={12} className="animate-spin" />
                         {limitsLoading ? "Verificando limites..." : "Buscando informações..."}
                       </p>
                     )}
+
+                    {/* Alerta de limite atingido */}
+                    {planLimits && !planLimits.can_add_products && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -5 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="mt-2 p-3 bg-destructive/5 border border-destructive/20 rounded-lg"
+                      >
+                        <div className="flex items-center gap-2 text-destructive">
+                          <AlertTriangle size={14} />
+                          <span className="text-xs font-bold">
+                            Limite de {planLimits.limit} produtos atingido
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setUpgradeFeature({
+                              feature: "Upgrade Necessário",
+                              description: `Limite de ${planLimits.limit} produtos atingido no plano ${planLimits.current_plan.toUpperCase()}.`,
+                            });
+                            setShowUpgrade(true);
+                          }}
+                          className="mt-2 w-full text-xs bg-destructive text-white px-3 py-1.5 rounded-lg font-bold hover:bg-destructive/90 flex items-center justify-center gap-1"
+                        >
+                          <Crown size={12} />
+                          Fazer Upgrade para PRO
+                        </button>
+                      </motion.div>
+                    )}
                   </div>
+
+                  {/* Separador */}
                   <div className="flex items-center gap-3">
                     <div className="h-px flex-1 bg-border" />
                     <span className="text-xs text-muted-foreground">OU</span>
                     <div className="h-px flex-1 bg-border" />
                   </div>
-                  <button 
-                    onClick={handleScannerClick} 
-                    disabled={limitsLoading}
-                    className={`w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all ${isLocked("barcode_scanner") || limitsLoading ? "opacity-80" : ""}`}
+
+                  {/* Botão Scanner */}
+                  <button
+                    onClick={handleScannerClick}
+                    disabled={limitsLoading || planLimits?.can_add_products === false}
+                    className={`w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all ${
+                      isLocked("barcode_scanner") || limitsLoading || planLimits?.can_add_products === false
+                        ? "opacity-80"
+                        : ""
+                    }`}
                   >
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${!isLocked("barcode_scanner") && !limitsLoading ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                      <div
+                        className={`p-2 rounded-lg ${
+                          !isLocked("barcode_scanner") && !limitsLoading
+                            ? "bg-brand/10 text-brand"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
                         {limitsLoading ? (
                           <Loader2 size={20} className="animate-spin" />
                         ) : !isLocked("barcode_scanner") ? (
@@ -614,13 +617,15 @@ const handleLookup = async (barcode: string) => {
                     </div>
                     <ChevronRight className="text-muted-foreground/30 group-hover:text-brand transition-colors" />
                   </button>
-                  <button 
-                    onClick={() => setIsSearchOpen(true)} 
-                    disabled={limitsLoading}
+
+                  {/* Botão Busca por Nome */}
+                  <button
+                    onClick={() => setIsSearchOpen(true)}
+                    disabled={limitsLoading || planLimits?.can_add_products === false}
                     className="w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="p-2 bg-primary/10 text-primary rounded-lg">
+                      <div className="p-2 bg-brand/10 text-brand rounded-lg">
                         <Search size={20} />
                       </div>
                       <div>
@@ -713,8 +718,9 @@ const handleLookup = async (barcode: string) => {
               </div>
             </motion.div>
           )}
-
-          {/* STEP 2: DETALHES GERAIS */}
+            {/* ════════════════════════════════
+              STEP 2: DETALHES
+              ════════════════════════════════ */}
           {step === 2 && (
             <motion.div
               key="details"
