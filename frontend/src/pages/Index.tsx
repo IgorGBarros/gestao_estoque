@@ -254,7 +254,7 @@ function ActionBtn({
       className={`flex items-center gap-3 rounded-xl p-4 text-left transition-all hover:scale-[1.02] hover:shadow-md ${
         primary
           ? "border-2 border-brand bg-gradient-to-br from-brand to-brand-hover shadow-sm"
-          : "border border-border bg-card hover:bg-secondary/50"
+          : "border border-border bg-card hoverbg-brand-soft"
       }`}
     >
       <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${primary ? "bg-white/20" : "bg-brand/10"}`}>
