@@ -1,5 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+
+from .admin_views import get_store_behavior_analytics, get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription,get_product_analytics
 from .views import (
     CustomUserCreateView,
     FirebaseLoginView,
@@ -7,10 +9,11 @@ from .views import (
     InventoryViewSet,
     SessionControlView,
     SessionSummaryView,
-    ThemeConfigAdminView,
-    ThemeConfigPublicView,
     apply_fifo_withdrawal,
     associate_user_store,
+    cash_flow_detailed,
+    cash_flow_summary,
+    check_plan_limits_complete,
     debug_user_store,
     feature_gates_view,
     inventory_item_batches_view, 
@@ -20,9 +23,7 @@ from .views import (
     CustomTokenObtainPairView,
     StockTransactionViewSet,
     profile_view,
-    AdminUserListView,
-    AdminUpdatePlanView,
-    AdminUpdateSubscriptionView,
+
     public_storefront,
     public_storefront_view,
     dashboard_overview,
@@ -52,9 +53,7 @@ urlpatterns = [
     path('auth/register/', CustomUserCreateView.as_view(), name='register'), 
     path('auth/firebase/', FirebaseLoginView.as_view(), name='firebase_login'),
 
-    path('admin/users/', AdminUserListView.as_view(), name='admin-users-list'),
-    path('admin/users/<int:pk>/plan/', AdminUpdatePlanView.as_view(), name='admin-update-plan'),
-    path('admin/users/<int:pk>/subscription/', AdminUpdateSubscriptionView.as_view(), name='admin-update-sub'),
+
 
     path('session-control/', SessionControlView.as_view(), name='session-control'),
     path('session-summary/', SessionSummaryView.as_view(), name='session-summary'),
@@ -86,7 +85,13 @@ urlpatterns = [
     path('admin/analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
 
     path('check-plan-limits/', check_plan_limits_complete, name='check-plan-limits'),
-    
+
+    # Endpoint público (sem auth)
+    path('public/theme/', ThemeConfigPublicView.as_view(), name='theme-public'),
+
+    # Endpoint admin (com auth)
+    path('admin/theme/', ThemeConfigAdminView.as_view(), name='theme-admin'),
+        
 
     # --- Rotas Automáticas (Router) ---
     path('', include(router.urls)),
