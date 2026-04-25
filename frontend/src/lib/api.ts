@@ -370,6 +370,7 @@ export const fifoApi = {
 
 // ── Batches ──
 export interface InventoryBatch {
+  expiry_date(expiry_date: any): import("react").ReactNode;
   id: string; // ✅ CORREÇÃO: Mudar de number para string
   quantity: number;
   cost_price: number;
