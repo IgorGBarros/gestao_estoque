@@ -9,6 +9,8 @@ from .views import (
     InventoryViewSet,
     SessionControlView,
     SessionSummaryView,
+    ThemeConfigAdminView,
+    ThemeConfigPublicView,
     apply_fifo_withdrawal,
     associate_user_store,
     cash_flow_detailed,

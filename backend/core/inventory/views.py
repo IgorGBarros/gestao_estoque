@@ -20,8 +20,8 @@ from django.contrib.auth import get_user_model
 
 from rest_framework_simplejwt.views import TokenObtainPairView,TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import CustomTokenObtainPairSerializer, CustomUserSerializer, ProfileSerializer
-from .models import CustomUser, RegistrationSession
+from .serializers import CustomTokenObtainPairSerializer, CustomUserSerializer, ProfileSerializer, ThemeConfigSerializer
+from .models import CustomUser, RegistrationSession, ThemeConfig
 
 
 # Imports do seu Projeto
