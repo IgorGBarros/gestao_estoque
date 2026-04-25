@@ -1,21 +1,26 @@
-# Dependências
-node_modules/
-venv/
-__pycache__/
-*.pyc
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# Ambiente
-.env
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-
-# Mobile/Expo
-.expo/
-*.jks
-*.p12
-*.key
-android/app/build
-ios/Pods
-*.sqlite
-*.db   
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 *.sql
-downloaded_files/
+*.sqlite

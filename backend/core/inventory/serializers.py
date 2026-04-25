@@ -9,7 +9,7 @@ from decimal import Decimal
 # Importa seus modelos de negócio
 from .models import (
     CustomUser, Product, InventoryItem, InventoryBatch, Store, 
-    Sale, SaleItem, StockTransaction, PlanConfig, Promotion
+    Sale, SaleItem, StockTransaction, PlanConfig, Promotion, ThemeConfig
 )
 
 User = get_user_model()
