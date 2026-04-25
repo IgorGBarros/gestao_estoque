@@ -1,3 +1,4 @@
+// components/UpgradeModal.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
 import { motion, AnimatePresence } from "framer-motion";
 import { Lock, Zap, X, ScanBarcode, Camera, Store, MessageCircle, BarChart3, Package } from "lucide-react";
 
@@ -32,12 +33,15 @@ export default function UpgradeModal({ isOpen, onClose, feature, description }: 
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            className="w-full max-w-md rounded-2xl bg-card border border-border overflow-hidden"
+            className="w-full max-w-md rounded-2xl bg-card border border-brand/15 overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header gradient */}
-            <div className="relative bg-gradient-to-br from-primary to-accent px-6 py-8 text-center">
-              <button onClick={onClose} className="absolute right-3 top-3 rounded-full bg-white/20 p-1.5 text-white hover:bg-white/30">
+            <div className="relative bg-gradient-to-br from-brand to-brand-hover px-6 py-8 text-center">
+              <button
+                onClick={onClose}
+                className="absolute right-3 top-3 rounded-full bg-white/20 p-1.5 text-white hover:bg-white/30"
+              >
                 <X className="h-4 w-4" />
               </button>
               <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20">
@@ -53,11 +57,16 @@ export default function UpgradeModal({ isOpen, onClose, feature, description }: 
 
             {/* Features */}
             <div className="px-6 py-5 space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Tudo do PRO:</p>
+              <p className="text-xs font-semibold text-brand-rose/60 uppercase tracking-wider">
+                Tudo do PRO:
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 {PRO_FEATURES.map((f) => (
-                  <div key={f.label} className="flex items-center gap-2 rounded-lg bg-secondary/50 px-3 py-2">
-                    <f.icon className="h-4 w-4 text-primary shrink-0" />
+                  <div
+                    key={f.label}
+                    className="flex items-center gap-2 rounded-lg bg-brand-soft px-3 py-2 border border-brand-peach/30"
+                  >
+                    <f.icon className="h-4 w-4 text-brand shrink-0" />
                     <span className="text-xs font-medium text-foreground">{f.label}</span>
                   </div>
                 ))}
@@ -68,16 +77,21 @@ export default function UpgradeModal({ isOpen, onClose, feature, description }: 
             <div className="px-6 pb-6 space-y-3">
               <button
                 onClick={() => {
-                  // TODO: integrate with payment
-                  window.open("https://wa.me/5511999999999?text=Quero%20assinar%20o%20PRO!", "_blank");
+                  window.open(
+                    "https://wa.me/5571999772054?text=Quero%20assinar%20o%20PRO!",
+                    "_blank"
+                  );
                   onClose();
                 }}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3.5 text-sm font-bold text-primary-foreground shadow-lg hover:opacity-90 transition-opacity"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3.5 text-sm font-bold text-white shadow-lg shadow-brand/25 hover:opacity-90 transition-opacity"
               >
                 <Zap className="h-4 w-4" />
-                Assinar PRO — R$ 19,90/mês
+                Assinar PRO — R$ 39,90/mês
               </button>
-              <button onClick={onClose} className="w-full text-center text-xs text-muted-foreground hover:text-foreground">
+              <button
+                onClick={onClose}
+                className="w-full text-center text-xs text-brand-rose/60 hover:text-foreground transition-colors"
+              >
                 Continuar no plano gratuito
               </button>
             </div>

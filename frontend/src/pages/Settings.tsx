@@ -1,6 +1,9 @@
+// pages/Settings.tsx — VERSÃO REFATORADA COM TEMA DINÂMICO
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Save, Loader2, LogOut, Sun, Moon, Monitor, Bell, Download } from "lucide-react";
+import {
+  ArrowLeft, Save, Loader2, LogOut, Sun, Moon, Monitor, Bell, Download,
+} from "lucide-react";
 import { inventoryApi, movementsApi, InventoryItem, Movement } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
@@ -11,18 +14,18 @@ export default function Settings() {
   const { signOut } = useAuth();
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
-  
+
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
-  
+
   const [expiryDays, setExpiryDays] = useState(() => {
     return parseInt(localStorage.getItem("expiry_alert_days") || "30", 10);
   });
-  
+
   const [expiryEnabled, setExpiryEnabled] = useState(() => {
     return localStorage.getItem("expiry_alert_enabled") !== "false";
   });
-  
+
   const [notifPrefs, setNotifPrefs] = useState(() => ({
     sales_milestones: localStorage.getItem("notif_sales_milestones") !== "false",
     weekly_insights: localStorage.getItem("notif_weekly_insights") !== "false",
@@ -44,13 +47,9 @@ export default function Settings() {
 
   const handleSave = async () => {
     setSaving(true);
-    
-    // Como os dados são puramente locais (navegador), não precisamos bater no backend!
-    // Usamos um pequeno timeout apenas para dar um feedback visual (UX) de "Salvando..."
     setTimeout(() => {
       localStorage.setItem("expiry_alert_days", String(expiryDays));
       localStorage.setItem("expiry_alert_enabled", String(expiryEnabled));
-      
       toast({ title: "Configurações do sistema salvas!" });
       setSaving(false);
     }, 500);
@@ -67,28 +66,52 @@ export default function Settings() {
     try {
       if (type === "inventory") {
         const items = await inventoryApi.list();
-        const header = "Nome,Código de Barras,Categoria,Quantidade,Preço Custo,Preço Venda,Validade\n";
-        const rows = items.map((i: InventoryItem) =>
-          `"${i.product?.name || i.product_name}","${i.product?.bar_code || i.barcode}","${i.product?.category || i.category}",${i.total_quantity || i.quantity},${i.cost_price},${i.sale_price || ""},${i.expiry_date || ""}`
-        ).join("\n");
+        const header =
+          "Nome,Código de Barras,Categoria,Quantidade,Preço Custo,Preço Venda,Validade\n";
+        const rows = items
+          .map(
+            (i: InventoryItem) =>
+              `"${i.product?.name || i.product_name}","${
+                i.product?.bar_code || i.barcode
+              }","${i.product?.category || i.category}",${
+                i.total_quantity || i.quantity
+              },${i.cost_price},${i.sale_price || ""},${i.expiry_date || ""}`
+          )
+          .join("\n");
         downloadFile(header + rows, "estoque.csv");
       } else {
         const items = await movementsApi.list();
-        const header = "Data,Produto,Código,Tipo,Quantidade,Preço Unit.,Tipo Saída,Observações\n";
-        const rows = items.map((m: Movement) =>
-          `"${new Date(m.created_at).toLocaleDateString("pt-BR")}","${m.product_name}","${m.barcode}","${m.movement_type}",${m.quantity},${m.unit_price || ""},"${m.sale_type || ""}","${m.notes || ""}"`
-        ).join("\n");
+        const header =
+          "Data,Produto,Código,Tipo,Quantidade,Preço Unit.,Tipo Saída,Observações\n";
+        const rows = items
+          .map(
+            (m: Movement) =>
+              `"${new Date(m.created_at).toLocaleDateString("pt-BR")}","${
+                m.product_name
+              }","${(m as any).barcode}","${(m as any).movement_type}",${
+                m.quantity
+              },${m.unit_price || ""},"${(m as any).sale_type || ""}","${
+                (m as any).notes || ""
+              }"`
+          )
+          .join("\n");
         downloadFile(header + rows, "movimentacoes.csv");
       }
       toast({ title: "Exportado com sucesso!" });
     } catch (err: any) {
-      toast({ title: "Erro ao exportar", description: err.message, variant: "destructive" });
+      toast({
+        title: "Erro ao exportar",
+        description: err.message,
+        variant: "destructive",
+      });
     }
     setExporting(false);
   };
 
   const downloadFile = (content: string, filename: string) => {
-    const blob = new Blob(["\uFEFF" + content], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["\uFEFF" + content], {
+      type: "text/csv;charset=utf-8;",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -105,18 +128,30 @@ export default function Settings() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* ══════════════════════════════════════════
+          HEADER
+          ══════════════════════════════════════════ */}
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-lg items-center gap-3 px-6 py-4">
-          <button onClick={() => navigate("/")} className="rounded-lg p-2 text-muted-foreground hover:text-foreground"><ArrowLeft className="h-5 w-5" /></button>
-          <h1 className="font-display text-lg font-bold text-foreground">Configurações do Sistema</h1>
+          <button
+            onClick={() => navigate("/")}
+            className="rounded-lg p-2 text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <h1 className="font-display text-lg font-bold text-foreground">
+            Configurações do Sistema
+          </h1>
         </div>
       </header>
-      <main className="mx-auto max-w-lg px-6 py-6 space-y-5">
 
-        {/* Tema */}
+      <main className="mx-auto max-w-lg px-6 py-6 space-y-5">
+        {/* ══════════════════════════════════════════
+            TEMA / APARÊNCIA
+            ══════════════════════════════════════════ */}
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">
           <h2 className="font-display text-sm font-semibold text-foreground flex items-center gap-2">
-            <Sun className="h-4 w-4 text-accent" /> Aparência
+            <Sun className="h-4 w-4 text-brand" /> Aparência
           </h2>
           <div className="grid grid-cols-3 gap-2">
             {themeOptions.map((opt) => (
@@ -125,46 +160,85 @@ export default function Settings() {
                 onClick={() => setTheme(opt.value)}
                 className={`flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all ${
                   theme === opt.value
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/30"
+                    ? "border-brand bg-brand/5"
+                    : "border-border hover:border-brand/30"
                 }`}
               >
-                <opt.icon className={`h-5 w-5 ${theme === opt.value ? "text-primary" : "text-muted-foreground"}`} />
-                <span className="text-xs font-medium text-foreground">{opt.label}</span>
+                <opt.icon
+                  className={`h-5 w-5 ${
+                    theme === opt.value ? "text-brand" : "text-muted-foreground"
+                  }`}
+                />
+                <span className="text-xs font-medium text-foreground">
+                  {opt.label}
+                </span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Notificações */}
+        {/* ══════════════════════════════════════════
+            ALERTAS E NOTIFICAÇÕES
+            ══════════════════════════════════════════ */}
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">
           <h2 className="font-display text-sm font-semibold text-foreground flex items-center gap-2">
-            <Bell className="h-4 w-4 text-accent" /> Alertas e Notificações
+            <Bell className="h-4 w-4 text-brand" /> Alertas e Notificações
           </h2>
-          <p className="text-xs text-muted-foreground">Escolha quais notificações visuais deseja ativar no aplicativo.</p>
+          <p className="text-xs text-muted-foreground">
+            Escolha quais notificações visuais deseja ativar no aplicativo.
+          </p>
           {[
-            { key: "sales_milestones" as const, label: "Metas de Vendas", desc: "Aviso ao atingir metas de faturamento (R$500, R$1.000, etc.)" },
-            { key: "weekly_insights" as const, label: "Resumo Semanal", desc: "Produtos mais vendidos da semana" },
-            { key: "low_stock" as const, label: "Estoque Baixo", desc: "Alerta quando produtos atingem quantidade mínima" },
-            { key: "expiry_alerts" as const, label: "Validade Próxima", desc: "Destaque produtos próximos do vencimento" },
+            {
+              key: "sales_milestones" as const,
+              label: "Metas de Vendas",
+              desc: "Aviso ao atingir metas de faturamento (R$500, R$1.000, etc.)",
+            },
+            {
+              key: "weekly_insights" as const,
+              label: "Resumo Semanal",
+              desc: "Produtos mais vendidos da semana",
+            },
+            {
+              key: "low_stock" as const,
+              label: "Estoque Baixo",
+              desc: "Alerta quando produtos atingem quantidade mínima",
+            },
+            {
+              key: "expiry_alerts" as const,
+              label: "Validade Próxima",
+              desc: "Destaque produtos próximos do vencimento",
+            },
           ].map((item) => (
-            <div key={item.key} className="flex items-center justify-between py-2 border-b border-border last:border-0">
+            <div
+              key={item.key}
+              className="flex items-center justify-between py-2 border-b border-border last:border-0"
+            >
               <div>
-                <p className="text-sm font-medium text-foreground">{item.label}</p>
+                <p className="text-sm font-medium text-foreground">
+                  {item.label}
+                </p>
                 <p className="text-xs text-muted-foreground">{item.desc}</p>
               </div>
               <button
                 onClick={() => toggleNotif(item.key)}
-                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${notifPrefs[item.key] ? "bg-primary" : "bg-muted"}`}
+                className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
+                  notifPrefs[item.key] ? "bg-brand" : "bg-muted"
+                }`}
               >
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${notifPrefs[item.key] ? "left-[22px]" : "left-0.5"}`} />
+                <span
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                    notifPrefs[item.key] ? "left-[22px]" : "left-0.5"
+                  }`}
+                />
               </button>
             </div>
           ))}
-          
+
           {notifPrefs.expiry_alerts && (
             <div className="pt-2">
-              <label className="text-sm text-muted-foreground">Alertar quantos dias antes do vencimento?</label>
+              <label className="text-sm text-muted-foreground">
+                Alertar quantos dias antes do vencimento?
+              </label>
               <div className="mt-2 flex items-center gap-3">
                 {[7, 15, 30, 60, 90].map((d) => (
                   <button
@@ -172,7 +246,7 @@ export default function Settings() {
                     onClick={() => setExpiryDays(d)}
                     className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
                       expiryDays === d
-                        ? "bg-primary text-primary-foreground"
+                        ? "bg-brand text-white"
                         : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
                     }`}
                   >
@@ -184,19 +258,27 @@ export default function Settings() {
           )}
         </div>
 
-        {/* Exportar Dados */}
+        {/* ══════════════════════════════════════════
+            EXPORTAR DADOS
+            ══════════════════════════════════════════ */}
         <div className="rounded-xl border border-border bg-card p-5 space-y-4">
           <h2 className="font-display text-sm font-semibold text-foreground flex items-center gap-2">
-            <Download className="h-4 w-4 text-accent" /> Exportar Dados
+            <Download className="h-4 w-4 text-brand" /> Exportar Dados
           </h2>
-          <p className="text-xs text-muted-foreground">Baixe seus dados em formato CSV para backup ou análise externa.</p>
+          <p className="text-xs text-muted-foreground">
+            Baixe seus dados em formato CSV para backup ou análise externa.
+          </p>
           <div className="grid grid-cols-2 gap-3">
             <button
               onClick={() => exportCSV("inventory")}
               disabled={exporting}
               className="flex items-center justify-center gap-2 rounded-xl border border-border bg-secondary py-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
             >
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
               Estoque
             </button>
             <button
@@ -204,20 +286,39 @@ export default function Settings() {
               disabled={exporting}
               className="flex items-center justify-center gap-2 rounded-xl border border-border bg-secondary py-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
             >
-              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {exporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
               Movimentações
             </button>
           </div>
         </div>
 
-        {/* Salvar */}
-        <button onClick={handleSave} disabled={saving} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50 transition-all active:scale-95">
-          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+        {/* ══════════════════════════════════════════
+            SALVAR
+            ══════════════════════════════════════════ */}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50 transition-all active:scale-95"
+        >
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="h-4 w-4" />
+          )}
           Salvar Configurações
         </button>
 
-        {/* Logout */}
-        <button onClick={handleLogout} className="flex w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 py-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5">
+        {/* ══════════════════════════════════════════
+            LOGOUT
+            ══════════════════════════════════════════ */}
+        <button
+          onClick={handleLogout}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 py-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
+        >
           <LogOut className="h-4 w-4" /> Sair da Conta
         </button>
       </main>

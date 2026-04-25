@@ -1,22 +1,25 @@
-import { useState, useRef, useEffect } from "react";
+// pages/AddProduct.tsx — VERSÃO COMPLETA REFATORADA COM TEMA DINÂMICO
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ScanBarcode, Camera, Hash, DollarSign, ChevronRight, ChevronLeft,
-  Check, Loader2, X, Package, Search, Lock, ImageIcon, Clock, CreditCard
+  Check, Loader2, X, Package, Search, Lock, ImageIcon, Clock, CreditCard, AlertTriangle
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import ProductSearchModal from "../components/ProductSearchModal";
 import UpgradeModal from "../components/UpgradeModal";
 import ProBadge from "../components/ProBadge";
-import { ocrApi, GlobalProduct, formatMoney } from "../lib/api";
+import { ocrApi, formatMoney, sessionApi } from "../lib/api";
 import { productService } from "../lib/productService";
 import { useAuth } from "../hooks/useAuth";
-import { usePlan } from "../../src/hooks/usePlan";
-import { useFeatureGates } from "../../src/hooks/useFeatureGates";
+import { useFeatureGates } from "../hooks/useFeatureGates";
 import { useToast } from "../hooks/use-toast";
 import { useStockEntry } from "../hooks/useStockEntry";
 
+// ══════════════════════════════════════════
+// CONSTANTES
+// ══════════════════════════════════════════
 const STEPS = [
   { id: "scan", label: "Código", icon: ScanBarcode },
   { id: "expiry", label: "Validade", icon: Camera },
@@ -26,8 +29,14 @@ const STEPS = [
   
 ];
 
-const CATEGORIES = ["Perfumaria", "Corpo", "Rosto", "Cabelos", "Maquiagem", "Infantil", "Casa", "Outro"];
+const CATEGORIES = [
+  "Perfumaria", "Corpo", "Rosto", "Cabelos",
+  "Maquiagem", "Infantil", "Casa", "Outro",
+];
 
+// ══════════════════════════════════════════
+// INTERFACES
+// ══════════════════════════════════════════
 interface EntryData {
   bar_code: string;
   name: string;
@@ -52,17 +61,33 @@ interface SessionStatus {
   duration_minutes?: number;
 }
 
+// ✅ NOVO: Interface para limites do plano
+interface PlanLimits {
+  current_plan: string;
+  current_count: number;
+  limit: number | null;
+  can_add_products: boolean;
+  remaining: number | null;
+}
+
 // ✅ NOVO: API de sessão
 const sessionApi = {
   getStatus: async (): Promise<SessionStatus> => {
-    const response = await fetch('/api/session-control/');
+    const response = await fetch('/api/session-control/', {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      }
+    });
     return response.json();
   },
   
   finish: async () => {
     const response = await fetch('/api/session-control/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      },
       body: JSON.stringify({ action: 'finish' })
     });
     return response.json();
@@ -71,7 +96,10 @@ const sessionApi = {
   confirmInvestment: async (sessionId: number, data: any) => {
     const response = await fetch('/api/session-summary/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+      },
       body: JSON.stringify({ session_id: sessionId, ...data })
     });
     return response.json();
@@ -84,75 +112,134 @@ export default function AddProduct() {
   const { isLocked } = useFeatureGates();
   const { toast } = useToast();
   const { loading, saveEntry } = useStockEntry();
-  
+
+  // Steps
   const [step, setStep] = useState(0);
+  const [data, setData] = useState<EntryData>(createEmptyEntry());
+
+  // UI States
   const [showScanner, setShowScanner] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeFeature, setUpgradeFeature] = useState({ feature: "", description: "" });
-  
   const [ocrLoading, setOcrLoading] = useState(false);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
-  
-  // ✅ NOVOS ESTADOS: Controle de sessão
+
+  // Sessão
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({ has_session: false });
   const [showSessionSummary, setShowSessionSummary] = useState(false);
   const [sessionSummaryData, setSessionSummaryData] = useState<any>(null);
   const [showInvestmentModal, setShowInvestmentModal] = useState(false);
   
+  // ✅ NOVOS ESTADOS: Controle de limites
+  const [planLimits, setPlanLimits] = useState<PlanLimits | null>(null);
+  const [limitsLoading, setLimitsLoading] = useState(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<EntryData>({
     bar_code: "", name: "", category: "Perfumaria", natura_sku: "",
     image_url: "", official_price: 0, sale_price: 0, cost_price: 0,
-    quantity: 1, batch_code: "", expiry_date: "", expiry_photo_url: "",brand: "",
+    quantity: 1, batch_code: "", expiry_date: "", expiry_photo_url: "", brand: "",
   });
 
-  // ✅ NOVO: Verificar status da sessão ao carregar
+  // ✅ NOVO: Função para verificar limites
+  const checkPlanLimits = async (): Promise<boolean> => {
+    setLimitsLoading(true);
+    try {
+      const response = await fetch('/api/check-plan-limits/', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const limits = await response.json();
+      setPlanLimits(limits);
+      
+      // Se não pode adicionar produtos, mostrar modal de upgrade
+      if (!limits.can_add_products) {
+        setUpgradeFeature({
+          feature: "Limite de Produtos Atingido",
+          description: `Você atingiu o limite de ${limits.limit} produtos do plano ${limits.current_plan.toUpperCase()}. Faça upgrade para continuar cadastrando produtos.`
+        });
+        setShowUpgrade(true);
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Erro ao verificar limites:', error);
+      toast({
+        title: "Erro",
+        description: "Falha ao verificar limites do plano.",
+        variant: "destructive"
+      });
+      return false;
+    } finally {
+      setLimitsLoading(false);
+    }
+  };
+
+  // ✅ NOVO: Verificar status da sessão e limites ao carregar
   useEffect(() => {
     checkSessionStatus();
+    checkPlanLimits();
   }, []);
 
-  const checkSessionStatus = async () => {
+  const checkSessionStatus = useCallback(async () => {
     try {
       const status = await sessionApi.getStatus();
       setSessionStatus(status);
     } catch (error) {
-      console.error('Erro ao verificar sessão:', error);
+      console.error("Erro ao verificar sessão:", error);
     }
-  };
+  }, []);
 
-  // ✅ NOVO: Finalizar sessão
-  const finishSession = async () => {
+  const finishSession = useCallback(async () => {
     try {
-      const result = await sessionApi.finish();
+      const result = await sessionApi.finishSession();
       setSessionStatus({ has_session: false });
-      
-      if (result.session_summary && result.session_summary.products_count > 0) {
-        setSessionSummaryData(result.session_summary);
+      if (result?.summary && result.summary.products_count > 0) {
+        setSessionSummaryData(result.summary);
         setShowSessionSummary(true);
-      } else {
-        toast({ title: "Sessão finalizada", description: "Nenhum produto foi cadastrado." });
+        return true;
       }
+      return false;
     } catch (error) {
-      console.error('Erro ao finalizar sessão:', error);
-      toast({ title: "Erro", description: "Falha ao finalizar sessão.", variant: "destructive" });
+      console.error("Erro ao finalizar sessão:", error);
+      return false;
     }
-  };
+  }, []);
 
-  // ✅ NOVO: Confirmar investimento
-  const confirmInvestment = async (paymentData: any) => {
-    try {
-      await sessionApi.confirmInvestment(sessionSummaryData.session_id, paymentData);
-      setShowInvestmentModal(false);
-      setShowSessionSummary(false);
-      toast({ title: "Sucesso!", description: "Investimento registrado com sucesso." });
-    } catch (error) {
-      console.error('Erro ao confirmar investimento:', error);
-      toast({ title: "Erro", description: "Falha ao registrar investimento.", variant: "destructive" });
-    }
-  };
+  // ══════════════════════════════════════════
+  // LIFECYCLE — sessão
+  // ══════════════════════════════════════════
+  useEffect(() => {
+    checkSessionStatus();
+    checkPlanLimits();
+    return () => {
+      sessionApi.finishSession().catch(() => {});
+    };
+  }, [checkSessionStatus, checkPlanLimits]);
 
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const token = localStorage.getItem("auth_token");
+      if (token) {
+        navigator.sendBeacon(
+          `${API_BASE}/api/session-control/`,
+          new Blob([JSON.stringify({ action: "finish" })], { type: "application/json" })
+        );
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [API_BASE]);
+
+  // ══════════════════════════════════════════
+  // HANDLERS
+  // ══════════════════════════════════════════
   const triggerProGate = (feature: string, description: string) => {
     setUpgradeFeature({ feature, description });
     setShowUpgrade(true);
@@ -160,18 +247,38 @@ export default function AddProduct() {
 
   const handleScannerClick = () => {
     if (isLocked("barcode_scanner")) {
-      triggerProGate("Scanner de Código de Barras", "Mais rápido e preciso! O Scanner é exclusivo PRO.");
+      triggerProGate(
+        "Scanner de Código de Barras",
+        "Mais rápido e preciso! O Scanner é exclusivo PRO."
+      );
       return;
     }
+    
+    // ✅ NOVO: Verificar limites antes de abrir scanner
+    const canAdd = await checkPlanLimits();
+    if (!canAdd) {
+      return;
+    }
+    
     setShowScanner(true);
   };
 
+  // ✅ CORRIGIR handleLookup - remover campo inexistente
 const handleLookup = async (barcode: string) => {
   if (!barcode.trim()) return;
   setLookupLoading(true);
+  
   try {
     const result = await productService.lookupByEan(barcode);
+    
     if (result.found) {
+      // ✅ NOVO: Assumir que é produto novo se não há dados específicos
+      // (API não retorna existing_in_store, então validamos sempre)
+      const canAdd = await checkPlanLimits();
+      if (!canAdd) {
+        return;
+      }
+      
       const resData = result.data as any;
       const remote = resData.remote || resData;
       setData(prev => ({
@@ -184,10 +291,17 @@ const handleLookup = async (barcode: string) => {
         image_url: remote?.image_url || resData?.image_url || prev.image_url,
         category: remote?.category || resData?.category || prev.category,
         official_price: remote?.official_price || resData?.official_price || 0,
-        brand: remote?.brand || resData?.brand || prev.brand || "" // ✅ ADICIONAR - do crawler
+        brand: remote?.brand || resData?.brand || prev.brand || ""
       }));
+      
       toast({ title: "Produto Identificado!", description: "Dados carregados com sucesso." });
     } else {
+      // ✅ PRODUTO NOVO: Sempre verificar limites
+      const canAdd = await checkPlanLimits();
+      if (!canAdd) {
+        return;
+      }
+      
       toast({ title: "Novo Código", description: "Preencha os dados no próximo passo." });
     }
   } catch {
@@ -196,28 +310,45 @@ const handleLookup = async (barcode: string) => {
     setLookupLoading(false);
   }
 };
+
+  // ✅ MODIFICADO: handleBarcodeScan com verificação de limites
   const handleBarcodeScan = async (barcode: string) => {
     setShowScanner(false);
     setData(prev => ({ ...prev, bar_code: barcode }));
+    
+    // ✅ VERIFICAR LIMITES antes de fazer lookup
+    const canAdd = await checkPlanLimits();
+    if (!canAdd) {
+      return;
+    }
+    
     await handleLookup(barcode);
-    setStep(1); 
+    setStep(1);
   };
 
-const selectSuggestion = (product: any) => {
-  setData((prev) => ({
-    ...prev,
-    bar_code: product.bar_code || product.barcode || prev.bar_code,
-    name: product.name,
-    category: product.category || prev.category,
-    natura_sku: product.natura_sku || product.sku || "",
-    image_url: product.image_url || "",
-    official_price: product.official_price || 0,
-    sale_price: product.official_price || prev.sale_price,
-    brand: product.brand || prev.brand || "", // ✅ ADICIONAR - do catálogo
-  }));
-  setIsSearchOpen(false);
-  setStep(1);
-};
+  // ✅ MODIFICADO: selectSuggestion com verificação de limites
+  const selectSuggestion = async (product: any) => {
+    // ✅ VERIFICAR LIMITES antes de selecionar
+    const canAdd = await checkPlanLimits();
+    if (!canAdd) {
+      return;
+    }
+    
+    setData((prev) => ({
+      ...prev,
+      bar_code: product.bar_code || product.barcode || prev.bar_code,
+      name: product.name,
+      category: product.category || prev.category,
+      natura_sku: product.natura_sku || product.sku || "",
+      image_url: product.image_url || "",
+      official_price: product.official_price || 0,
+      sale_price: product.official_price || prev.sale_price,
+      brand: product.brand || prev.brand || "",
+    }));
+    
+    setIsSearchOpen(false);
+    setStep(1);
+  };
 
   const handleExpiryPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -239,51 +370,99 @@ const selectSuggestion = (product: any) => {
     }
   };
 
-const handleSave = async () => {
-  if (!data.bar_code?.trim()) {
-    toast({ title: "Código obrigatório", description: "Digite ou escaneie o EAN.", variant: "destructive" });
-    return;
-  }
-  
-  try {
-    // ✅ CORREÇÃO: Construir payload dinamicamente
-    const payload: any = {
-      bar_code: data.bar_code.trim(),
-      name: data.name || "Produto sem nome",
-      category: data.category,
-      natura_sku: data.natura_sku,
-      expiration_date: data.expiry_date,
-      expiry_photo_url: data.expiry_photo_url,
-      quantity: data.quantity,
-      cost_price: data.cost_price,
-      sale_price: data.sale_price,
-      batch_code: data.batch_code,
-    };
-    
-    // ✅ ADICIONAR brand apenas se existir e não for vazio
-    if (data.brand && data.brand.trim() !== "") {
-      payload.brand = data.brand.trim();
+  const handleSave = async () => {
+    if (!data.bar_code?.trim()) {
+      toast({ title: "Código obrigatório", description: "Digite ou escaneie o EAN.", variant: "destructive" });
+      return;
     }
     
-    await saveEntry(payload);
-    
-    setIsSuccess(true);
-    setTimeout(() => {
-      navigate("/");
-    }, 2000);
-  } catch (error) {
-    console.error('Erro ao salvar:', error);
-    // O Toast de erro já vem do useStockEntry
-  }
-};
+    try {
+      // ✅ CORREÇÃO: Construir payload dinamicamente
+      const payload: any = {
+        bar_code: data.bar_code.trim(),
+        name: data.name || "Produto sem nome",
+        category: data.category,
+        natura_sku: data.natura_sku,
+        expiration_date: data.expiry_date,
+        expiry_photo_url: data.expiry_photo_url,
+        quantity: data.quantity,
+        cost_price: data.cost_price,
+        sale_price: data.sale_price,
+        batch_code: data.batch_code,
+      };
+      
+      // ✅ ADICIONAR brand apenas se existir e não for vazio
+      if (data.brand && data.brand.trim() !== "") {
+        payload.brand = data.brand.trim();
+      }
+      
+      await saveEntry(payload);
+      
+      // ✅ NOVO: Atualizar limites após salvar
+      await checkPlanLimits();
+      
+      setIsSuccess(true);
+      setTimeout(() => {
+        navigate("/");
+      }, 2000);
+    } catch (error) {
+      console.error('Erro ao salvar:', error);
+      // O Toast de erro já vem do useStockEntry
+    }
+  };
+
   const canAdvance = () => {
     if (step === 0) return !!data.bar_code?.trim() && !lookupLoading;
     if (step === 1) return true;
     if (step === 2) return data.quantity > 0 && data.name.trim() !== "";
     return true;
   };
-    return (
+
+  return (
     <div className="min-h-screen bg-background">
+      {/* ✅ NOVO: Header com informações dos limites */}
+      {planLimits && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`px-4 py-2 flex items-center justify-between text-sm border-b ${
+            planLimits.can_add_products 
+              ? 'bg-green-50 text-green-800 border-green-200' 
+              : 'bg-red-50 text-red-800 border-red-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Package size={14} />
+            <span className="font-medium">
+              {planLimits.current_count}/{planLimits.limit || '∞'} produtos
+            </span>
+            <span className="text-xs opacity-75">
+              ({planLimits.current_plan.toUpperCase()})
+            </span>
+          </div>
+          
+          {!planLimits.can_add_products ? (
+            <button 
+              onClick={() => {
+                setUpgradeFeature({
+                  feature: "Upgrade Necessário",
+                  description: `Limite de ${planLimits.limit} produtos atingido no plano ${planLimits.current_plan.toUpperCase()}.`
+                });
+                setShowUpgrade(true);
+              }}
+              className="text-xs bg-red-600 text-white px-2 py-1 rounded font-medium hover:bg-red-700 transition-colors flex items-center gap-1"
+            >
+              <AlertTriangle size={12} />
+              Fazer Upgrade
+            </button>
+          ) : planLimits.remaining !== null && planLimits.remaining <= 5 ? (
+            <span className="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded font-medium">
+              {planLimits.remaining} restantes
+            </span>
+          ) : null}
+        </motion.div>
+      )}
+
       {/* ✅ NOVO: Header com status da sessão */}
       {sessionStatus.has_session && (
         <motion.div 
@@ -296,69 +475,101 @@ const handleSave = async () => {
             <span className="text-sm font-medium">
               Cadastrando... {sessionStatus.products_count} produtos
             </span>
-            <div className="flex items-center gap-1 text-blue-200">
-              <Clock size={12} />
-              <span className="text-xs">{sessionStatus.duration_minutes}min</span>
-            </div>
-          </div>
-          
-          <button 
-            onClick={finishSession}
-            className="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm font-medium flex items-center gap-1 transition-colors"
-          >
-            <Check size={14} />
-            Finalizar
-          </button>
-        </motion.div>
-      )}
+          ) : null}
+        </div>
+      </div>
+    );
+  };
 
+  // ══════════════════════════════════════════
+  // RENDER
+  // ══════════════════════════════════════════
+  return (
+    <div className="min-h-screen bg-background">
+      {/* ── HEADER ── */}
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
-          <button onClick={() => navigate("/")} className="rounded-lg p-2 text-muted-foreground hover:text-foreground">
+          <button
+            onClick={async () => {
+              await finishSession();
+              navigate("/");
+            }}
+            className="rounded-lg p-2 text-muted-foreground hover:text-foreground"
+          >
             <X className="h-5 w-5" />
           </button>
           <h1 className="font-display text-base font-bold text-foreground">Entrada Mágica</h1>
-          <div className="w-9" />
+          {sessionStatus.has_session ? (
+            <div className="flex items-center gap-1 text-xs text-brand bg-brand-soft px-2 py-1 rounded-full">
+              <Clock size={10} />
+              <span className="font-medium">{sessionStatus.products_count || 0}</span>
+            </div>
+          ) : (
+            <div className="w-9" />
+          )}
         </div>
       </header>
 
-      {/* STEPS HEADER */}
+      {/* ── STEPS PROGRESS ── */}
       <div className="mx-auto max-w-lg px-4 pt-4">
         <div className="flex items-center gap-1">
           {STEPS.map((s, i) => (
             <div key={s.id} className="flex flex-1 flex-col items-center gap-1">
-              <div className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-colors ${i <= step ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+              <div
+                className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold transition-colors ${
+                  i <= step
+                    ? "bg-brand text-white"
+                    : "bg-muted text-muted-foreground"
+                }`}
+              >
                 {i < step ? <Check className="h-4 w-4" /> : i + 1}
               </div>
-              <span className={`text-[10px] ${i <= step ? "text-primary font-medium" : "text-muted-foreground"}`}>{s.label}</span>
+              <span
+                className={`text-[10px] ${
+                  i <= step ? "text-brand font-medium" : "text-muted-foreground"
+                }`}
+              >
+                {s.label}
+              </span>
             </div>
           ))}
         </div>
       </div>
 
+      {/* ── MAIN CONTENT ── */}
       <main className="mx-auto max-w-lg px-4 py-6">
         <AnimatePresence mode="wait">
-          
-          {/* STEP 0: SCAN & IDENTIFICAÇÃO */}
+          {/* ════════════════════════════════
+              STEP 0: SCAN & IDENTIFICAÇÃO
+              ════════════════════════════════ */}
           {step === 0 && (
-            <motion.div key="scan" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div
+              key="scan"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
               {showScanner && !isLocked("barcode_scanner") ? (
                 <div className="space-y-4">
-                  <BarcodeScanner 
-                    onScan={handleBarcodeScan} 
+                  <BarcodeScanner
+                    onScan={handleBarcodeScan}
                     onClose={() => {
-                        setShowScanner(false);
-                        setIsSearchOpen(true);
-                    }} 
+                      setShowScanner(false);
+                      setIsSearchOpen(true);
+                    }}
                   />
-                  <button onClick={() => setShowScanner(false)} className="w-full text-center text-sm text-muted-foreground underline mt-2">
+                  <button
+                    onClick={() => setShowScanner(false)}
+                    className="w-full text-center text-sm text-muted-foreground underline mt-2"
+                  >
                     Cancelar Câmera
                   </button>
                 </div>
               ) : (
                 <div className="space-y-6 rounded-xl border border-border bg-card p-5">
+                  {/* Contador + Campo EAN */}
                   <div>
-                    <label className="text-sm font-medium text-foreground">Código de Barras (EAN) *</label>
+                    <ProductCounter />
                     <input
                       type="text"
                       value={data.bar_code}
@@ -366,18 +577,34 @@ const handleSave = async () => {
                       onBlur={(e) => handleLookup(e.target.value)}
                       placeholder="Escaneie ou digite..."
                       className="mt-2 w-full rounded-lg border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus:border-primary"
+                      disabled={limitsLoading}
                     />
-                    {lookupLoading && <p className="text-xs text-primary mt-1 animate-pulse">Buscando informações...</p>}
+                    {(lookupLoading || limitsLoading) && (
+                      <p className="text-xs text-primary mt-1 animate-pulse flex items-center gap-1">
+                        <Loader2 size={12} className="animate-spin" />
+                        {limitsLoading ? "Verificando limites..." : "Buscando informações..."}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="h-px flex-1 bg-border" />
                     <span className="text-xs text-muted-foreground">OU</span>
                     <div className="h-px flex-1 bg-border" />
                   </div>
-                  <button onClick={handleScannerClick} className={`w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all ${isLocked("barcode_scanner") ? "opacity-80" : ""}`}>
+                  <button 
+                    onClick={handleScannerClick} 
+                    disabled={limitsLoading}
+                    className={`w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all ${isLocked("barcode_scanner") || limitsLoading ? "opacity-80" : ""}`}
+                  >
                     <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${!isLocked("barcode_scanner") ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-                        {!isLocked("barcode_scanner") ? <ScanBarcode size={20} /> : <Lock size={20} />}
+                      <div className={`p-2 rounded-lg ${!isLocked("barcode_scanner") && !limitsLoading ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                        {limitsLoading ? (
+                          <Loader2 size={20} className="animate-spin" />
+                        ) : !isLocked("barcode_scanner") ? (
+                          <ScanBarcode size={20} />
+                        ) : (
+                          <Lock size={20} />
+                        )}
                       </div>
                       <div>
                         <p className="font-bold text-sm text-foreground flex items-center gap-2">
@@ -385,69 +612,142 @@ const handleSave = async () => {
                         </p>
                       </div>
                     </div>
-                    <ChevronRight className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
+                    <ChevronRight className="text-muted-foreground/30 group-hover:text-brand transition-colors" />
                   </button>
-                  <button onClick={() => setIsSearchOpen(true)} className="w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all">
+                  <button 
+                    onClick={() => setIsSearchOpen(true)} 
+                    disabled={limitsLoading}
+                    className="w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all"
+                  >
                     <div className="flex items-center gap-3">
-                      <div className="p-2 bg-primary/10 text-primary rounded-lg"><Search size={20} /></div>
+                      <div className="p-2 bg-primary/10 text-primary rounded-lg">
+                        <Search size={20} />
+                      </div>
                       <div>
                         <p className="font-bold text-sm text-foreground">Buscar por Nome</p>
                         <p className="text-xs text-muted-foreground">Catálogo Global</p>
                       </div>
                     </div>
-                    <ChevronRight className="text-muted-foreground/30 group-hover:text-primary transition-colors" />
+                    <ChevronRight className="text-muted-foreground/30 group-hover:text-brand transition-colors" />
                   </button>
                 </div>
               )}
             </motion.div>
           )}
 
-          {/* STEP 1: VALIDADE */}
+          {/* ════════════════════════════════
+              STEP 1: VALIDADE
+              ════════════════════════════════ */}
           {step === 1 && (
-            <motion.div key="expiry" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div
+              key="expiry"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
               <div className="space-y-4 rounded-xl border border-border bg-card p-5">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10"><Camera className="h-5 w-5 text-primary" /></div>
-                  <div><p className="text-sm font-semibold text-foreground">Foto da Validade</p></div>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand/10">
+                    <Camera className="h-5 w-5 text-brand" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Foto da Validade</p>
+                  </div>
                 </div>
+
                 {data.expiry_photo_url ? (
                   <div className="space-y-3">
-                    <img src={data.expiry_photo_url} alt="Validade" className="w-full rounded-lg object-cover" style={{ maxHeight: 200 }} />
-                    <button type="button" onClick={() => { setData(p => ({ ...p, expiry_photo_url: "" })); fileInputRef.current?.click(); }} className="text-xs text-primary underline">Tirar outra</button>
+                    <img
+                      src={data.expiry_photo_url}
+                      alt="Validade"
+                      className="w-full rounded-lg object-cover"
+                      style={{ maxHeight: 200 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setData((p) => ({ ...p, expiry_photo_url: "" }));
+                        fileInputRef.current?.click();
+                      }}
+                      className="text-xs text-brand underline"
+                    >
+                      Tirar outra
+                    </button>
                   </div>
                 ) : (
-                  <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-10 text-muted-foreground hover:border-primary hover:text-primary">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border py-10 text-muted-foreground hover:border-brand hover:text-brand"
+                  >
                     <Camera className="h-8 w-8" />
                     <span className="text-sm">Tirar foto da validade (Opcional)</span>
                   </button>
                 )}
-                <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleExpiryPhoto} className="hidden" />
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleExpiryPhoto}
+                  className="hidden"
+                />
+
+                {ocrLoading && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-brand">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Analisando imagem...
+                  </div>
+                )}
+
                 <div>
                   <label className="text-sm text-muted-foreground">Mês/Ano de Validade</label>
-                  <input type="month" value={data.expiry_date} onChange={(e) => setData((p) => ({ ...p, expiry_date: e.target.value }))} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+                  <input
+                    type="month"
+                    value={data.expiry_date}
+                    onChange={(e) => setData((p) => ({ ...p, expiry_date: e.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-brand"
+                  />
                 </div>
               </div>
             </motion.div>
           )}
 
           {/* STEP 2: DETALHES GERAIS */}
-          
           {step === 2 && (
-            <motion.div key="details" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div
+              key="details"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
               <div className="space-y-5 rounded-xl border border-border bg-card p-5">
                 <div className="flex gap-4 items-start">
                   <div className="flex-1">
-                      <label className="text-sm font-medium text-foreground">Nome do Produto *</label>
-                      <input required type="text" value={data.name} onChange={(e) => setData((p) => ({ ...p, name: e.target.value }))} className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary" />
+                    <label className="text-sm font-medium text-foreground">Nome do Produto *</label>
+                    <input
+                      required
+                      type="text"
+                      value={data.name}
+                      onChange={(e) => setData((p) => ({ ...p, name: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-brand"
+                    />
                   </div>
                   {data.image_url ? (
-                      <img src={data.image_url} alt="" className="w-16 h-16 rounded-lg object-cover border mt-6" />
+                    <img
+                      src={data.image_url}
+                      alt=""
+                      className="w-16 h-16 rounded-lg object-cover border mt-6"
+                    />
                   ) : (
-                      <div className="w-16 h-16 bg-muted rounded-lg border mt-6 flex items-center justify-center"><ImageIcon className="text-muted-foreground" size={20}/></div>
+                    <div className="w-16 h-16 bg-muted rounded-lg border mt-6 flex items-center justify-center">
+                      <ImageIcon className="text-muted-foreground" size={20} />
+                    </div>
                   )}
                 </div>
-                
-                {/* ✅ NOVO: Campo Brand SOMENTE LEITURA */}
+
+                {/* Campo Brand SOMENTE LEITURA */}
                 {data.brand && (
                   <div>
                     <label className="text-sm font-medium text-foreground">Marca</label>
@@ -459,72 +759,143 @@ const handleSave = async () => {
                     </p>
                   </div>
                 )}
-                
+
                 <div className="grid grid-cols-2 gap-4">
-                    <div>
-                        <label className="text-sm font-medium text-foreground">Categoria</label>
-                        <select value={data.category} onChange={(e) => setData(p => ({ ...p, category: e.target.value }))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none bg-background">
-                            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="text-sm font-medium text-foreground">SKU Natura</label>
-                        <input value={data.natura_sku} onChange={(e) => setData(p => ({...p, natura_sku: e.target.value}))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none" placeholder="Opcional" />
-                    </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground">Categoria</label>
+                    <select
+                      value={data.category}
+                      onChange={(e) => setData((p) => ({ ...p, category: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none bg-background"
+                    >
+                      {CATEGORIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground">SKU Natura</label>
+                    <input
+                      value={data.natura_sku}
+                      onChange={(e) => setData((p) => ({ ...p, natura_sku: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                      placeholder="Opcional"
+                    />
+                  </div>
                 </div>
-                
-                 <div className="grid grid-cols-2 gap-4 p-4 border rounded-lg bg-primary/5">
-                    <div>
-                        <label className="text-sm font-bold text-primary">Qtd Entrada *</label>
-                        <div className="mt-1 flex items-center gap-2">
-                            <button type="button" onClick={() => setData(p => ({ ...p, quantity: Math.max(1, p.quantity - 1) }))} className="h-8 w-8 rounded bg-background border font-bold">-</button>
-                            <input type="number" min={1} value={data.quantity} onChange={(e) => setData(p => ({ ...p, quantity: parseInt(e.target.value)||1 }))} className="h-8 w-12 rounded border text-center font-bold outline-none" />
-                            <button type="button" onClick={() => setData(p => ({ ...p, quantity: p.quantity + 1 }))} className="h-8 w-8 rounded bg-background border font-bold">+</button>
-                        </div>
+
+                <div className="grid grid-cols-2 gap-4 p-4 border rounded-lg bg-brand/5">
+                  <div>
+                    <label className="text-sm font-bold text-brand">Qtd Entrada *</label>
+                    <div className="mt-1 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setData((p) => ({ ...p, quantity: Math.max(1, p.quantity - 1) }))
+                        }
+                        className="h-8 w-8 rounded bg-background border font-bold"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        min={1}
+                        value={data.quantity}
+                        onChange={(e) =>
+                          setData((p) => ({ ...p, quantity: parseInt(e.target.value) || 1 }))
+                        }
+                        className="h-8 w-12 rounded border text-center font-bold outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setData((p) => ({ ...p, quantity: p.quantity + 1 }))}
+                        className="h-8 w-8 rounded bg-background border font-bold"
+                      >
+                        +
+                      </button>
                     </div>
-                    <div>
-                        <label className="text-sm font-medium text-foreground">Lote</label>
-                        <input value={data.batch_code} onChange={(e) => setData(p => ({...p, batch_code: e.target.value}))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none" placeholder="Opcional" />
-                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground">Lote</label>
+                    <input
+                      value={data.batch_code}
+                      onChange={(e) => setData((p) => ({ ...p, batch_code: e.target.value }))}
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                      placeholder="Opcional"
+                    />
+                  </div>
                 </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-sm font-medium text-foreground">Preço de Custo</label>
-                    <input type="number" step="0.01" value={data.cost_price || ""} onChange={(e) => setData((p) => ({ ...p, cost_price: parseFloat(e.target.value)||0 }))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none" />
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={data.cost_price || ""}
+                      onChange={(e) =>
+                        setData((p) => ({ ...p, cost_price: parseFloat(e.target.value) || 0 }))
+                      }
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                    />
                   </div>
                   <div>
                     <label className="text-sm font-medium text-foreground">Preço Venda</label>
-                    <input type="number" step="0.01" value={data.sale_price || ""} onChange={(e) => setData((p) => ({ ...p, sale_price: parseFloat(e.target.value)||0 }))} className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none" />
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={data.sale_price || ""}
+                      onChange={(e) =>
+                        setData((p) => ({ ...p, sale_price: parseFloat(e.target.value) || 0 }))
+                      }
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                    />
                   </div>
                 </div>
-            
               </div>
             </motion.div>
           )}
 
-          {/* STEP 3: CONFIRMAR COM RESUMO DA SESSÃO */}
+          {/* ════════════════════════════════
+              STEP 3: CONFIRMAR
+              ════════════════════════════════ */}
           {step === 3 && (
-            <motion.div key="confirm" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <motion.div
+              key="confirm"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+            >
               <div className="space-y-4 rounded-xl border border-border bg-card p-5 overflow-hidden">
                 <AnimatePresence mode="wait">
                   {!isSuccess ? (
                     <motion.div key="summary" exit={{ opacity: 0, scale: 0.9 }}>
                       <div className="flex items-center gap-3 mb-4">
                         {data.image_url ? (
-                          <img src={data.image_url} alt="Produto" className="h-12 w-12 rounded-lg object-cover border" />
+                          <img
+                            src={data.image_url}
+                            alt="Produto"
+                            className="h-12 w-12 rounded-lg object-cover border"
+                          />
                         ) : (
-                          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10"><Package className="text-primary" /></div>
+                          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-brand/10">
+                            <Package className="text-brand" />
+                          </div>
                         )}
                         <div>
                           <p className="text-sm font-semibold text-foreground">Confirmar Entrada</p>
-                          <p className="text-xs text-muted-foreground">{data.name || "Sem Nome"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {data.name || "Sem Nome"}
+                          </p>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-2 rounded-lg bg-secondary/50 p-4 mb-4">
                         <Row label="EAN" value={data.bar_code} />
                         <Row label="SKU" value={data.natura_sku || "—"} />
-                        {data.brand && <Row label="Marca" value={data.brand} />} {/* ✅ NOVO */}
+                        {data.brand && <Row label="Marca" value={data.brand} />}
                         <Row label="Lote" value={data.batch_code || "—"} />
                         <Row label="Validade" value={data.expiry_date || "Não informada"} />
                         <Row label="Qtd Entrada" value={`${data.quantity} un.`} />
@@ -532,21 +903,19 @@ const handleSave = async () => {
                         <Row label="Venda" value={formatMoney(data.sale_price)} />
                       </div>
 
-                      {/* ✅ NOVO: Resumo da sessão */}
+                      {/* Resumo da sessão */}
                       {sessionStatus.has_session && (
-                        <div className="rounded-lg bg-blue-50 border border-blue-200 p-4">
+                        <div className="rounded-lg bg-brand-soft border border-brand/20 p-4">
                           <div className="flex items-center gap-2 mb-2">
-                            <Package className="text-blue-600" size={16} />
-                            <span className="text-sm font-semibold text-blue-900">Resumo da Sessão</span>
+                            <Package className="text-brand" size={16} />
+                            <span className="text-sm font-semibold text-foreground">
+                              Sessão Ativa
+                            </span>
                           </div>
-                          <div className="text-xs text-blue-700 space-y-1">
-                            <p>• Total de produtos: {sessionStatus.products_count}</p>
-                            <p>• Valor estimado: {formatMoney(sessionStatus.total_estimated_cost || 0)}</p>
-                            <p>• Tempo de cadastro: {sessionStatus.duration_minutes}min</p>
+                          <div className="text-xs text-muted-foreground space-y-1">
+                            <p>• Produtos nesta sessão: {sessionStatus.products_count}</p>
+                            <p>• Tempo: {sessionStatus.duration_minutes}min</p>
                           </div>
-                          <p className="text-xs text-blue-600 mt-2">
-                            💡 Após confirmar, você pode finalizar e registrar o investimento
-                          </p>
                         </div>
                       )}
                     </motion.div>
@@ -561,7 +930,7 @@ const handleSave = async () => {
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
                         transition={{ type: "spring", stiffness: 200, damping: 10, delay: 0.1 }}
-                        className="flex h-24 w-24 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg"
+                        className="flex h-24 w-24 items-center justify-center rounded-full bg-success text-white shadow-lg"
                       >
                         <Check size={48} strokeWidth={3} />
                       </motion.div>
@@ -572,7 +941,9 @@ const handleSave = async () => {
                         className="text-center space-y-1"
                       >
                         <h3 className="text-xl font-bold text-foreground">Sucesso!</h3>
-                        <p className="text-sm text-muted-foreground">Produto adicionado ao estoque.</p>
+                        <p className="text-sm text-muted-foreground">
+                          Produto adicionado ao estoque.
+                        </p>
                       </motion.div>
                     </motion.div>
                   )}
@@ -582,20 +953,34 @@ const handleSave = async () => {
           )}
         </AnimatePresence>
 
-        {/* NAVIGATION BUTTONS */}
-        {(!showScanner || step > 0) && !isSuccess && (
+        {/* ══════════════════════════════════════════
+            NAVIGATION BUTTONS
+            ══════════════════════════════════════════ */}
+        {(!showScanner || step > 0) && !isSuccess && !showContinueModal && (
           <div className="mt-6 flex gap-3">
             {step > 0 && (
-              <button onClick={() => setStep((s) => s - 1)} disabled={loading} className="flex flex-1 items-center justify-center gap-2 rounded-xl border bg-card py-3 text-sm font-medium disabled:opacity-50">
+              <button
+                onClick={() => setStep((s) => s - 1)}
+                disabled={loading}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl border bg-card py-3 text-sm font-medium disabled:opacity-50"
+              >
                 <ChevronLeft className="h-4 w-4" /> Voltar
               </button>
             )}
             {step < 3 ? (
-              <button onClick={() => setStep((s) => s + 1)} disabled={!canAdvance()} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50">
+              <button
+                onClick={() => setStep((s) => s + 1)}
+                disabled={!canAdvance()}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50"
+              >
                 Próximo <ChevronRight className="h-4 w-4" />
               </button>
             ) : (
-              <button onClick={handleSave} disabled={loading} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50 transition-all active:scale-95">
+              <button
+                onClick={handleSave}
+                disabled={loading}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50 transition-all active:scale-95"
+              >
                 {loading ? <Loader2 className="animate-spin" /> : <Check />} Confirmar
               </button>
             )}
@@ -603,33 +988,135 @@ const handleSave = async () => {
         )}
       </main>
 
-      {/* ✅ NOVO: Modal de Resumo da Sessão */}
+      {/* ══════════════════════════════════════════
+          POPUP: CADASTRAR MAIS PRODUTOS?
+          ══════════════════════════════════════════ */}
+      <AnimatePresence>
+        {showContinueModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="bg-card rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-border"
+            >
+              <div className="text-center space-y-4">
+                <div className="flex h-16 w-16 mx-auto items-center justify-center rounded-full bg-success/10">
+                  <Check className="h-8 w-8 text-success" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-foreground">Produto cadastrado!</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Deseja cadastrar mais produtos?
+                  </p>
+                </div>
+
+                {planLimits && (
+                  <div className="bg-secondary/50 rounded-lg p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Produtos cadastrados:{" "}
+                      <span className="font-bold text-foreground">
+                        {planLimits.current_count}/{planLimits.limit || "∞"}
+                      </span>
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={handleFinishRegistering}
+                    className="flex-1 flex items-center justify-center gap-2 border border-border rounded-xl py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors"
+                  >
+                    <Home size={16} />
+                    Não, finalizar
+                  </button>
+                  <button
+                    onClick={handleContinueRegistering}
+                    className="flex-1 flex items-center justify-center gap-2 bg-brand rounded-xl py-3 text-sm font-bold text-white hover:opacity-90 transition-colors"
+                  >
+                    <RotateCcw size={16} />
+                    Sim, mais um!
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ══════════════════════════════════════════
+          MODAL: RESUMO DA SESSÃO
+          ══════════════════════════════════════════ */}
       {showSessionSummary && sessionSummaryData && (
-        <SessionSummaryModal 
-          summary={sessionSummaryData}
-          onClose={() => setShowSessionSummary(false)}
-          onConfirmInvestment={(_paymentData: any) => {
-            setShowInvestmentModal(true);
-            setShowSessionSummary(false);
-          }}
-        />
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-2xl p-6 max-w-md w-full shadow-2xl border border-border">
+            <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+              <Package className="text-brand" size={20} />
+              Resumo da Sessão
+            </h3>
+            <div className="space-y-2 mb-6 bg-secondary/50 rounded-lg p-4">
+              <Row label="Produtos cadastrados" value={String(sessionSummaryData.products_count)} />
+              <Row
+                label="Valor estimado"
+                value={formatMoney(sessionSummaryData.total_estimated_cost)}
+              />
+              <Row
+                label="Tempo de cadastro"
+                value={`${sessionSummaryData.duration_minutes}min`}
+              />
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowSessionSummary(false);
+                  navigate("/");
+                }}
+                className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-secondary"
+              >
+                Fechar
+              </button>
+              <button
+                onClick={() => {
+                  setShowInvestmentModal(true);
+                  setShowSessionSummary(false);
+                }}
+                className="flex-1 bg-brand text-white rounded-xl py-2.5 text-sm font-bold hover:opacity-90 flex items-center justify-center gap-1"
+              >
+                <CreditCard size={14} />
+                Registrar Investimento
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* ✅ NOVO: Modal de Investimento */}
+      {/* ══════════════════════════════════════════
+          MODAL: INVESTIMENTO
+          ══════════════════════════════════════════ */}
       {showInvestmentModal && (
-        <InvestmentModal 
+        <InvestmentModal
           estimatedCost={sessionSummaryData?.total_estimated_cost || 0}
-          onClose={() => setShowInvestmentModal(false)}
+          onClose={() => {
+            setShowInvestmentModal(false);
+            navigate("/");
+          }}
           onConfirm={confirmInvestment}
         />
       )}
 
+      {/* ══════════════════════════════════════════
+          MODAIS EXISTENTES
+          ══════════════════════════════════════════ */}
       <ProductSearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
         onSelect={(p) => selectSuggestion(p)}
       />
-      
       <UpgradeModal
         isOpen={showUpgrade}
         onClose={() => setShowUpgrade(false)}
@@ -640,6 +1127,9 @@ const handleSave = async () => {
   );
 }
 
+// ══════════════════════════════════════════════════
+// COMPONENTES AUXILIARES
+// ══════════════════════════════════════════════════
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between border-b border-border/50 pb-1 last:border-0">
@@ -649,87 +1139,81 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ✅ NOVO: Componentes dos modais (você precisa criar estes)
-function SessionSummaryModal({ summary, onClose, onConfirmInvestment }: any) {
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full">
-        <h3 className="text-lg font-bold mb-4">📦 Resumo da Sessão</h3>
-        <div className="space-y-2 mb-6">
-          <p>Produtos cadastrados: {summary.products_count}</p>
-          <p>Valor estimado: {formatMoney(summary.total_estimated_cost)}</p>
-        </div>
-        <div className="flex gap-3">
-          <button onClick={onClose} className="flex-1 border rounded-lg py-2">
-            Depois
-          </button>
-          <button onClick={onConfirmInvestment} className="flex-1 bg-blue-600 text-white rounded-lg py-2">
-            Registrar Investimento
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function InvestmentModal({ estimatedCost, onClose, onConfirm }: any)  {
-  const [paymentMethod, setPaymentMethod] = useState('credit_card');
+function InvestmentModal({
+  estimatedCost,
+  onClose,
+  onConfirm,
+}: {
+  estimatedCost: number;
+  onClose: () => void;
+  onConfirm: (data: any) => void;
+}) {
+  const [paymentMethod, setPaymentMethod] = useState("credit_card");
   const [totalPaid, setTotalPaid] = useState(estimatedCost);
   const [installments, setInstallments] = useState(1);
 
   const handleConfirm = () => {
-    onConfirm({ payment_method: paymentMethod, total_paid: totalPaid, installments });
+    onConfirm({
+      payment_method: paymentMethod,
+      total_paid: totalPaid,
+      installments,
+    });
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 max-w-md w-full">
-        <h3 className="text-lg font-bold mb-4">💳 Registrar Investimento</h3>
-        
+      <div className="bg-card rounded-2xl p-6 max-w-md w-full shadow-2xl border border-border">
+        <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
+          <CreditCard className="text-brand" size={20} />
+          Registrar Investimento
+        </h3>
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">Como você pagou?</label>
-            <select 
-              value={paymentMethod} 
+            <select
+              value={paymentMethod}
               onChange={(e) => setPaymentMethod(e.target.value)}
-              className="w-full border rounded-lg px-3 py-2"
+              className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background"
             >
               <option value="credit_card">Cartão de Crédito</option>
               <option value="pix">PIX</option>
               <option value="cash">Dinheiro</option>
             </select>
           </div>
-          
           <div>
             <label className="block text-sm font-medium mb-1">Valor total pago</label>
-            <input 
-              type="number" 
+            <input
+              type="number"
               step="0.01"
-              value={totalPaid} 
-              onChange={(e) => setTotalPaid(parseFloat(e.target.value))}
-              className="w-full border rounded-lg px-3 py-2"
+              value={totalPaid}
+              onChange={(e) => setTotalPaid(parseFloat(e.target.value) || 0)}
+              className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background"
             />
           </div>
-          
-          {paymentMethod === 'credit_card' && (
+          {paymentMethod === "credit_card" && (
             <div>
               <label className="block text-sm font-medium mb-1">Parcelas</label>
-              <input 
-                type="number" 
+              <input
+                type="number"
                 min="1"
-                value={installments} 
-                onChange={(e) => setInstallments(parseInt(e.target.value))}
-                className="w-full border rounded-lg px-3 py-2"
+                value={installments}
+                onChange={(e) => setInstallments(parseInt(e.target.value) || 1)}
+                className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-background"
               />
             </div>
           )}
         </div>
-        
         <div className="flex gap-3 mt-6">
-          <button onClick={onClose} className="flex-1 border rounded-lg py-2">
+          <button
+            onClick={onClose}
+            className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-secondary"
+          >
             Cancelar
           </button>
-          <button onClick={handleConfirm} className="flex-1 bg-green-600 text-white rounded-lg py-2">
+          <button
+            onClick={handleConfirm}
+            className="flex-1 bg-success text-white rounded-xl py-2.5 text-sm font-bold hover:opacity-90"
+          >
             Confirmar
           </button>
         </div>

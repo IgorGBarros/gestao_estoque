@@ -7,7 +7,10 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.exceptions import AuthenticationFailed
 
 # Importa seus modelos de negócio
-from .models import CustomUser, Product, InventoryItem, InventoryBatch, Store, Sale, SaleItem, StockTransaction
+from .models import (
+    CustomUser, Product, InventoryItem, InventoryBatch, Store, 
+    Sale, SaleItem, StockTransaction, PlanConfig, Promotion
+)
 
 # 🚀 CORREÇÃO 1: Usar o modelo de usuário ativo (CustomUser) dinamicamente
 User = get_user_model()
@@ -137,6 +140,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
 # 3. SERIALIZER DE ENTRADA (SCAN)
 # ==========================================
 
+
 class StockEntrySerializer(serializers.Serializer):
     # 🚀 CORREÇÃO 2: Permitir null e blindar contra erros 400
     bar_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -151,6 +155,29 @@ class StockEntrySerializer(serializers.Serializer):
     category = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     natura_sku = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     image_url = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    def validate(self, attrs):
+        store = self.context.get('store')  # ✅ AUTOMÁTICO: store no contexto
+        
+        # ✅ AUTOMÁTICO: validação de limite
+        if not store.can_add_products:
+            raise ValidationError({
+                'error': 'PLAN_LIMIT_REACHED',
+                'current_count': store.product_count,
+                'limit': store.plan_config.max_products
+            })
+    
+    # ✅ APENAS validações básicas de formato
+    def validate_quantity(self, value):
+        if value <= 0:
+            raise ValidationError("Quantidade deve ser maior que zero")
+        return value
+    
+    def validate_bar_code(self, value):
+        # Validar formato se necessário
+        if value and len(value) > 50:
+            raise ValidationError("Código de barras muito longo")
+        return value
 
 # ==========================================
 # 4. SERIALIZERS DE VENDA E TRANSAÇÕES
@@ -218,7 +245,72 @@ class ProfileSerializer(serializers.ModelSerializer):
     # Se o frontend enviar null nessas chaves, o serializer converte para string vazia
     # protegendo o banco de dados de quebrar.
     def validate_display_name(self, value):
-        return value if value is not None else ""
+        return value if value else ""
+    
+    def validate_whatsapp_number(self, value):
+        return value if value else ""
+
+# ==========================================
+# 7. SERIALIZERS PARA ASAAS (NOVOS)
+# ==========================================
+
+class AsaasCheckoutSerializer(serializers.Serializer):
+    """Serializer para criar checkout no Asaas"""
+    billing_cycle = serializers.ChoiceField(choices=['monthly', 'yearly'], default='monthly')
+    payment_method = serializers.ChoiceField(
+        choices=['credit_card', 'pix', 'boleto'], 
+        default='credit_card'
+    )
+    
+    def validate(self, attrs):
+        """Validação do checkout"""
+        # Verificar se store pode fazer upgrade
+        store = self.context.get('store')
+        if not store:
+            raise ValidationError("Store não encontrada")
         
-    def validate_store_slug(self, value):
-        return value if value is not None else ""
+        if store.plan == 'pro':
+            raise ValidationError("Loja já possui plano PRO ativo")
+        
+        return attrs
+
+class AsaasWebhookSerializer(serializers.Serializer):
+    """Serializer para processar webhooks do Asaas"""
+    event = serializers.CharField()
+    payment = serializers.DictField(required=False)
+    subscription = serializers.DictField(required=False)
+    
+    def validate_event(self, value):
+        """Validar eventos suportados"""
+        supported_events = [
+            'PAYMENT_RECEIVED', 'PAYMENT_OVERDUE', 
+            'SUBSCRIPTION_ACTIVATED', 'SUBSCRIPTION_CANCELED'
+        ]
+        
+        if value not in supported_events:
+            raise ValidationError(f"Evento {value} não suportado")
+        
+        return value
+
+# ==========================================
+# 8. SERIALIZERS DE ADMIN (NOVOS)
+# ==========================================
+
+class AdminStoreSerializer(serializers.ModelSerializer):
+    """Serializer para admin panel"""
+    owner_email = serializers.CharField(source='owner.email', read_only=True)
+    owner_name = serializers.CharField(source='owner.name', read_only=True)
+    product_count = serializers.IntegerField(read_only=True)
+    subscription_status = serializers.CharField(read_only=True)
+    days_until_expiry = serializers.IntegerField(read_only=True)
+    can_add_products = serializers.BooleanField(read_only=True)
+    
+    class Meta:
+        model = Store
+        fields = [
+            'id', 'name', 'slug', 'owner_email', 'owner_name',
+            'plan', 'product_count', 'whatsapp', 'created_at', 'updated_at',
+            'payment_provider', 'payment_external_id',
+            'subscription_started_at', 'subscription_expires_at',
+            'subscription_status', 'days_until_expiry', 'can_add_products'
+        ]

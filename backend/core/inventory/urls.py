@@ -7,6 +7,8 @@ from .views import (
     InventoryViewSet,
     SessionControlView,
     SessionSummaryView,
+    ThemeConfigAdminView,
+    ThemeConfigPublicView,
     apply_fifo_withdrawal,
     associate_user_store,
     debug_user_store,
@@ -70,6 +72,20 @@ urlpatterns = [
     path('dashboard/overview/', dashboard_overview, name='dashboard-overview'),
     path('dashboard/financial/', dashboard_financial_summary, name='dashboard-financial'),
     path('dashboard/inventory/', dashboard_inventory_analysis, name='dashboard-inventory'),
+    path('cash-flow/summary/', cash_flow_summary, name='cash-flow-summary'),
+    path('cash-flow/detailed/', cash_flow_detailed, name='cash-flow-detailed'),
+
+
+    path('admin/plan-configs/', list_plan_configs, name='admin_plan_configs'),
+    path('admin/promotions/', list_promotions, name='admin_promotions'),
+    path('admin/stats/', get_system_stats, name='admin_stats'),
+    path('admin/users/', list_users, name='admin_users'),
+    path('admin/users/<int:user_id>/plan/', update_plan, name='admin_update_plan'),
+    path('admin/users/<int:user_id>/subscription/', update_subscription, name='admin_update_subscription'),
+    path('admin/analytics/products/', get_product_analytics, name='admin_product_analytics'),
+    path('admin/analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
+
+    path('check-plan-limits/', check_plan_limits_complete, name='check-plan-limits'),
     
 
     # --- Rotas Automáticas (Router) ---

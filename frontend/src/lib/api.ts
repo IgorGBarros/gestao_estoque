@@ -370,6 +370,7 @@ export const fifoApi = {
 
 // ── Batches ──
 export interface InventoryBatch {
+  expiry_date(expiry_date: any): import("react").ReactNode;
   id: string; // ✅ CORREÇÃO: Mudar de number para string
   quantity: number;
   cost_price: number;
@@ -396,6 +397,7 @@ export const batchApi = {
 
 // ── Movements ──
 export interface Movement {
+  movement_type: string;
   id: string;
   product_name: string;
   transaction_type: string;
@@ -472,19 +474,41 @@ export const movementsApi = {
 
 // ── Admin ──
 export const adminApi = {
+  // ✅ Existentes (sem alteração)
   listUsers: () => apiRequest<any[]>("/admin/users/"),
+
   updatePlan: (id: string | number, plan: "free" | "pro") =>
     apiRequest<{ message: string; plan: string }>(`/admin/users/${id}/plan/`, {
       method: "PATCH",
       body: JSON.stringify({ plan }),
     }),
+
   updateSubscription: (id: string | number, data: any) =>
     apiRequest<{ message: string }>(`/admin/users/${id}/subscription/`, {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
-};
 
+  // ✅ NOVOS — Dados reais do backend (sem mock)
+  getProductAnalytics: () =>
+    apiRequest<any>("/admin/analytics/products/"),
+
+  getBehaviorAnalytics: () =>
+    apiRequest<any>("/admin/analytics/behavior/"),
+
+  getMlInsights: () =>
+    apiRequest<any>("/admin/analytics/ml-insights/"),
+
+  // ✅ NOVOS — Planos, Promoções, Stats (dados reais)
+  listPlanConfigs: () =>
+    apiRequest<any[]>("/admin/plan-configs/"),
+
+  listPromotions: () =>
+    apiRequest<any[]>("/admin/promotions/"),
+
+  getSystemStats: () =>
+    apiRequest<any>("/admin/stats/"),
+};
 // ── Profile ──
 export interface Profile {
   id: string;
@@ -768,5 +792,51 @@ export const sessionApi = {
   getSummary: async () => {
     const response = await api.get('/session-summary/');
     return response.data;
+  },
+
+  // ✅ ADICIONAR
+  confirmInvestment: async (sessionId: number, data: any) => {
+    const response = await api.post('/session-summary/', {
+      session_id: sessionId,
+      ...data
+    });
+    return response.data;
   }
+};
+
+// lib/api.ts (adicionar)
+
+export interface ThemeConfig {
+  color_primary: string;
+  color_primary_light: string;
+  color_success: string;
+  color_text: string;
+  color_accent: string;
+  color_destructive: string;
+  color_warning: string;
+  color_background: string;
+  color_card: string;
+  color_border: string;
+  app_name: string;
+  logo_url: string | null;
+  updated_at: string;
+}
+
+// Público — sem auth (para landing page e carregamento inicial)
+export const themeApi = {
+  get: async (): Promise<ThemeConfig> => {
+    const response = await fetch(`${API_BASE_URL}/api/public/theme/`);
+    if (!response.ok) throw new Error('Erro ao carregar tema');
+    return response.json();
+  },
+};
+
+// Admin — com auth
+export const adminThemeApi = {
+  get: () => apiRequest<ThemeConfig>('/admin/theme/'),
+  update: (data: Partial<ThemeConfig>) =>
+    apiRequest<ThemeConfig>('/admin/theme/', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 };
