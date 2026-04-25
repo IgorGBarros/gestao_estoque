@@ -62,14 +62,17 @@ export default {
         // Leem de CSS variables definidas no index.css
         // Atualizáveis via ThemeProvider ou Admin Panel
         // ══════════════════════════════════════════
-        brand: {
-          DEFAULT: "var(--color-brand)",
-          hover: "var(--color-brand-hover)",
-          soft: "var(--color-brand-soft)",
-        },
-        success: {
-          DEFAULT: "var(--color-success)",
-        },
+          brand: {
+            DEFAULT: "var(--color-brand)",
+            hover: "var(--color-brand-hover)",
+            soft: "var(--color-brand-soft)",
+            peach: "var(--color-brand-peach)",
+            lavender: "var(--color-brand-lavender)",
+            rose: "var(--color-brand-rose)",
+          },
+          success: {
+            DEFAULT: "var(--color-success)",
+          },
 
         // ══════════════════════════════════════════
         // CORES DO CHAT (existentes)
