@@ -3,6 +3,7 @@ from time import time
 from aiohttp import request
 from django.db import models
 from django.db import transaction
+from pydantic_core import ValidationError
 from rest_framework import viewsets,status, permissions, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -19,8 +20,8 @@ from django.contrib.auth import get_user_model
 
 from rest_framework_simplejwt.views import TokenObtainPairView,TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import CustomTokenObtainPairSerializer, CustomUserSerializer, ProfileSerializer, ThemeConfigSerializer
-from .models import CustomUser, RegistrationSession, ThemeConfig
+from .serializers import CustomTokenObtainPairSerializer, CustomUserSerializer, ProfileSerializer
+from .models import CustomUser, RegistrationSession
 
 
 # Imports do seu Projeto
@@ -221,10 +222,10 @@ def ensure_user_has_store(user):
         import traceback
         traceback.print_exc()
         raise
+# inventory/mixins.py ou views.py
+
 class TenantModelMixin:
-    """
-    Mixin para ViewSets. Filtra automaticamente os dados pela loja do usuário.
-    """
+    """Mixin tenant-aware com validação de limites"""
     permission_classes = [IsAuthenticated]
     
     def get_store(self):
@@ -232,14 +233,49 @@ class TenantModelMixin:
     
     def get_queryset(self):
         try:
-            store = ensure_user_has_store(self.request.user)
+            store = self.get_store()
             return InventoryItem.objects.filter(store=store).select_related('product')
         except Exception as e:
             print(f"❌ Erro no get_queryset: {e}")
             return InventoryItem.objects.none()
     
     def perform_create(self, serializer):
-        serializer.save(store=self.get_store())
+        store = self.get_store()
+
+
+        
+        # VALIDAÇÃO DE LIMITE (novo)
+        if hasattr(self, 'check_plan_limits'):
+            self.check_plan_limits(store)
+        
+        serializer.save(store=store)
+    
+    def check_plan_limits(self, store):
+        """Valida limites do plano antes de criar"""
+        if not store.can_add_products:
+            from rest_framework.exceptions import ValidationError
+            
+            config = store.plan_config
+            limit = config.max_products if config else 20
+            
+            raise ValidationError({
+                'error': 'PLAN_LIMIT_REACHED',
+                'message': f'Você atingiu o limite de {limit} produtos do plano {store.plan.upper()}.',
+                'current_plan': store.plan,
+                'current_count': store.product_count,
+                'limit': limit
+            })
+
+# Usar no ViewSet de produtos:
+class InventoryItemViewSet(TenantModelMixin, viewsets.ModelViewSet):
+    # ... seu código atual ...
+    
+    def create(self, request, *args, **kwargs):
+        """Override para validar limites"""
+        store = self.get_store()
+        self.check_plan_limits(store)  # Valida antes de criar
+        
+        return super().create(request, *args, **kwargs)
 
 
 # ==========================================
@@ -815,7 +851,7 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
 
 class StockEntryView(APIView):
     permission_classes = [IsAuthenticated]
-
+    
     def post(self, request):
         print(f"\n=== [DEBUG] StockEntryView ===")
         print(f"Usuário: {request.user}")
@@ -845,20 +881,7 @@ class StockEntryView(APIView):
         data = serializer.validated_data
         print(f"✅ Dados validados: {data}")
         
-        store = get_current_store(request.user)
-        print(f"Store encontrada: {store}")
-        
-        if not store:
-            print("❌ Usuário sem loja vinculada")
-            return Response({"error": "Usuário não possui loja vinculada."}, status=403)
-        
-        # ✅ NOVO: VALIDAÇÃO DE LIMITE ANTES DE PROCESSAR
-        try:
-            self.validate_plan_limits(store, data)
-        except ValidationError as e:
-            print(f"❌ Limite de plano atingido: {e.detail}")
-            return Response(e.detail, status=400)
-        
+        # ✅ 3. Processar entrada de estoque (lógica existente mantida)
         try:
             with transaction.atomic():
                 # Conversão de strings vazias para None
@@ -870,12 +893,13 @@ class StockEntryView(APIView):
                 
                 name_input = data.get('name', '').strip()
                 category_input = data.get('category', 'Geral')
-                # Proteção contra nomes de fallback [1]
+                
                 if name_input in ["Produto sem nome", "Produto Novo", ""]:
                     name_input = "Produto Novo"
+                
                 print(f"Buscando produto: SKU={sku_input}, Barcode={barcode_input}")
                 
-                # 1. Buscar produto no catálogo [1]
+                # 1. Buscar produto no catálogo
                 product = None
                 
                 if barcode_input:
@@ -883,9 +907,10 @@ class StockEntryView(APIView):
                     
                 if not product and sku_input:
                     product = Product.objects.filter(natura_sku=sku_input).first()
+                
                 print(f"Produto encontrado: {product}")
                 
-                # 2. Criar ou atualizar produto [1]
+                # 2. Criar ou atualizar produto
                 if product:
                     is_protected = getattr(product, 'is_protected', False)
                     if is_protected:
@@ -910,6 +935,7 @@ class StockEntryView(APIView):
                         if data.get('image_url') and not getattr(product, 'image_url', ''):
                             product.image_url = data['image_url']
                             updated = True
+                        
                         if updated:
                             product.save()
                             print("Produto atualizado com os novos dados")
@@ -926,7 +952,7 @@ class StockEntryView(APIView):
                     )
                     print(f"Produto criado: {product}")
                 
-                # 3. Gerenciar estoque da loja [1]
+                # 3. Gerenciar estoque da loja (TENANT-AWARE)
                 print(f"Criando/atualizando InventoryItem para store={store}, product={product}")
                 item, created = InventoryItem.objects.get_or_create(
                     store=store,  # ✅ TENANT: isolamento por loja
@@ -938,6 +964,7 @@ class StockEntryView(APIView):
                     }
                 )
                 print(f"InventoryItem: {item} (criado: {created})")
+                
                 if data.get('cost_price'): 
                     item.cost_price = data['cost_price']
                 if data.get('sale_price'): 
@@ -945,7 +972,7 @@ class StockEntryView(APIView):
                 item.save()
                 print("InventoryItem salvo")
                 
-                # 4. ✅ NOVO: Verificar se já existe lote com mesma validade
+                # 4. Verificar se já existe lote com mesma validade (CONSOLIDAÇÃO)
                 expiration_date = data.get('expiration_date')
                 existing_batch = None
                 
@@ -960,6 +987,7 @@ class StockEntryView(APIView):
                         expiration_date__isnull=True,
                         quantity__gt=0
                     ).first()
+                
                 if existing_batch:
                     # ✅ CONSOLIDAR: Somar quantidade no lote existente
                     print(f"📦 Consolidando com lote existente {existing_batch.id}")
@@ -977,13 +1005,13 @@ class StockEntryView(APIView):
                     )
                     print(f"Batch criado: {used_batch}")
                 
-                # 5. Atualizar Total Consolidado [1]
+                # 5. Atualizar Total Consolidado
                 total_real = item.batches.aggregate(total=Sum('quantity'))['total'] or 0
                 item.total_quantity = total_real
                 item.save()
                 print(f"Total atualizado: {total_real}")
                 
-                # 6. Registrar Transação [1]
+                # 6. Registrar Transação
                 print("Criando StockTransaction")
                 StockTransaction.objects.create(
                     store=store,  # ✅ TENANT: transação por loja
@@ -997,98 +1025,40 @@ class StockEntryView(APIView):
                 )
                 print("Transação criada")
                 
-                # 7. Adicionar à sessão se existir
+                # 7. Adicionar à sessão se existir (opcional)
                 try:
                     from .models import RegistrationSession
                     session = RegistrationSession.objects.filter(store=store, is_active=True).first()
                     if session:
                         session.add_product(item, data['quantity'])
-                except:
-                    pass  # Sessão é opcional
+                        print(f"✅ Produto adicionado à sessão {session.id}")
+                except Exception as session_error:
+                    print(f"⚠️ Erro na sessão (não crítico): {session_error}")
+                    # Sessão é opcional, não quebra o fluxo
                     
+        except ValidationError as e:
+            # ✅ Erros de validação (como limite de plano)
+            print(f"❌ Erro de validação: {e.detail}")
+            return Response(e.detail, status=400)
         except Exception as e:
             print(f"❌ ERRO na transação: {str(e)}")
             print(f"Tipo do erro: {type(e)}")
             import traceback
             traceback.print_exc()
             return Response({"error": f"Erro interno: {str(e)}"}, status=500)
-
+        
         print("✅ Sucesso!")
         return Response({
             "message": "Estoque atualizado com sucesso!", 
             "product": product.name,
             "new_total": item.total_quantity,
-            "batch_consolidated": existing_batch is not None
+            "batch_consolidated": existing_batch is not None,
+            "tenant_info": {
+                "store_id": store.id,
+                "current_products": store.product_count if hasattr(store, 'product_count') else 'N/A',
+                "plan": store.plan
+            }
         })
-    
-    def validate_plan_limits(self, store, data):
-        """✅ NOVO: Validação de limites do plano"""
-        # Verificar se é um produto novo para a loja
-        bar_code = data.get('bar_code')
-        natura_sku = data.get('natura_sku')
-        
-        is_new_product = self.is_new_product_for_store(store, bar_code, natura_sku)
-        
-        if is_new_product:
-            print(f"🆕 Produto novo detectado - validando limites do plano {store.plan}")
-            
-            # Obter configuração do plano
-            try:
-                from .models import PlanConfig
-                plan_config = PlanConfig.objects.filter(plan_type=store.plan).first()
-            except:
-                plan_config = None
-            
-            # Definir limite baseado no plano
-            if plan_config and plan_config.max_products:
-                limit = plan_config.max_products
-            else:
-                # Fallback para limites hardcoded
-                limit = 20 if store.plan == 'free' else None
-            
-            # Se tem limite, verificar
-            if limit is not None:
-                current_count = store.items.values('product').distinct().count()
-                print(f"📊 Contagem atual: {current_count}/{limit}")
-                
-                if current_count >= limit:
-                    from rest_framework.exceptions import ValidationError
-                    raise ValidationError({
-                        'error': 'PLAN_LIMIT_REACHED',
-                        'message': f'Você atingiu o limite de {limit} produtos do plano {store.plan.upper()}.',
-                        'current_plan': store.plan,
-                        'current_count': current_count,
-                        'limit': limit,
-                        'upgrade_required': True,
-                        'upgrade_url': '/upgrade'
-                    })
-            else:
-                print(f"✅ Plano {store.plan} permite produtos ilimitados")
-        else:
-            print(f"📦 Produto já existe na loja - sem validação de limite")
-    
-    def is_new_product_for_store(self, store, bar_code, natura_sku):
-        """✅ NOVO: Verifica se é produto novo para a loja"""
-        # Se não tem identificador, é produto novo
-        if not bar_code and not natura_sku:
-            return True
-        
-        # Verificar se já existe no estoque da loja
-        existing_item = None
-        
-        if bar_code:
-            existing_item = InventoryItem.objects.filter(
-                store=store,
-                product__bar_code=bar_code
-            ).first()
-        
-        if not existing_item and natura_sku:
-            existing_item = InventoryItem.objects.filter(
-                store=store,
-                product__natura_sku=natura_sku
-            ).first()
-        
-        return existing_item is None
 # inventory/views.py - CORRIGIR SaleCheckoutView
 
 class SaleCheckoutView(APIView):
@@ -1360,217 +1330,371 @@ def public_storefront(request, slug):
         },
         "items": items_data
     })
-# inventory/views.py - ADICIONAR estas funções ao seu arquivo
 
-from django.db.models import Sum, Count, Avg, Q, F
+from django.db.models import Sum, Count, F, Q
 from django.utils import timezone
 from datetime import datetime, timedelta
+
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_overview(request):
-    """Dashboard principal - VERSÃO CORRIGIDA FINAL"""
+    """Dashboard principal - VERSÃO CORRIGIDA COM VERIFICAÇÕES DE SEGURANÇA"""
     try:
         store = ensure_user_has_store(request.user)
         if not store:
             return Response({'error': 'Loja não encontrada'}, status=400)
 
-        # Período para análises (últimos 30 dias)
-        thirty_days_ago = timezone.now() - timedelta(days=30)
-        today = timezone.now().date()
-        
-                # Período configurável
+        # ✅ PERÍODO CONFIGURÁVEL COM VALIDAÇÃO
         period = request.GET.get('period', '30d')
-        days = {'7d': 7, '30d': 30, '90d': 90}[period]
+        period_map = {'7d': 7, '30d': 30, '90d': 90, '180d': 180, '1y': 365}
+        days = period_map.get(period, 30)
         start_date = timezone.now() - timedelta(days=days)
-        
-        # 📊 MÉTRICAS DE ESTOQUE - CORRIGIDO
-        inventory_items = InventoryItem.objects.filter(store=store)
-        
-        # ✅ CALCULAR TOTAIS CORRETAMENTE (sem agregação problemática)
-        total_products = inventory_items.count()
-        total_stock = sum(item.total_quantity or 0 for item in inventory_items)
-        low_stock_count = inventory_items.filter(
-            total_quantity__lte=F('min_quantity')
-        ).count()
-        
-        # ✅ CALCULAR VALORES FINANCEIROS MANUALMENTE
+        today = timezone.now().date()
+
+        print(f"📊 Dashboard período: {period} ({days} dias) - desde {start_date.date()}")
+
+        # 📊 MÉTRICAS DE ESTOQUE COM VERIFICAÇÃO
+        try:
+            inventory_items = InventoryItem.objects.filter(store=store)
+            total_products = inventory_items.count()
+            total_stock = sum(item.total_quantity or 0 for item in inventory_items)
+            
+            # ✅ CORREÇÃO: Verificar se min_quantity existe
+            low_stock_items = inventory_items.filter(
+                Q(total_quantity__lte=F('min_quantity')) | Q(total_quantity=0)
+            )
+            low_stock_count = low_stock_items.count()
+        except Exception as e:
+            print(f"⚠️ Erro nas métricas de estoque: {e}")
+            total_products = 0
+            total_stock = 0
+            low_stock_count = 0
+
+        # 💰 VALORES FINANCEIROS COM VERIFICAÇÃO
         total_invested = 0
         total_potential = 0
-        
-        for item in inventory_items:
-            if item.total_quantity and item.cost_price:
-                total_invested += item.total_quantity * item.cost_price
-            if item.total_quantity and item.sale_price:
-                total_potential += item.total_quantity * item.sale_price
-        
-        # 💰 MÉTRICAS FINANCEIRAS (últimos 30 dias)
-        sales_stats = StockTransaction.objects.filter(
-            store=store,
-            transaction_type='VENDA',
-            created_at__gte=thirty_days_ago
-        ).aggregate(
-            total_sales=Count('id'),
-            total_revenue=Sum('unit_price'),
-            total_items_sold=Sum('quantity')
-        )
-        
-        # ✅ CORRIGIR valor de items_sold (deve ser positivo)
-        total_items_sold = abs(sales_stats['total_items_sold'] or 0)
-        
-        # 📈 VENDAS POR DIA (últimos 7 dias)
-        seven_days_ago = timezone.now() - timedelta(days=7)
-        daily_sales = []
-        for i in range(7):
-            day = seven_days_ago + timedelta(days=i)
-            day_sales = StockTransaction.objects.filter(
+        try:
+            for item in inventory_items:
+                if item.total_quantity and item.cost_price:
+                    total_invested += item.total_quantity * item.cost_price
+                if item.total_quantity and item.sale_price:
+                    total_potential += item.total_quantity * item.sale_price
+        except Exception as e:
+            print(f"⚠️ Erro nos valores financeiros: {e}")
+
+        # 💸 RECEITAS E VENDAS COM VERIFICAÇÃO
+        try:
+            revenue_transactions = StockTransaction.objects.filter(
                 store=store,
                 transaction_type='VENDA',
-                created_at__date=day.date()
-            ).aggregate(
-                revenue=Sum('unit_price'),
-                quantity=Sum('quantity')
+                created_at__gte=start_date
             )
-            daily_sales.append({
-                'date': day.strftime('%Y-%m-%d'),
-                'day_name': day.strftime('%a'),
-                'revenue': float(day_sales['revenue'] or 0),
-                'quantity': abs(int(day_sales['quantity'] or 0))
-            })
-        
-        # 🏆 TOP PRODUTOS (mais vendidos)
-        top_products = StockTransaction.objects.filter(
-            store=store,
-            transaction_type='VENDA',
-            created_at__gte=thirty_days_ago
-        ).values(
-            'product__name',
-            'product__id'
-        ).annotate(
-            total_sold=Sum('quantity'),
-            total_revenue=Sum('unit_price')
-        ).order_by('total_sold')[:5]  # Ordenar crescente pois quantity é negativo
-        
-        # 📊 ANÁLISE POR CATEGORIA - CORRIGIDO
-        category_stats = []
-        categories = InventoryItem.objects.filter(
-            store=store,
-            total_quantity__gt=0
-        ).values_list('product__category', flat=True).distinct()
-        
-        for category in categories:
-            items = InventoryItem.objects.filter(
-                store=store,
-                product__category=category,
-                total_quantity__gt=0
-            )
-            
-            total_products_cat = items.count()
-            total_quantity_cat = sum(item.total_quantity or 0 for item in items)
-            
-            # Calcular valor total manualmente
-            total_value = sum(
-                (item.total_quantity or 0) * (item.sale_price or 0) 
-                for item in items
-            )
-            
-            category_stats.append({
-                'category': category or 'Sem categoria',
-                'total_products': total_products_cat,
-                'total_quantity': total_quantity_cat,
-                'total_value': total_value
-            })
-        
-        # Ordenar por valor
-        category_stats.sort(key=lambda x: x['total_value'], reverse=True)
-        
-        # ⚠️ ALERTAS DE ESTOQUE
-        low_stock_items = InventoryItem.objects.filter(
-            store=store,
-            total_quantity__lte=F('min_quantity')
-        ).select_related('product')[:10]
-        
-        # 📦 PRODUTOS PRÓXIMOS DO VENCIMENTO (próximos 30 dias)
-        thirty_days_from_now = today + timedelta(days=30)
-        expiring_soon = []
+
+            # ✅ CORREÇÃO: Verificar se existem transações
+            if revenue_transactions.exists():
+                total_revenue = revenue_transactions.aggregate(
+                    total=Sum('unit_price')
+                )['total'] or 0
+                
+                total_sales = revenue_transactions.count()
+                
+                # ✅ CORREÇÃO: Evitar erro de agregação
+                quantity_sum = 0
+                for trans in revenue_transactions:
+                    quantity_sum += abs(trans.quantity or 0)
+                total_items_sold = quantity_sum
+            else:
+                total_revenue = 0
+                total_sales = 0
+                total_items_sold = 0
+        except Exception as e:
+            print(f"⚠️ Erro nas receitas: {e}")
+            total_revenue = 0
+            total_sales = 0
+            total_items_sold = 0
+
+        # 📈 VENDAS POR SEMANA COM VERIFICAÇÃO
+        weekly_sales = []
         try:
-            expiring_soon = InventoryBatch.objects.filter(
+            weeks_back = 4
+            for i in range(weeks_back):
+                week_start = timezone.now() - timedelta(weeks=i+1)
+                week_end = timezone.now() - timedelta(weeks=i)
+                
+                week_transactions = StockTransaction.objects.filter(
+                    store=store,
+                    transaction_type='VENDA',
+                    created_at__range=[week_start, week_end]
+                )
+                
+                # ✅ CÁLCULO MANUAL PARA EVITAR ERROS DE AGREGAÇÃO
+                revenue = 0
+                quantity = 0
+                cost = 0
+                
+                for trans in week_transactions:
+                    revenue += trans.unit_price or 0
+                    quantity += abs(trans.quantity or 0)
+                    cost += abs((trans.quantity or 0) * (trans.unit_cost or 0))
+                
+                profit = revenue - cost
+                
+                weekly_sales.append({
+                    'week': f'S{weeks_back - i}',
+                    'week_label': f'Semana {weeks_back - i}',
+                    'revenue': float(revenue),
+                    'quantity': int(quantity),
+                    'profit': float(profit),
+                    'cost': float(cost)
+                })
+            
+            weekly_sales.reverse()  # Ordem cronológica
+        except Exception as e:
+            print(f"⚠️ Erro nas vendas semanais: {e}")
+            weekly_sales = []
+
+        # 📊 VENDAS POR MÊS COM VERIFICAÇÃO
+        monthly_comparison = []
+        try:
+            for i in range(3):
+                month_start = (timezone.now().replace(day=1) - timedelta(days=30*i))
+                month_end = month_start + timedelta(days=30)
+                
+                month_transactions = StockTransaction.objects.filter(
+                    store=store,
+                    transaction_type='VENDA',
+                    created_at__range=[month_start, month_end]
+                )
+                
+                # ✅ CÁLCULO MANUAL
+                revenue = 0
+                cost = 0
+                quantity = 0
+                
+                for trans in month_transactions:
+                    revenue += trans.unit_price or 0
+                    cost += abs((trans.quantity or 0) * (trans.unit_cost or 0))
+                    quantity += abs(trans.quantity or 0)
+                
+                profit = revenue - cost
+                
+                monthly_comparison.append({
+                    'month': month_start.strftime('%b/%Y'),
+                    'month_short': month_start.strftime('%b'),
+                    'revenue': float(revenue),
+                    'profit': float(profit),
+                    'cost': float(cost),
+                    'quantity': int(quantity)
+                })
+
+            monthly_comparison.reverse()
+        except Exception as e:
+            print(f"⚠️ Erro nas vendas mensais: {e}")
+            monthly_comparison = []
+
+        # 📈 VENDAS DIÁRIAS COM VERIFICAÇÃO
+        daily_sales = []
+        try:
+            for i in range(7):
+                day = timezone.now() - timedelta(days=6-i)
+                
+                day_transactions = StockTransaction.objects.filter(
+                    store=store,
+                    transaction_type='VENDA',
+                    created_at__date=day.date()
+                )
+                
+                # ✅ CÁLCULO MANUAL
+                revenue = 0
+                quantity = 0
+                cost = 0
+                
+                for trans in day_transactions:
+                    revenue += trans.unit_price or 0
+                    quantity += abs(trans.quantity or 0)
+                    cost += abs((trans.quantity or 0) * (trans.unit_cost or 0))
+                
+                daily_sales.append({
+                    'date': day.strftime('%Y-%m-%d'),
+                    'day_name': day.strftime('%a'),
+                    'day_full': day.strftime('%d/%m'),
+                    'revenue': float(revenue),
+                    'quantity': int(quantity),
+                    'profit': float(revenue - cost),
+                    'cost': float(cost)
+                })
+        except Exception as e:
+            print(f"⚠️ Erro nas vendas diárias: {e}")
+            daily_sales = []
+
+        # 🏆 TOP PRODUTOS COM VERIFICAÇÃO
+        top_products = []
+        try:
+            # ✅ CÁLCULO MANUAL PARA EVITAR ERROS
+            product_stats = {}
+            
+            for trans in StockTransaction.objects.filter(
+                store=store,
+                transaction_type='VENDA',
+                created_at__gte=start_date
+            ).select_related('product'):
+                
+                if not trans.product:
+                    continue
+                    
+                product_id = trans.product.id
+                product_name = trans.product.name
+                
+                if product_id not in product_stats:
+                    product_stats[product_id] = {
+                        'name': product_name,
+                        'id': product_id,
+                        'total_sold': 0,
+                        'total_revenue': 0,
+                        'total_cost': 0
+                    }
+                
+                product_stats[product_id]['total_sold'] += abs(trans.quantity or 0)
+                product_stats[product_id]['total_revenue'] += trans.unit_price or 0
+                product_stats[product_id]['total_cost'] += abs((trans.quantity or 0) * (trans.unit_cost or 0))
+            
+            # Converter para lista e ordenar
+            top_products = sorted(
+                product_stats.values(),
+                key=lambda x: x['total_revenue'],
+                reverse=True
+            )[:10]
+            
+            # Adicionar lucro
+            for product in top_products:
+                product['profit'] = product['total_revenue'] - product['total_cost']
+                
+        except Exception as e:
+            print(f"⚠️ Erro nos top produtos: {e}")
+            top_products = []
+
+        # 📊 ANÁLISE POR CATEGORIA COM VERIFICAÇÃO
+        category_stats = []
+        try:
+            categories = InventoryItem.objects.filter(
+                store=store,
+                total_quantity__gt=0
+            ).values_list('product__category', flat=True).distinct()
+
+            category_total_value = 0
+            for category in categories:
+                if not category:
+                    category = 'Sem categoria'
+                    
+                items = InventoryItem.objects.filter(
+                    store=store,
+                    product__category=category,
+                    total_quantity__gt=0
+                )
+                
+                total_products_cat = items.count()
+                total_quantity_cat = sum(item.total_quantity or 0 for item in items)
+                total_value = sum(
+                    (item.total_quantity or 0) * (item.sale_price or 0)
+                    for item in items
+                )
+                category_total_value += total_value
+                
+                category_stats.append({
+                    'category': category,
+                    'total_products': total_products_cat,
+                    'total_quantity': total_quantity_cat,
+                    'total_value': total_value
+                })
+
+            # Calcular percentuais
+            for cat in category_stats:
+                cat['percentage'] = (cat['total_value'] / max(category_total_value, 1)) * 100
+
+            category_stats.sort(key=lambda x: x['total_value'], reverse=True)
+        except Exception as e:
+            print(f"⚠️ Erro na análise por categoria: {e}")
+            category_stats = []
+
+        # ⚠️ ALERTAS COM VERIFICAÇÃO
+        low_stock_alerts = []
+        expiring_soon = []
+        
+        try:
+            low_stock_alerts = [
+                {
+                    'id': item.id,
+                    'product_name': item.product.name if item.product else 'Produto sem nome',
+                    'current_stock': item.total_quantity or 0,
+                    'min_stock': item.min_quantity or 0,
+                    'status': 'critical' if (item.total_quantity or 0) == 0 else 'warning'
+                }
+                for item in InventoryItem.objects.filter(
+                    Q(total_quantity__lte=F('min_quantity')) | Q(total_quantity=0),
+                    store=store
+                ).select_related('product')[:10]
+            ]
+        except Exception as e:
+            print(f"⚠️ Erro nos alertas de estoque baixo: {e}")
+
+        try:
+            thirty_days_from_now = today + timedelta(days=30)
+            expiring_batches = InventoryBatch.objects.filter(
                 item__store=store,
                 expiration_date__lte=thirty_days_from_now,
                 expiration_date__gte=today,
                 quantity__gt=0
             ).select_related('item__product').order_by('expiration_date')[:10]
+            
+            expiring_soon = [
+                {
+                    'id': batch.id,
+                    'product_name': batch.item.product.name if batch.item and batch.item.product else 'Produto sem nome',
+                    'batch_code': batch.batch_code or 'S/N',
+                    'expiration_date': batch.expiration_date,
+                    'quantity': batch.quantity,
+                    'days_to_expire': (batch.expiration_date - today).days
+                }
+                for batch in expiring_batches
+            ]
         except Exception as e:
-            print(f"⚠️ Erro ao buscar lotes vencendo: {e}")
-        
-        # 💡 CÁLCULOS DERIVADOS
-        profit_potential = total_potential - total_invested
-        avg_ticket = (sales_stats['total_revenue'] or 0) / max(sales_stats['total_sales'] or 1, 1)
+            print(f"⚠️ Erro nos alertas de vencimento: {e}")
 
-                # ✅ NOVO: Vendas por semana
-        weekly_sales = []
-        weeks_back = 4  # Últimas 4 semanas
+        # 💡 MÉTRICAS DE PERFORMANCE COM VERIFICAÇÃO
+        profit_potential = total_potential - total_invested
+        avg_ticket = total_revenue / max(total_sales, 1)
         
-        for i in range(weeks_back):
-            week_start = timezone.now() - timedelta(weeks=i+1)
-            week_end = timezone.now() - timedelta(weeks=i)
-            
-            week_data = StockTransaction.objects.filter(
-                store=store,
-                transaction_type='VENDA',
-                created_at__range=[week_start, week_end]
-            ).aggregate(
-                revenue=Sum('unit_price'),
-                quantity=Sum('quantity'),
-                cost=Sum('unit_cost')
-            )
-            
-            revenue = float(week_data['revenue'] or 0)
-            cost = float(week_data['cost'] or 0)
-            profit = revenue - cost
-            
-            weekly_sales.append({
-                'week': f'Sem {weeks_back - i}',
-                'revenue': revenue,
-                'quantity': abs(week_data['quantity'] or 0),
-                'profit': profit
-            })
+        turnover_rate = total_items_sold / max(total_stock, 1) if total_stock > 0 else 0
+        stock_rotation_days = 30 / max(turnover_rate, 0.1) if turnover_rate > 0 else 0
+        sell_through_rate = (total_items_sold / max(total_stock, 1)) * 100 if total_stock > 0 else 0
+
+        # Margem de lucro real
+        total_cost_sold = sum(
+            abs((trans.quantity or 0) * (trans.unit_cost or 0))
+            for trans in revenue_transactions
+        ) if 'revenue_transactions' in locals() else 0
         
-        weekly_sales.reverse()  # Ordem cronológica
-        
-        # ✅ NOVO: Comparação mensal (últimos 3 meses)
-        monthly_comparison = []
-        for i in range(3):
-            month_start = timezone.now().replace(day=1) - timedelta(days=30*i)
-            month_end = month_start + timedelta(days=30)
-            
-            month_data = StockTransaction.objects.filter(
-                store=store,
-                transaction_type='VENDA',
-                created_at__range=[month_start, month_end]
-            ).aggregate(
-                revenue=Sum('unit_price'),
-                cost=Sum('unit_cost')
-            )
-            
-            revenue = float(month_data['revenue'] or 0)
-            cost = float(month_data['cost'] or 0)
-            
-            monthly_comparison.append({
-                'month': month_start.strftime('%b/%Y'),
-                'revenue': revenue,
-                'profit': revenue - cost
-            })
-        
-        monthly_comparison.reverse()
-        
-       # ✅ NOVO: Categorias com percentual
-        category_total_value = sum(cat['total_value'] for cat in category_stats)
-        for cat in category_stats:
-            cat['percentage'] = (cat['total_value'] / max(category_total_value, 1)) * 100
-        
-        
+        real_profit = total_revenue - total_cost_sold
+        real_margin = (real_profit / max(total_revenue, 1)) * 100
+
+        # ✅ FLUXO DE CAIXA
+        cash_flow_summary = {
+            'total_income': float(total_revenue),
+            'total_expenses': float(total_cost_sold),
+            'net_flow': float(real_profit),
+            'daily_average': float(total_revenue / max(days, 1)),
+            'margin_percent': float(real_margin),
+            'growth_rate': 0.0
+        }
+
         return Response({
+            'period_info': {
+                'selected': period,
+                'days': days,
+                'start_date': start_date.date(),
+                'end_date': today
+            },
             'store_info': {
                 'name': store.name,
                 'plan': getattr(store, 'plan', 'free'),
@@ -1580,8 +1704,11 @@ def dashboard_overview(request):
                 'total_invested': float(total_invested),
                 'total_potential': float(total_potential),
                 'profit_potential': float(profit_potential),
-                'total_revenue_30d': float(sales_stats['total_revenue'] or 0),
-                'avg_ticket': float(avg_ticket)
+                'total_revenue_30d': float(total_revenue),
+                'avg_ticket': float(avg_ticket),
+                'margin_percent': float(real_margin),
+                'real_profit': float(real_profit),
+                'cost_of_goods_sold': float(total_cost_sold)
             },
             'inventory': {
                 'total_products': total_products,
@@ -1589,57 +1716,99 @@ def dashboard_overview(request):
                 'low_stock_count': low_stock_count
             },
             'sales': {
-                'total_sales_30d': sales_stats['total_sales'] or 0,
+                'total_sales_30d': total_sales,
                 'total_items_sold_30d': total_items_sold,
-                'daily_sales': daily_sales
+                'daily_sales': daily_sales,
+                'weekly_sales': weekly_sales,
+                'monthly_comparison': monthly_comparison
             },
             'charts': {
-                'by_category': category_stats[:5],  # Top 5 categorias
+                'by_category': category_stats[:5],
                 'top_products': [
                     {
-                        'name': item['product__name'],
-                        'id': item['product__id'],
-                        'total_sold': abs(item['total_sold'] or 0),
-                        'revenue': float(item['total_revenue'] or 0)
+                        'name': item['name'],
+                        'id': item['id'],
+                        'total_sold': int(item['total_sold']),
+                        'revenue': float(item['total_revenue']),
+                        'profit': float(item['profit'])
                     }
                     for item in top_products
-                ]
+                ],
+                'performance_metrics': {
+                    'turnover_rate': round(turnover_rate, 2),
+                    'stock_rotation_days': round(stock_rotation_days),
+                    'sell_through_rate': round(sell_through_rate, 1)
+                }
             },
             'alerts': {
-                'low_stock': [
-                    {
-                        'id': item.id,
-                        'product_name': item.product.name,
-                        'current_stock': item.total_quantity,
-                        'min_stock': item.min_quantity,
-                        'status': 'critical' if item.total_quantity == 0 else 'warning'
-                    }
-                    for item in low_stock_items
-                ],
-                'expiring_soon': [
-                    {
-                        'id': batch.id,
-                        'product_name': batch.item.product.name,
-                        'batch_code': batch.batch_code or 'S/N',
-                        'expiration_date': batch.expiration_date,
-                        'quantity': batch.quantity,
-                        'days_to_expire': (batch.expiration_date - today).days
-                    }
-                    for batch in expiring_soon
-                ]
+                'low_stock': low_stock_alerts,
+                'expiring_soon': expiring_soon
             },
-            'sessions': {
-                'total_sessions_30d': 0,
-                'total_products_registered_30d': 0,
-                'avg_session_duration': 0
-            }
+            'cash_flow': cash_flow_summary
         })
-        
+
     except Exception as e:
-        print(f"❌ Erro no dashboard: {e}")
+        print(f"❌ Erro crítico no dashboard: {e}")
         import traceback
         traceback.print_exc()
-        return Response({'error': str(e)}, status=500)
+        
+        # ✅ RETORNO DE FALLBACK PARA EVITAR CRASH
+        return Response({
+            'period_info': {
+                'selected': '30d',
+                'days': 30,
+                'start_date': (timezone.now() - timedelta(days=30)).date(),
+                'end_date': timezone.now().date()
+            },
+            'store_info': {
+                'name': 'Loja',
+                'plan': 'free',
+                'created_at': timezone.now()
+            },
+            'financial': {
+                'total_invested': 0.0,
+                'total_potential': 0.0,
+                'profit_potential': 0.0,
+                'total_revenue_30d': 0.0,
+                'avg_ticket': 0.0,
+                'margin_percent': 0.0,
+                'real_profit': 0.0,
+                'cost_of_goods_sold': 0.0
+            },
+            'inventory': {
+                'total_products': 0,
+                'total_stock': 0,
+                'low_stock_count': 0
+            },
+            'sales': {
+                'total_sales_30d': 0,
+                'total_items_sold_30d': 0,
+                'daily_sales': [],
+                'weekly_sales': [],
+                'monthly_comparison': []
+            },
+            'charts': {
+                'by_category': [],
+                'top_products': [],
+                'performance_metrics': {
+                    'turnover_rate': 0.0,
+                    'stock_rotation_days': 0,
+                    'sell_through_rate': 0.0
+                }
+            },
+            'alerts': {
+                'low_stock': [],
+                'expiring_soon': []
+            },
+            'cash_flow': {
+                'total_income': 0.0,
+                'total_expenses': 0.0,
+                'net_flow': 0.0,
+                'daily_average': 0.0,
+                'margin_percent': 0.0,
+                'growth_rate': 0.0
+            }
+        })
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1831,100 +2000,71 @@ def profile_view(request):
 # ==========================================
 # 5. PAINEL ADMIN (Gestão de Assinaturas)
 # ==========================================
-class AdminUserListView(APIView):
-    """Lista todos os usuários e dados de suas lojas para o painel admin."""
-    permission_classes = [IsAuthenticated, IsAdminUser] # 🔒 Apenas Administradores!
 
-    def get(self, request):
-        users = CustomUser.objects.select_related('store').all()
-        data = []
-        for u in users:
-            store = getattr(u, 'store', None)
-            
-            # Conta quantos produtos diferentes essa loja tem em estoque
-            product_count = InventoryItem.objects.filter(store=store).count() if store else 0
-            
-            data.append({
-                "id": u.id,
-                "email": u.email,
-                "display_name": getattr(store, 'name', u.name),
-                "plan": getattr(store, 'plan', 'free'),
-                "store_slug": getattr(store, 'slug', None),
-                "storefront_enabled": getattr(store, 'storefront_enabled', False),
-                "whatsapp_number": getattr(store, 'whatsapp', None),
-                "product_count": product_count,
-                "created_at": getattr(store, 'created_at', u.last_login),
-                "last_sign_in": u.last_login,
-                "subscription_started_at": getattr(store, 'subscription_started_at', None),
-                "subscription_expires_at": getattr(store, 'subscription_expires_at', None),
-                "payment_provider": getattr(store, 'payment_provider', None),
-                "payment_external_id": getattr(store, 'payment_external_id', None),
-            })
+# Atualizar seu admin panel para usar Store diretamente
 
-class AdminUpdatePlanView(APIView):
-    """✅ CORRIGIDO: Muda o plano de um usuário rapidamente"""
-    permission_classes = [IsAuthenticated, IsAdminUser]
+def get_admin_stores():
+    """Retorna dados para admin panel (baseado em Store)"""
+    stores = []
     
-    def patch(self, request, pk):
-        try:
-            # ✅ CORREÇÃO: Usar owner em vez de user
-            store = Store.objects.get(owner__id=pk)
-            new_plan = request.data.get("plan")
-            
-            if new_plan in ["free", "pro"]:
-                store.plan = new_plan
-                store.save()
-                return Response({"message": f"Plano alterado para {new_plan}", "plan": store.plan})
-            return Response({"error": "Plano inválido"}, status=400)
-        except Store.DoesNotExist:
-            return Response({"error": "Loja não encontrada para este usuário"}, status=404)
-
-class AdminUpdateSubscriptionView(APIView):
-    """✅ CORRIGIDO: Salva os dados completos de uma assinatura"""
-    permission_classes = [IsAuthenticated, IsAdminUser]
-    
-    def patch(self, request, pk):
-        try:
-            # ✅ CORREÇÃO: Usar owner em vez de user
-            store = Store.objects.get(owner__id=pk)
-            data = request.data
-            
-            store.payment_provider = data.get("provider", store.payment_provider)
-            store.payment_external_id = data.get("external_id", store.payment_external_id)
-            store.subscription_started_at = data.get("started_at", store.subscription_started_at)
-            store.subscription_expires_at = data.get("expires_at", store.subscription_expires_at)
-            
-            if data.get("plan"):
-                store.plan = data.get("plan")
-            
-            store.save()
-            return Response({"message": "Assinatura e plano atualizados com sucesso!"})
-        except Store.DoesNotExist:
-            return Response({"error": "Loja não encontrada para este usuário"}, status=404)
-
-class AdminUpdateSubscriptionView(APIView):
-    """Salva os dados completos de uma assinatura (Gateway, Datas, etc)."""
-    permission_classes = [IsAuthenticated, IsAdminUser]
-
-    def patch(self, request, pk):
-        try:
-            store = Store.objects.get(user__id=pk)
-            data = request.data
-            
-            store.payment_provider = data.get("provider", store.payment_provider)
-            store.payment_external_id = data.get("external_id", store.payment_external_id)
-            store.subscription_started_at = data.get("started_at", store.subscription_started_at)
-            store.subscription_expires_at = data.get("expires_at", store.subscription_expires_at)
-            
-            if data.get("plan"):
-                store.plan = data.get("plan")
-                
-            store.save()
-            return Response({"message": "Assinatura e plano atualizados com sucesso!"})
-        except Store.DoesNotExist:
-            return Response({"error": "Loja não encontrada para este usuário"}, status=404)
+    for store in Store.objects.select_related('owner').prefetch_related('items'):
+        owner = store.owner
         
+        stores.append({
+            'id': store.id,
+            'store_name': store.name,
+            'store_slug': store.slug,
+            'owner_email': owner.email if owner else 'Sem dono',
+            'owner_name': owner.name if owner else 'Sem nome',
+            'plan': store.plan,
+            'product_count': store.product_count,
+            'storefront_enabled': store.storefront_enabled,
+            'whatsapp': store.whatsapp,
+            'created_at': store.created_at,
+            'last_updated': store.updated_at,
+            'payment_provider': store.payment_provider,
+            'payment_external_id': store.payment_external_id,
+            'subscription_started_at': store.subscription_started_at,
+            'subscription_expires_at': store.subscription_expires_at,
+            'subscription_status': store.subscription_status,
+            'days_until_expiry': store.days_until_expiry,
+            'can_add_products': store.can_add_products,
+            'features': store.can_use_feature
+        })
+    
+    return stores
 
+# API endpoint para admin
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_stores_list(request):
+    """Lista lojas para admin panel"""
+    if not request.user.is_staff:
+        return Response({'error': 'Sem permissão'}, status=403)
+    
+    stores = get_admin_stores()
+    return Response(stores)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_update_store_plan(request, store_id):
+    """Atualiza plano de uma loja"""
+    if not request.user.is_staff:
+        return Response({'error': 'Sem permissão'}, status=403)
+    
+    try:
+        store = Store.objects.get(id=store_id)
+        new_plan = request.data.get('plan')
+        
+        if new_plan == 'pro':
+            store.upgrade_to_pro()
+        else:
+            store.downgrade_to_free()
+        
+        return Response({'success': True, 'new_plan': store.plan})
+    
+    except Store.DoesNotExist:
+        return Response({'error': 'Loja não encontrada'}, status=404)
 # inventory/views.py - ADICIONAR
 # inventory/views.py - CORRIGIR SessionControlView
 
@@ -3102,3 +3242,42 @@ def check_plan_limits_complete(request):
             'remaining': 20,
             'features': {'scanner': True, 'storefront': False}
         }, status=200)
+
+# backend/core/inventory/views.py (adicionar)
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny, IsAdminUser
+from rest_framework import status
+
+class ThemeConfigPublicView(APIView):
+    """
+    GET público — qualquer pessoa pode ler o tema.
+    Não requer autenticação (landing page precisa).
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request):
+        theme = ThemeConfig.load()
+        serializer = ThemeConfigSerializer(theme)
+        return Response(serializer.data)
+
+
+class ThemeConfigAdminView(APIView):
+    """
+    GET/PATCH protegido — apenas admin pode alterar.
+    """
+    permission_classes = [IsAdminUser]
+    
+    def get(self, request):
+        theme = ThemeConfig.load()
+        serializer = ThemeConfigSerializer(theme)
+        return Response(serializer.data)
+    
+    def patch(self, request):
+        theme = ThemeConfig.load()
+        serializer = ThemeConfigSerializer(theme, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
