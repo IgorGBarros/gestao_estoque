@@ -8,6 +8,11 @@
 
 @layer base {
   :root {
+    --color-brand: #871745;
+    --color-brand-hover: #A91B60;
+    --color-brand-soft: #FDF2F7;
+    --color-success: #2E8B57;
+    --color-text-main: #2D292E;
     --background: 140 15% 97%;
     --foreground: 150 30% 10%;
 
