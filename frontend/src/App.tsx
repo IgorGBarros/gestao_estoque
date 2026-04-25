@@ -30,10 +30,9 @@ import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
 import LandingPage from "./pages/LandingPage";
 import NotFound from "./pages/NotFound";
-import PGBA from "./pages/pgba/PGBA";
+
 // Nova página PGBA Neural Canvas
-import PGBANeural from "./pages/pgba/PGBANeural";
-import PGBASite from "./pages/pgba/PGBASite";
+
 
 
 
@@ -59,9 +58,7 @@ const App = () => (
               <BrowserRouter>
                 <Routes>
                   {/* Rotas públicas (SEM SessionHeader) */}
-                  <Route path="/neural" element={<PGBANeural />} />
-                  <Route path="/site" element={<PGBASite />} />
-                  <Route path="/pgba" element={<PGBA />} />
+           
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/vitrine/:slug" element={<Storefront />} />
                   <Route path="/vitrine" element={<Storefront />} />
