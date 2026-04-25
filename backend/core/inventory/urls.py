@@ -23,7 +23,8 @@ from .views import (
     CustomTokenObtainPairView,
     StockTransactionViewSet,
     profile_view,
-
+    ThemeConfigAdminView,
+    ThemeConfigPublicView,
     public_storefront,
     public_storefront_view,
     dashboard_overview,
