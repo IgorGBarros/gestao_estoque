@@ -24,3 +24,6 @@ dist-ssr
 *.sw?
 *.sql
 *.sqlite
+*.db   
+*.sql
+downloaded_files/
