@@ -1,6 +1,7 @@
+// components/ProductSearchModal.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
 import { useState, useEffect } from "react";
 import {
-  Search, X, Loader2, ChevronRight, Package, ImageOff
+  Search, X, Loader2, ChevronRight, Package, ImageOff,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatMoney } from "../lib/api";
@@ -11,10 +12,11 @@ interface Product {
   name: string;
   natura_sku?: string;
   bar_code?: string;
-  category?: string; 
+  category?: string;
   official_price?: number;
   image_url?: string | null;
 }
+
 interface Props {
   isOpen: boolean;
   onClose: () => void;
@@ -29,7 +31,6 @@ export default function ProductSearchModal({ isOpen, onClose, onSelect }: Props)
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // carrega catálogo local uma vez quando o modal abre
   useEffect(() => {
     if (!isOpen || loaded) return;
     setLoading(true);
@@ -46,49 +47,40 @@ export default function ProductSearchModal({ isOpen, onClose, onSelect }: Props)
       .finally(() => setLoading(false));
   }, [isOpen, loaded]);
 
-  // busca remota + fallback local
   const searchProducts = async (q: string) => {
-  setLoading(true);
-  setError(null);
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await productService.lookupByName(q);
+      let list: Product[] = [];
 
-  try {
-    // a função lookupByName faz GET e retorna o corpo JSON, não o envelope Axios
-    const response = await productService.lookupByName(q);
+      if (response.candidates && response.candidates.length > 0) {
+        list = response.candidates;
+      } else if (response.found && response.source === "local" && response.data) {
+        const data = response.data as Product;
+        list = [data];
+      }
 
-    let list: Product[] = [];
+      if (!list.length && allProducts.length) {
+        const qLower = q.toLowerCase();
+        list = allProducts.filter(
+          (p) =>
+            p.name.toLowerCase().includes(qLower) ||
+            (p.natura_sku && p.natura_sku.toLowerCase().includes(qLower)) ||
+            (p.bar_code && p.bar_code.includes(qLower))
+        );
+      }
 
-    // verifica se há candidatos (busca textual)
-    if (response.candidates && response.candidates.length > 0) {
-      list = response.candidates;
+      setResults(list.slice(0, 20));
+    } catch (err) {
+      console.error("Erro na busca remota:", err);
+      setError("Falha ao buscar produtos.");
+      setResults([]);
+    } finally {
+      setLoading(false);
     }
-    // verifica match exato de SKU/EAN
-    else if (response.found && response.source === "local" && response.data) {
-      const data = response.data as Product;
-      list = [data];
-    }
+  };
 
-    // fallback local se remoto vier vazio
-    if (!list.length && allProducts.length) {
-      const qLower = q.toLowerCase();
-      list = allProducts.filter(
-        (p) =>
-          p.name.toLowerCase().includes(qLower) ||
-          (p.natura_sku && p.natura_sku.toLowerCase().includes(qLower)) ||
-          (p.bar_code && p.bar_code.includes(qLower))
-      );
-    }
-
-    setResults(list.slice(0, 20));
-  } catch (err) {
-    console.error("Erro na busca remota:", err);
-    setError("Falha ao buscar produtos.");
-    setResults([]);
-  } finally {
-    setLoading(false);
-  }
-};
-
-  // debounce
   useEffect(() => {
     const timer = setTimeout(() => {
       if (query.length >= 2 && isOpen) searchProducts(query);
@@ -97,7 +89,6 @@ export default function ProductSearchModal({ isOpen, onClose, onSelect }: Props)
     return () => clearTimeout(timer);
   }, [query, isOpen]);
 
-  // reset quando fecha
   useEffect(() => {
     if (!isOpen) {
       setQuery("");
@@ -122,32 +113,34 @@ export default function ProductSearchModal({ isOpen, onClose, onSelect }: Props)
           animate={{ scale: 1 }}
           exit={{ scale: 0.95 }}
           onClick={(e) => e.stopPropagation()}
-          className="bg-card w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+          className="bg-card w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] border border-brand/15"
         >
-          <div className="p-4 border-b flex items-center gap-3">
-            <Search className="text-muted-foreground" />
+          {/* Search Header */}
+          <div className="p-4 border-b border-brand-peach/30 flex items-center gap-3">
+            <Search className="text-brand-rose" />
             <input
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Digite nome ou SKU (ex: 38854)..."
-              className="flex-1 outline-none text-base bg-transparent text-foreground placeholder:text-muted-foreground"
+              className="flex-1 outline-none text-base bg-transparent text-foreground placeholder:text-brand-rose/50"
             />
             <button onClick={onClose}>
-              <X className="text-muted-foreground hover:text-primary" />
+              <X className="text-brand-rose/50 hover:text-brand transition-colors" />
             </button>
           </div>
 
+          {/* Results */}
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {loading ? (
-              <div className="py-10 flex justify-center text-primary">
+              <div className="py-10 flex justify-center text-brand">
                 <Loader2 className="animate-spin" />
               </div>
             ) : error ? (
-              <div className="py-10 text-center text-red-500 text-sm">{error}</div>
+              <div className="py-10 text-center text-destructive text-sm">{error}</div>
             ) : results.length === 0 ? (
-              <div className="py-10 text-center text-gray-400">
-                <Package className="w-10 h-10 mx-auto mb-2 opacity-50" />
+              <div className="py-10 text-center text-brand-rose/60">
+                <Package className="w-10 h-10 mx-auto mb-2 text-brand-lavender" />
                 <p>Nenhum produto encontrado.</p>
                 <p className="text-xs">Digite pelo menos 2 caracteres.</p>
               </div>
@@ -159,9 +152,9 @@ export default function ProductSearchModal({ isOpen, onClose, onSelect }: Props)
                     onSelect(item);
                     onClose();
                   }}
-                  className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-xl transition-colors text-left border border-transparent hover:border-gray-200"
+                  className="w-full flex items-center gap-3 p-3 hover:bg-brand-soft rounded-xl transition-colors text-left border border-transparent hover:border-brand-peach/50"
                 >
-                  <div className="w-12 h-12 bg-muted rounded-lg shrink-0 overflow-hidden flex items-center justify-center">
+                  <div className="w-12 h-12 bg-brand-soft rounded-lg shrink-0 overflow-hidden flex items-center justify-center border border-brand-peach/30">
                     {item.image_url ? (
                       <img
                         src={item.image_url}
@@ -169,21 +162,21 @@ export default function ProductSearchModal({ isOpen, onClose, onSelect }: Props)
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <ImageOff size={20} className="text-gray-400" />
+                      <ImageOff size={20} className="text-brand-lavender" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-bold text-foreground text-sm truncate">{item.name}</p>
-                    <div className="flex gap-2 text-xs text-muted-foreground mt-1">
+                    <div className="flex gap-2 text-xs text-brand-rose/70 mt-1">
                       {item.natura_sku && <span>SKU: {item.natura_sku}</span>}
                       {item.official_price && (
-                        <span className="text-green-600 font-medium">
+                        <span className="text-brand font-medium">
                           {formatMoney(item.official_price)}
                         </span>
                       )}
                     </div>
                   </div>
-                  <ChevronRight size={16} className="text-muted-foreground/40" />
+                  <ChevronRight size={16} className="text-brand-rose/40" />
                 </button>
               ))
             )}
