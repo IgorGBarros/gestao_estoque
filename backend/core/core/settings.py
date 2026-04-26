@@ -142,6 +142,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:5173",
     "https://gestao-estoque-one.vercel.app",
     "https://gestao-estoque-k5vy.onrender.com",
+    "minhaamora.com.br"
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
