@@ -1,3 +1,5 @@
+import uuid
+
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
@@ -71,6 +73,7 @@ class Store(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
+
     # ✅ RELACIONAMENTO CORRETO
     owner = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -109,18 +112,8 @@ class Store(models.Model):
     # inventory/models.py - ATUALIZAR Store    
     @property
     def product_count(self):
-        """✅ CONTAGEM OTIMIZADA com cache"""
-        # Cache válido por 5 minutos
-        if self.cache_updated_at:
-            age = timezone.now() - self.cache_updated_at
-            if age.total_seconds() < 300:
-                return self.cached_product_count
-        
-        # Recalcular (produtos únicos por loja)
-        real_count = self.items.values('product').distinct().count()
-        self.cached_product_count = real_count
-        self.save(update_fields=['cached_product_count', 'cache_updated_at'])
-        return real_count
+        """Contagem de produtos únicos da loja"""
+        return self.items.values('product').distinct().count()
     
     @property
     def plan_config(self):
@@ -129,11 +122,16 @@ class Store(models.Model):
     
     @property
     def can_add_products(self):
-        """Verifica se pode adicionar mais produtos"""
-        config = self.plan_config
-        if not config or config.max_products is None:
-            return True
-        return self.product_count < config.max_products
+        """Verifica se a loja pode adicionar mais produtos"""
+        if self.plan == 'pro':
+            return True  # PRO tem produtos ilimitados
+        
+        # Free tem limite
+        current_count = self.items.count()
+        plan_config = getattr(self, 'plan_config', None)
+        max_products = plan_config.max_products if plan_config else 20
+        
+        return current_count < max_products
     
     def get_plan_limits(self):
         """✅ INFORMAÇÕES COMPLETAS de limites"""
@@ -851,3 +849,115 @@ class DataPrivacyConsent(models.Model):
     def __str__(self):
         status = "Concedido" if self.granted else "Negado"
         return f"{self.store.name} - {self.get_consent_type_display()} ({status})"
+    
+    # inventory/models.py (adicionar)
+# inventory/models.py (adicionar campos)
+class ExternalBarcodeCatalog(models.Model):
+    brand = models.CharField(max_length=100, db_index=True)
+    gtin = models.CharField(max_length=14, unique=True, db_index=True)
+    description = models.CharField(max_length=255)
+    source = models.CharField(max_length=50, default='bluesoft')
+    source_url = models.URLField(null=True, blank=True)
+    matched = models.BooleanField(default=False, db_index=True)
+    
+    # ✅ NOVOS CAMPOS PARA RASTREAMENTO
+    searched_product_sku = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    searched_product_name = models.CharField(max_length=255, null=True, blank=True)
+    search_term_used = models.CharField(max_length=255, null=True, blank=True)
+    confidence_level = models.CharField(max_length=20, null=True, blank=True)  # high, medium, low
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'external_barcode_catalog'
+        indexes = [
+            models.Index(fields=['brand', 'matched']),
+            models.Index(fields=['source', 'created_at']),
+            models.Index(fields=['searched_product_sku']),  # ✅ NOVO ÍNDICE
+        ]
+    
+    def __str__(self):
+        return f"{self.brand} - {self.gtin} - {self.description[:50]} (SKU: {self.searched_product_sku})"
+
+
+# backend/core/inventory/models.py (adicionar ao arquivo existente)
+
+class ThemeConfig(models.Model):
+    """
+    Singleton — Configuração global de tema/cores do sistema.
+    Apenas 1 registro deve existir.
+    """
+    # Cores principais
+    color_primary = models.CharField(
+        max_length=7, default="#871745",
+        help_text="Cor principal (CTA, botões, destaques). Ex: #871745"
+    )
+    color_primary_light = models.CharField(
+        max_length=7, default="#FDF2F7",
+        help_text="Cor de fundo suave (cards, inputs). Ex: #FDF2F7"
+    )
+    color_success = models.CharField(
+        max_length=7, default="#2E8B57",
+        help_text="Cor de sucesso/lucro (scanner, indicadores positivos). Ex: #2E8B57"
+    )
+    color_text = models.CharField(
+        max_length=7, default="#2D292E",
+        help_text="Cor do texto principal. Ex: #2D292E"
+    )
+    
+    # Cores secundárias (opcionais, com defaults inteligentes)
+    color_accent = models.CharField(
+        max_length=7, default="#A91B60",
+        help_text="Cor de acento/gradiente. Ex: #A91B60"
+    )
+    color_destructive = models.CharField(
+        max_length=7, default="#DC2626",
+        help_text="Cor de erro/alerta. Ex: #DC2626"
+    )
+    color_warning = models.CharField(
+        max_length=7, default="#F59E0B",
+        help_text="Cor de aviso. Ex: #F59E0B"
+    )
+    color_background = models.CharField(
+        max_length=7, default="#FFFFFF",
+        help_text="Cor de fundo geral. Ex: #FFFFFF"
+    )
+    color_card = models.CharField(
+        max_length=7, default="#FFFFFF",
+        help_text="Cor de fundo dos cards. Ex: #FFFFFF"
+    )
+    color_border = models.CharField(
+        max_length=7, default="#E5E7EB",
+        help_text="Cor das bordas. Ex: #E5E7EB"
+    )
+    
+    # Metadados
+    app_name = models.CharField(
+        max_length=100, default="Minha Amora",
+        help_text="Nome exibido no app"
+    )
+    logo_url = models.URLField(
+        blank=True, null=True,
+        help_text="URL do logotipo (opcional)"
+    )
+    
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Configuração de Tema"
+        verbose_name_plural = "Configuração de Tema"
+    
+    def __str__(self):
+        return f"Tema — {self.app_name}"
+    
+    def save(self, *args, **kwargs):
+        """Garante que só existe 1 registro (Singleton)."""
+        self.pk = 1
+        super().save(*args, **kwargs)
+    
+    @classmethod
+    def load(cls):
+        """Carrega ou cria a configuração padrão."""
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
