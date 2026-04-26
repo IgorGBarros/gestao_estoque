@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('inventory', '0004_planconfig_promotion_rename_user_store_owner_and_more'),
+        ('inventory', 'inventory', '0003_registrationsession'),
     ]
 
     operations = [
