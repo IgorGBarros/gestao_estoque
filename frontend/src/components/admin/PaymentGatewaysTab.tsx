@@ -93,7 +93,7 @@ const PAYMENT_METHODS_OPTIONS = [
 
 const API_BASE = (
   (import.meta as any).env?.VITE_API_BASE_URL ||
-  "https://gestao-estoque-k5vy.onrender.com"
+  "https://dev-brih.onrender.com"
 ).replace(/\/$/, "");
 
 // ==========================================

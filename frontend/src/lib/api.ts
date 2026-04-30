@@ -6,7 +6,7 @@ import {
 import { api } from "../services/api";
 
 // ✅ CORREÇÃO: Base URL limpa (services/api.ts já adiciona /api/)
-const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || "https://gestao-estoque-k5vy.onrender.com")
+const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || "https://dev-brih.onrender.com")
   .replace(/\/$/, "");
     
 function getToken(): string | null {
