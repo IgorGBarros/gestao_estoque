@@ -370,6 +370,7 @@ export const fifoApi = {
 
 // ── Batches ──
 export interface InventoryBatch {
+  batch_code: string;
   expiry_date(expiry_date: any): import("react").ReactNode;
   id: string; // ✅ CORREÇÃO: Mudar de number para string
   quantity: number;
@@ -472,42 +473,109 @@ export const movementsApi = {
   },
 };
 
-// ── Admin ──
+// ── Payments (Asaas Integration) ──
+
+export interface CheckoutResponse {
+  checkout_url: string;
+  payment_link_id: string;
+  billing_cycle: string;
+  status: string;
+}
+
+export interface SubscriptionStatus {
+  plan: string;
+  is_active: boolean;
+  payment_provider: string | null;
+  subscription_started_at: string | null;
+  subscription_expires_at: string | null;
+  days_remaining: number;
+}
+
+export interface AsaasConfig {
+  environment: string;
+  base_url: string;
+  has_api_key: boolean;
+  has_webhook_token: boolean;
+  webhook_url: string;
+}
+
+export interface AsaasConnectionTest {
+  status: "connected" | "error";
+  balance?: number;
+  environment?: string;
+  message?: string;
+}
+
+// ✅ API de Pagamentos (usuário autenticado)
+export const paymentsApi = {
+  // Cria checkout (link de pagamento) no Asaas
+  createCheckout: (billingCycle: "monthly" | "yearly") =>
+    apiRequest<CheckoutResponse>("/payments/asaas/checkout/", {
+      method: "POST",
+      body: JSON.stringify({ billing_cycle: billingCycle }),
+    }),
+
+  // Consulta status da assinatura do usuário
+  getSubscriptionStatus: () =>
+    apiRequest<SubscriptionStatus>("/payments/asaas/status/"),
+
+  // Cancela assinatura
+  cancelSubscription: () =>
+    apiRequest<{ status: string; message: string }>("/payments/asaas/cancel/", {
+      method: "POST",
+    }),
+};
+
+// ✅ API Admin de Pagamentos (apenas staff)
+export const adminPaymentsApi = {
+  // Retorna configuração atual do Asaas
+  getAsaasConfig: () =>
+    apiRequest<AsaasConfig>("/admin/payments/asaas/config/"),
+
+  // Testa conexão com o Asaas (verifica API key e saldo)
+  testAsaasConnection: () =>
+    apiRequest<AsaasConnectionTest>("/admin/payments/asaas/test/", {
+      method: "POST",
+    }),
+};
+
 export const adminApi = {
   // ✅ Existentes (sem alteração)
   listUsers: () => apiRequest<any[]>("/admin/users/"),
-
   updatePlan: (id: string | number, plan: "free" | "pro") =>
     apiRequest<{ message: string; plan: string }>(`/admin/users/${id}/plan/`, {
       method: "PATCH",
       body: JSON.stringify({ plan }),
     }),
-
   updateSubscription: (id: string | number, data: any) =>
     apiRequest<{ message: string }>(`/admin/users/${id}/subscription/`, {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
 
-  // ✅ NOVOS — Dados reais do backend (sem mock)
+  // ✅ Analytics
   getProductAnalytics: () =>
     apiRequest<any>("/admin/analytics/products/"),
-
   getBehaviorAnalytics: () =>
     apiRequest<any>("/admin/analytics/behavior/"),
-
   getMlInsights: () =>
     apiRequest<any>("/admin/analytics/ml-insights/"),
 
-  // ✅ NOVOS — Planos, Promoções, Stats (dados reais)
+  // ✅ Planos, Promoções, Stats
   listPlanConfigs: () =>
     apiRequest<any[]>("/admin/plan-configs/"),
-
   listPromotions: () =>
     apiRequest<any[]>("/admin/promotions/"),
-
   getSystemStats: () =>
     apiRequest<any>("/admin/stats/"),
+
+  // ✅ NOVO — Asaas (Admin)
+  getAsaasConfig: () =>
+    apiRequest<AsaasConfig>("/admin/payments/asaas/config/"),
+  testAsaasConnection: () =>
+    apiRequest<AsaasConnectionTest>("/admin/payments/asaas/test/", {
+      method: "POST",
+    }),
 };
 // ── Profile ──
 export interface Profile {

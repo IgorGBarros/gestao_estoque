@@ -240,3 +240,18 @@ except ImportError:
 print("✅ Settings carregado com sucesso!")
 print(f"📊 DEBUG: {DEBUG}")
 print(f"🗄️ Database: {DATABASES['default']['ENGINE']}")
+
+# ==========================================
+# ASAAS CONFIGURATION
+# ==========================================
+import os
+
+ASAAS_API_KEY = os.environ.get('ASAAS_API_KEY', '')
+ASAAS_ENVIRONMENT = os.environ.get('ASAAS_ENVIRONMENT', 'sandbox')  # 'sandbox' ou 'production'
+ASAAS_WEBHOOK_TOKEN = os.environ.get('ASAAS_WEBHOOK_TOKEN', '')
+
+ASAAS_BASE_URLS = {
+    'sandbox': 'https://sandbox.asaas.com/api/v3',
+    'production': 'https://api.asaas.com/v3',
+}
+ASAAS_BASE_URL = ASAAS_BASE_URLS.get(ASAAS_ENVIRONMENT, ASAAS_BASE_URLS['sandbox'])
