@@ -12,4 +12,5 @@ urlpatterns = [
 admin_urlpatterns = [
     path('payments/asaas/config/', views.asaas_admin_config, name='asaas-admin-config'),
     path('payments/asaas/test/', views.asaas_admin_test_connection, name='asaas-admin-test'),
+    
 ]
