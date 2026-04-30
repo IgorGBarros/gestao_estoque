@@ -102,6 +102,7 @@ INSTALLED_APPS = [
     # Apps do projeto
     'inventory',
     'ai',
+    'payments',
 ]
 
 # ✅ CORREÇÃO: CORS primeiro no middleware

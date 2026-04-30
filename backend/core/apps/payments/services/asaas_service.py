@@ -1,8 +1,10 @@
+# apps/payments/services/asaas_service.py
 import requests
 import logging
 from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
+from django.apps import apps
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +15,11 @@ class AsaasAPIError(Exception):
         self.status_code = status_code
         self.response_data = response_data or {}
         super().__init__(self.message)
+
+
+def _get_store_model():
+    """Helper para obter o modelo Store de forma segura, sem importação direta."""
+    return apps.get_model('stores', 'Store')
 
 
 class AsaasService:
@@ -51,6 +58,7 @@ class AsaasService:
             raise AsaasAPIError(f"Erro inesperado: {str(e)}", 500)
 
     # ─── CUSTOMERS ───────────────────────────────────────
+
     def get_or_create_customer(self, store) -> str:
         """Retorna customer_id do Asaas. Cria se não existir."""
         # Se já tem ID salvo, valida
@@ -100,6 +108,7 @@ class AsaasService:
         return customer_id
 
     # ─── SUBSCRIPTIONS ───────────────────────────────────
+
     def create_subscription(self, store, billing_cycle: str = 'monthly', payment_method: str = 'credit_card') -> dict:
         customer_id = self.get_or_create_customer(store)
 
@@ -155,12 +164,14 @@ class AsaasService:
         return result
 
     # ─── WEBHOOK PROCESSING ──────────────────────────────
+
     def process_webhook(self, event: str, payload: dict) -> dict:
         handlers = {
             'PAYMENT_RECEIVED': self._on_payment_received,
             'PAYMENT_OVERDUE': self._on_payment_overdue,
             'SUBSCRIPTION_CANCELED': self._on_subscription_canceled,
         }
+
         handler = handlers.get(event)
         if not handler:
             return {'status': 'ignored', 'event': event}
@@ -169,7 +180,7 @@ class AsaasService:
         return handler(payload)
 
     def _find_store_from_payload(self, payload: dict):
-        from apps.stores.models import Store
+        Store = _get_store_model()
 
         payment = payload.get('payment', {})
         external_ref = payment.get('externalReference')
@@ -209,7 +220,7 @@ class AsaasService:
         return {'status': 'warning'}
 
     def _on_subscription_canceled(self, payload: dict) -> dict:
-        from apps.stores.models import Store
+        Store = _get_store_model()
 
         subscription = payload.get('subscription', {})
         external_ref = subscription.get('externalReference')
