@@ -571,9 +571,9 @@ export const adminApi = {
 
   // ✅ NOVO — Asaas (Admin)
   getAsaasConfig: () =>
-    apiRequest<AsaasConfig>("/admin/payments/asaas/config/"),
+    apiRequest<AsaasConfig>("/payments/asaas/config/"),
   testAsaasConnection: () =>
-    apiRequest<AsaasConnectionTest>("/admin/payments/asaas/test/", {
+    apiRequest<AsaasConnectionTest>("/payments/asaas/test/", {
       method: "POST",
     }),
 };
