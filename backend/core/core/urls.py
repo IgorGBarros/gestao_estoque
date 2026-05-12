@@ -18,6 +18,7 @@ from django.contrib import admin
 from django.urls import include, path
 #from backend.core.inventory.views import session_control_view
 
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/chat/", include("ai.urls")),
