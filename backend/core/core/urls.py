@@ -22,8 +22,9 @@ from django.urls import include, path
 urlpatterns = [
     path('admin/', admin.site.urls),
     path("api/chat/", include("ai.urls")),
-    path("api/", include("inventory.urls")),
     path("api/payments/", include("apps.payments.urls")),
+    path("api/", include("inventory.urls")),
+    
    # path('session-control/', session_control_view, name='session-control-direct'),
    # path('session-summary/', session_control_view, name='session-summary-direct'),
 
