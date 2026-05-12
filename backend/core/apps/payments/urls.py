@@ -13,10 +13,10 @@ public_urlpatterns = [
 protected_urlpatterns = [
     path('asaas/checkout/', views.asaas_create_checkout, name='asaas-checkout'),
     path('asaas/status/', views.asaas_subscription_status, name='asaas-status'),
-]
+
 
 # URLs admin (requer is_staff)
-admin_urlpatterns = [
+
     path('asaas/config/', views.asaas_admin_config, name='asaas-admin-config'),
     path('asaas/test/', views.asaas_admin_test_connection, name='asaas-admin-test'),
 ]
@@ -29,5 +29,5 @@ urlpatterns = [
     path('', include((protected_urlpatterns, 'protected'), namespace='protected')),
     
     # Rotas admin (is_staff required) - note o prefixo 'admin/'
-    path('admin/', include((admin_urlpatterns, 'admin'), namespace='admin')),
+   # path('admin/', include((admin_urlpatterns, 'admin'), namespace='admin')),
 ]
