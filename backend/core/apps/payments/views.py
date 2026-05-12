@@ -130,23 +130,44 @@ def asaas_admin_config(request):
         'webhook_url': request.build_absolute_uri('/api/payments/asaas/webhook/'),
     })
 
+# apps/payments/views.py
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def asaas_admin_test_connection(request):
-    """POST /api/admin/payments/asaas/test/ - Testa conexão com Asaas"""
     if not request.user.is_staff:
         return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    # --- DEBUG INÍCIO ---
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    api_key = getattr(settings, 'ASAAS_API_KEY', 'NAO_ENCONTRADA')
+    env = getattr(settings, 'ASAAS_ENVIRONMENT', 'NAO_ENCONTRADO')
+    
+    logger.warning(f"🔍 DEBUG ASAAS:")
+    logger.warning(f"   API Key encontrada? {api_key != 'NAO_ENCONTRADA'}")
+    logger.warning(f"   API Key começa com $? {api_key.startswith('$') if isinstance(api_key, str) and api_key else 'N/A'}")
+    logger.warning(f"   Ambiente: {env}")
+    logger.warning(f"   Tamanho da chave: {len(api_key) if isinstance(api_key, str) else 0}")
+    # --- DEBUG FIM ---
 
     try:
         result = asaas_service._request('GET', 'finance/balance')
         return Response({
             'status': 'connected',
             'balance': result.get('balance'),
-            'environment': getattr(settings, 'ASAAS_ENVIRONMENT', 'sandbox'),
+            'environment': env,
         })
     except AsaasAPIError as e:
+        logger.error(f"❌ ERRO ASAAS API: {e.message}")
         return Response({
             'status': 'error',
             'message': e.message,
         }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.error(f"❌ ERRO GERAL: {str(e)}")
+        return Response({
+            'status': 'error',
+            'message': f'Erro interno: {str(e)}',
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
