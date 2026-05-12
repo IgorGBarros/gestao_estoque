@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Shield, Crown, User, Loader2, Check, Search, Users, ChevronUp, ChevronDown,
@@ -723,71 +723,70 @@ const fetchAllData = async () => {
       setSubSaving(false);
     }
   };
+// ==========================================
+// FUNÇÕES ESTABILIZADAS COM USECALLBACK
+// ==========================================
 
-  // Novas funções para planos e promoções
-  const savePlanConfig = async (planData: Partial<PlanConfig>) => {
-    try {
-      if (editingPlan) {
-        // Simula update
-        setPlanConfigs(prev => prev.map(p => 
-          p.plan_type === editingPlan.plan_type ? { ...p, ...planData } : p
-        ));
-        toast({ title: "Plano atualizado com sucesso" });
-      } else {
-        // Simula create
-        const newPlan = { ...planData } as PlanConfig;
-        setPlanConfigs(prev => [...prev, newPlan]);
-        toast({ title: "Plano criado com sucesso" });
-      }
-      
-      setShowPlanModal(false);
-      setEditingPlan(null);
-      
-    } catch (err: any) {
-      toast({ title: "Erro", description: "Falha ao salvar plano", variant: "destructive" });
-    }
-  };
-
-  const savePromotion = async (promotionData: Partial<Promotion>) => {
-    try {
-      if (editingPromotion) {
-        setPromotions(prev => prev.map(p => 
-          p.id === editingPromotion.id ? { ...p, ...promotionData } : p
-        ));
-        toast({ title: "Promoção atualizada" });
-      } else {
-        const newPromotion = { 
-          ...promotionData, 
-          id: Date.now().toString(),
-          created_at: new Date().toISOString()
-        } as Promotion;
-        setPromotions(prev => [...prev, newPromotion]);
-        toast({ title: "Promoção criada" });
-      }
-      
-      setShowPromotionModal(false);
-      setEditingPromotion(null);
-      
-    } catch (err: any) {
-      toast({ title: "Erro", description: "Falha ao salvar promoção", variant: "destructive" });
-    }
-  };
-
-  const togglePromotionStatus = async (promotion: Promotion) => {
-    try {
-      setPromotions(prev => prev.map(p => 
-        p.id === promotion.id ? { ...p, is_active: !p.is_active } : p
+const savePlanConfig = useCallback(async (planData: Partial<PlanConfig>) => {
+  try {
+    if (editingPlan) {
+      setPlanConfigs(prev => prev.map(p => 
+        p.plan_type === editingPlan.plan_type ? { ...p, ...planData } : p
       ));
-      
-      toast({ 
-        title: `Promoção ${promotion.is_active ? 'desativada' : 'ativada'}` 
-      });
-      
-    } catch (err: any) {
-      toast({ title: "Erro", description: "Falha ao alterar status", variant: "destructive" });
+      toast({ title: "Plano atualizado com sucesso" });
+    } else {
+      const newPlan = { ...planData } as PlanConfig;
+      setPlanConfigs(prev => [...prev, newPlan]);
+      toast({ title: "Plano criado com sucesso" });
     }
-  };
+    
+    setShowPlanModal(false);
+    setEditingPlan(null);
+    
+  } catch (err: any) {
+    toast({ title: "Erro", description: "Falha ao salvar plano", variant: "destructive" });
+  }
+}, [editingPlan, setPlanConfigs, toast, setShowPlanModal, setEditingPlan]);
 
+const savePromotion = useCallback(async (promotionData: Partial<Promotion>) => {
+  try {
+    if (editingPromotion) {
+      setPromotions(prev => prev.map(p => 
+        p.id === editingPromotion.id ? { ...p, ...promotionData } : p
+      ));
+      toast({ title: "Promoção atualizada" });
+    } else {
+      const newPromotion = { 
+        ...promotionData, 
+        id: Date.now().toString(),
+        created_at: new Date().toISOString()
+      } as Promotion;
+      setPromotions(prev => [...prev, newPromotion]);
+      toast({ title: "Promoção criada" });
+    }
+    
+    setShowPromotionModal(false);
+    setEditingPromotion(null);
+    
+  } catch (err: any) {
+    toast({ title: "Erro", description: "Falha ao salvar promoção", variant: "destructive" });
+  }
+}, [editingPromotion, setPromotions, toast, setShowPromotionModal, setEditingPromotion]);
+
+const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
+  try {
+    setPromotions(prev => prev.map(p => 
+      p.id === promotion.id ? { ...p, is_active: !p.is_active } : p
+    ));
+    
+    toast({ 
+      title: `Promoção ${promotion.is_active ? 'desativada' : 'ativada'}` 
+    });
+    
+  } catch (err: any) {
+    toast({ title: "Erro", description: "Falha ao alterar status", variant: "destructive" });
+  }
+}, [setPromotions, toast]);
   // ==========================================
   // EFEITOS
   // ==========================================
