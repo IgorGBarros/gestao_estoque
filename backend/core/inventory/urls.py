@@ -85,7 +85,7 @@ urlpatterns = [
     path('admin/analytics/products/', get_product_analytics, name='admin_product_analytics'),
     path('admin/analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
 
-    path('check-plan-limits/', check_plan_limits_complete, name='check-plan-limits'),
+    path('check-plan-limits/', check_plan_limits_complete, name='check-plan-limits'),  
 
     # Endpoint público (sem auth)
     path('public/theme/', ThemeConfigPublicView.as_view(), name='theme-public'),
