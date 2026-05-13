@@ -139,8 +139,7 @@ type SortDir = "asc" | "desc";
 // ==========================================
 // COMPONENTES DE MODAL
 // ==========================================
-// Dentro do AdminPanel, adicione ao estado:
-const [apiMonitorData, setApiMonitorData] = useState<any>(null);
+
 
 // No fetchAllData ou useEffect:
 try {
@@ -525,7 +524,8 @@ const PromotionModal = ({
 export default function AdminPanel() {
   const navigate = useNavigate();
   const { toast } = useToast();
-
+// Dentro do AdminPanel, adicione ao estado:
+  const [apiMonitorData, setApiMonitorData] = useState<any>(null);
   // Estados de autenticação
   const [authenticated, setAuthenticated] = useState(false);
   const [secret, setSecret] = useState("");
@@ -620,7 +620,6 @@ export default function AdminPanel() {
   const [subForm, setSubForm] = useState({ external_id: "", started_at: "", expires_at: "" });
   const [subSaving, setSubSaving] = useState(false);
   const [globalProvider, setGlobalProvider] = useState(() => localStorage.getItem("admin_global_provider") || "");
-  const [apiMonitorData, setApiMonitorData] = useState<any>(null);
   const PROVIDERS = [
     { value: "stripe", label: "Stripe" },
     { value: "mercadopago", label: "Mercado Pago" },
@@ -1921,6 +1920,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
                 </thead>
                 <tbody>
                   {productAnalytics.popular_products.map((product, index) => (
+
                     <tr key={index} className="border-b border-border/50 last:border-0">
                       <td className="py-3 px-3">
                         <span className="text-sm font-medium">{product.name}</span>
@@ -2363,3 +2363,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
               );
               }
               
+function setApiMonitorData(monitorRes: any) {
+  throw new Error("Function not implemented.");
+}
+
