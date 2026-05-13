@@ -1,7 +1,7 @@
 // src/components/admin/ApiManagementTab.tsx
-import React, { useState } from "react"; // ✅ Import explícito do React + hooks
-import { Server, Key, Bell } from "lucide-react";
-import { Badge } from "../ui/badge";
+import { useState } from "react"; // ✅ Import explícito do React + hooks
+import { Server, Bell } from "lucide-react";
+
 
 export interface Props {
   formatCurrency: (n: number) => string;

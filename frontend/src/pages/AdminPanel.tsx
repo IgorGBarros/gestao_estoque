@@ -2,12 +2,11 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Shield, Crown, User, Loader2, Check, Search, Users, ChevronUp, ChevronDown,
-  ExternalLink, RefreshCw, AlertTriangle, Package, Calendar, Phone, Store, Mail, BarChart3,
-  Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
-  Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
-  FileText, Download, Upload, Eye, EyeOff, Palette, Zap, Bell, Gift, Percent,
-  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy
-} from "lucide-react";
+  RefreshCw, AlertTriangle, Package, Store, BarChart3,
+  Settings2, ToggleLeft, ToggleRight, CreditCard, X,
+  Plus, Edit2, Trash2, DollarSign, Megaphone, TrendingUp, Activity,
+  Eye, EyeOff, Zap, Gift, Percent,
+  Bot, Server, LogIn, Ban, FileSearch, AlertCircle, Key} from "lucide-react";
 
 interface SystemHealth {
   api_status: 'operational' | 'degraded' | 'down';
@@ -27,7 +26,7 @@ interface AuditLog {
   status: 'success' | 'failed';
 }
 
-import { profileApi, adminApi } from "../lib/api";
+import { adminApi } from "../lib/api";
 import { useToast } from "../hooks/use-toast";
 import { Badge } from "../components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
