@@ -2274,11 +2274,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
         TAB: API & WEBHOOKS (Monetização do Banco de Dados)
         ========================================== */}
     <TabsContent value="api" className="space-y-6">
-      {apiMonitorData ? (
-        <ApiManagementTab data={apiMonitorData} formatCurrency={formatCurrency} toast={toast} />
-      ) : (
-        <div className="p-12 text-center text-muted-foreground">Carregando monitoramento...</div>
-      )}
+      <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
     </TabsContent>
 
   </Tabs>
