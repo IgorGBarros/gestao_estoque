@@ -1,5 +1,5 @@
 // src/components/admin/ApiManagementTab.tsx
-import { useState } from "react";
+import React, { useState } from "react"; // ✅ Import explícito do React
 import {
   Server, Key, Activity, Bell, Plus, FileText, BarChart3, RefreshCw, Ban,
   ToggleLeft, ToggleRight, Lock, Shield, Check, CreditCard, DollarSign, Copy, X
@@ -105,7 +105,6 @@ const SEED_WEBHOOKS: Webhook[] = [
 ];
 
 const ENDPOINTS: Endpoint[] = [
-  // Catálogo Global
   {
     path: "/api/products/", method: "GET",
     description: "Lista o catálogo global de produtos (Natura, marcas)",
@@ -120,7 +119,6 @@ const ENDPOINTS: Endpoint[] = [
     pricing_tier: ["starter", "pro", "enterprise"],
     sample: { source: "local", product: { id: 12, name: "Tododia Algodão", official_price: 45.9 } },
   },
-  // Storefront Pública
   {
     path: "/api/public/storefront/{slug}/", method: "GET",
     description: "Vitrine pública de uma consultora (sem datas de validade)",
@@ -135,7 +133,6 @@ const ENDPOINTS: Endpoint[] = [
     pricing_tier: ["starter", "pro", "enterprise"],
     sample: [{ product_name: "Kaiak Aero", brand: "Natura", sale_price: 129.9 }],
   },
-  // Analytics Agregados (Enterprise)
   {
     path: "/api/admin/analytics/products/", method: "GET",
     description: "Analytics agregado de produtos: top vendidos, marcas, categorias",
@@ -150,7 +147,6 @@ const ENDPOINTS: Endpoint[] = [
     pricing_tier: ["enterprise"], lgpd: true,
     sample: { avg_products_per_store: 18.3, avg_monthly_revenue: 2840 },
   },
-  // Webhooks
   {
     path: "webhook → product.updated", method: "POST",
     description: "Notifica alterações de preço/estoque de produtos do catálogo",
@@ -204,6 +200,7 @@ function generateSecret(): string {
 // ─────────────────────────────────────────────────────────────
 
 export default function ApiManagementTab({ formatCurrency, toast }: Props) {
+  // ✅ Hooks APENAS dentro do componente
   const [apiKeys, setApiKeys] = useState<ApiKey[]>(SEED_KEYS);
   const [webhooks, setWebhooks] = useState<Webhook[]>(SEED_WEBHOOKS);
   
