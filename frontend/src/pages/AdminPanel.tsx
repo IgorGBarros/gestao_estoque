@@ -6,7 +6,7 @@ import {
   Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
   Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
   FileText, Download, Upload, Eye, EyeOff, Palette, Zap, Bell, Gift, Percent,
-  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle
+  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy
 } from "lucide-react";
 
 interface SystemHealth {
@@ -34,6 +34,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from ".
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import React from "react";
 import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
+import ApiManagementTab from "../components/admin/ApiManagementTab";
 
 const ADMIN_SECRET = "natura2024admin";
 
@@ -1066,7 +1067,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
       <main className="mx-auto max-w-7xl px-4 py-6">
         {/* Tabs de Navegação */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-7 lg:w-auto lg:grid-cols-7">
+          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
             <TabsTrigger value="dashboard" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Dashboard
@@ -1086,9 +1087,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
             <TabsTrigger value="payments" className="flex items-center gap-2">
               <CreditCard className="h-4 w-4" />
               Pagamentos
-              
             </TabsTrigger>
-            
             <TabsTrigger value="analytics" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Analytics
@@ -1096,6 +1095,10 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
             <TabsTrigger value="system" className="flex items-center gap-2">
               <Server className="h-4 w-4" />
               Sistema
+            </TabsTrigger>
+            <TabsTrigger value="api" className="flex items-center gap-2">
+              <Key className="h-4 w-4" />
+              API & Webhooks
             </TabsTrigger>
           </TabsList>
 
@@ -2245,6 +2248,13 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
           </TableBody>
         </Table>
       </div>
+    </TabsContent>
+
+    {/* ==========================================
+        TAB: API & WEBHOOKS (Monetização do Banco de Dados)
+        ========================================== */}
+    <TabsContent value="api" className="space-y-6">
+      <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
     </TabsContent>
 
   </Tabs>
