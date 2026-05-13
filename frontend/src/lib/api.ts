@@ -569,6 +569,7 @@ export const adminApi = {
   getSystemStats: () =>
     apiRequest<any>("/admin/stats/"),
 
+  getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
   // ✅ NOVO — Asaas (Admin)
   getAsaasConfig: () =>
     apiRequest<AsaasConfig>("/payments/asaas/config/"),

@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from .admin_views import get_store_behavior_analytics, get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription,get_product_analytics
+from .admin_views import get_store_behavior_analytics, get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription,get_product_analytics,monitor_api_usage 
 from .views import (
     CustomUserCreateView,
     FirebaseLoginView,
@@ -84,6 +84,7 @@ urlpatterns = [
     path('admin/users/<int:user_id>/subscription/', update_subscription, name='admin_update_subscription'),
     path('admin/analytics/products/', get_product_analytics, name='admin_product_analytics'),
     path('admin/analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
+    path('admin/monitoring/api-usage/', monitor_api_usage, name='admin_api_usage'),
 
     path('check-plan-limits/', check_plan_limits_complete, name='check-plan-limits'),  
 

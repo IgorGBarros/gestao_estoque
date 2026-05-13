@@ -140,6 +140,18 @@ type SortDir = "asc" | "desc";
 // ==========================================
 // COMPONENTES DE MODAL
 // ==========================================
+// Dentro do AdminPanel, adicione ao estado:
+const [apiMonitorData, setApiMonitorData] = useState<any>(null);
+
+// No fetchAllData ou useEffect:
+try {
+  const monitorRes = await adminApi.getApiMonitor();
+  setApiMonitorData(monitorRes);
+} catch (e) {
+  console.warn("Monitoramento API indisponível ainda", e);
+}
+
+// No JSX da Tab "api":
 
 const PlanConfigModal = ({
   isOpen,
@@ -609,7 +621,7 @@ export default function AdminPanel() {
   const [subForm, setSubForm] = useState({ external_id: "", started_at: "", expires_at: "" });
   const [subSaving, setSubSaving] = useState(false);
   const [globalProvider, setGlobalProvider] = useState(() => localStorage.getItem("admin_global_provider") || "");
-
+  const [apiMonitorData, setApiMonitorData] = useState<any>(null);
   const PROVIDERS = [
     { value: "stripe", label: "Stripe" },
     { value: "mercadopago", label: "Mercado Pago" },
@@ -644,7 +656,12 @@ const fetchAllData = async () => {
       console.warn("⚠️ Erro ao carregar planos:", err);
       setPlanConfigs([]);
     }
-
+      try {
+        const monitorRes = await adminApi.getApiMonitor();
+        setApiMonitorData(monitorRes);
+      } catch (e) {
+        console.warn("Monitoramento API indisponível ainda", e);
+      }
     // 4. Carrega stats reais do backend
     try {
       const statsRes = await adminApi.getSystemStats();
@@ -739,6 +756,7 @@ const fetchAllData = async () => {
           lgpd_compliant: true
         }
       });
+      
     }
 
   } catch (err: any) {
@@ -965,6 +983,8 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
         return <Badge variant="outline">PRO</Badge>;
     }
   };
+
+  
 
   // ==========================================
   // TELA DE LOGIN
@@ -2254,7 +2274,11 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
         TAB: API & WEBHOOKS (Monetização do Banco de Dados)
         ========================================== */}
     <TabsContent value="api" className="space-y-6">
-      <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
+      {apiMonitorData ? (
+        <ApiManagementTab data={apiMonitorData} formatCurrency={formatCurrency} toast={toast} />
+      ) : (
+        <div className="p-12 text-center text-muted-foreground">Carregando monitoramento...</div>
+      )}
     </TabsContent>
 
   </Tabs>
