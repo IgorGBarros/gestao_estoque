@@ -24,6 +24,7 @@ urlpatterns = [
     path("api/chat/", include("ai.urls")),
     path("api/payments/", include("apps.payments.urls")),
     path("api/", include("inventory.urls")),
+    path('api/v1/', include('inventory.api_comercial_urls')),
     
    # path('session-control/', session_control_view, name='session-control-direct'),
    # path('session-summary/', session_control_view, name='session-summary-direct'),

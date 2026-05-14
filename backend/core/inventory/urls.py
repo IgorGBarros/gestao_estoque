@@ -33,12 +33,35 @@ from .views import (
     # FirebaseLoginView e CustomUserCreateView foram removidos daqui pois estão comentados na view
 )
 from rest_framework_simplejwt.views import TokenRefreshView
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+from .api_comercial_views import (
+    api_products_list,
+    api_product_lookup,
+    api_public_storefront,
+    api_analytics_products,
+)
 
 router = DefaultRouter()
 router.register(r'products', ProductViewSet)
 router.register(r'inventory', InventoryViewSet, basename='inventory')
 router.register(r'transactions', StockTransactionViewSet, basename='stock-transaction')
 
+# Rotas da API comercial
+api_comercial_urls = [
+    # Documentação Swagger/OpenAPI
+    path('schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    
+    # Endpoints da API
+    path('products/', api_products_list, name='api-products-list'),
+    path('products/lookup/', api_product_lookup, name='api-product-lookup'),
+    path('public/storefront/<str:slug>/', api_public_storefront, name='api-public-storefront'),
+    path('analytics/products/', api_analytics_products, name='api-analytics-products'),
+    
+    # Webhooks (exemplo)
+    # path('webhooks/', include('inventory.webhook_urls')),
+]
 
 urlpatterns = [
     # --- Rotas de Negócio ---

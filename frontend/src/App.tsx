@@ -30,6 +30,11 @@ import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
 import LandingPage from "./pages/LandingPage";
 import NotFound from "./pages/NotFound";
+import ApiLanding from "./pages/ApiLanding";
+import ApiDocs from "./pages/ApiDocs";
+import ApiPricing from "./pages/ApiPricing";
+import ApiSandbox from "./pages/ApiSandbox";
+import ApiDashboard from "./pages/ApiDashboard";
 
 // Nova página PGBA Neural Canvas
 
@@ -57,6 +62,12 @@ const App = () => (
             <FeatureGatesProvider>
               <BrowserRouter>
                 <Routes>
+     
+                  <Route path="/api" element={<ApiLanding />} />
+                  <Route path="/api/docs" element={<ApiDocs />} />
+                  <Route path="/api/pricing" element={<ApiPricing />} />
+                  <Route path="/api/sandbox" element={<ApiSandbox />} />
+                  <Route path="/api/dashboard" element={<ApiDashboard />} />
                   {/* Rotas públicas (SEM SessionHeader) */}
            
                   <Route path="/auth" element={<Auth />} />

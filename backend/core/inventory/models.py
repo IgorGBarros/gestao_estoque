@@ -961,3 +961,108 @@ class ThemeConfig(models.Model):
         """Carrega ou cria a configuração padrão."""
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+
+# inventory/models.py — Adicionar ao final
+
+class ApiKey(models.Model):
+    """Chave de API para acesso comercial"""
+    PLAN_CHOICES = [
+        ('starter', 'Starter'),
+        ('pro', 'Pro'),
+        ('enterprise', 'Enterprise'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100, help_text="Nome descritivo da chave")
+    key = models.CharField(max_length=64, unique=True, editable=False)  # pk_live_••••
+    
+    # Dono da chave (pode ser Store ou CustomUser externo)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='api_keys',
+        null=True,
+        blank=True,
+        help_text="Usuário dono da chave (opcional para clientes externos)"
+    )
+    store = models.ForeignKey(
+        Store,
+        on_delete=models.CASCADE,
+        related_name='api_keys',
+        null=True,
+        blank=True,
+        help_text="Loja associada (para consultoras)"
+    )
+    
+    plan = models.CharField(max_length=20, choices=PLAN_CHOICES, default='starter')
+    
+    # Scopes/permissões
+    scopes = models.JSONField(
+        default=list,
+        help_text="Lista de scopes: ['read:products', 'read:analytics', 'write:webhooks']"
+    )
+    
+    # Rate limiting
+    rate_limit = models.IntegerField(default=20, help_text="Requisições por minuto")
+    monthly_quota = models.IntegerField(default=1000, help_text="Requisições por mês")
+    
+    # Status
+    is_active = models.BooleanField(default=True)
+    last_used = models.DateTimeField(null=True, blank=True)
+    
+    # Metadados
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True, help_text="Expiração da chave")
+    
+    class Meta:
+        db_table = 'api_keys'
+        indexes = [
+            models.Index(fields=['key']),
+            models.Index(fields=['owner', 'is_active']),
+            models.Index(fields=['store', 'plan']),
+        ]
+    
+    def save(self, *args, **kwargs):
+        if not self.key:
+            # Gerar chave segura
+            import secrets
+            prefix = 'pk_live_' if self.plan != 'starter' else 'pk_test_'
+            self.key = prefix + secrets.token_urlsafe(32)
+        super().save(*args, **kwargs)
+    
+    def check_quota(self):
+        """Verificar se quota mensal foi excedida"""
+        from django.utils import timezone
+        month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0)
+        
+        # Contar requisições do mês (implementar logging de uso)
+        # usage_count = ApiUsageLog.objects.filter(
+        #     api_key=self,
+        #     created_at__gte=month_start
+        # ).count()
+        # return usage_count < self.monthly_quota
+        return True  # Placeholder
+    
+    def __str__(self):
+        return f"{self.name} ({self.key[:16]}•••) - {self.plan}"
+
+
+class ApiUsageLog(models.Model):
+    """Log de uso da API para billing e analytics"""
+    api_key = models.ForeignKey(ApiKey, on_delete=models.CASCADE, related_name='usage_logs')
+    endpoint = models.CharField(max_length=100)
+    method = models.CharField(max_length=10)
+    status_code = models.IntegerField()
+    response_time_ms = models.IntegerField()
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.TextField(blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'api_usage_logs'
+        indexes = [
+            models.Index(fields=['api_key', 'created_at']),
+            models.Index(fields=['endpoint', 'status_code']),
+        ]

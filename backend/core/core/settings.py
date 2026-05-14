@@ -92,7 +92,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
+    'drf_spectacular',
     # ✅ Libs essenciais na ordem correta
     'corsheaders',
     'rest_framework',
@@ -108,6 +108,7 @@ INSTALLED_APPS = [
 # ✅ CORREÇÃO: CORS primeiro no middleware
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # ✅ PRIMEIRO
+    'inventory.middleware.ApiKeyMiddleware'
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -137,6 +138,8 @@ TEMPLATES = [
 
 # ✅ CORS corrigido para Firebase
 CORS_ALLOWED_ORIGINS = [
+    "https://api.minhaamora.com.br",
+    "https://minhaamora.com.br",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -177,6 +180,7 @@ SIMPLE_JWT = {
 
 # ✅ Django REST Framework
 REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     "DEFAULT_FILTER_BACKENDS": ["django_filters.rest_framework.DjangoFilterBackend"],
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
@@ -187,6 +191,54 @@ REST_FRAMEWORK = {
     ],
 }
 
+
+# Swagger config
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Minha Amora API',
+    'DESCRIPTION': '''
+    API comercial para acesso ao banco de dados de produtos de beleza.
+    
+    ## Recursos
+    - Catálogo global de produtos (Natura, Avon, Boticário, etc.)
+    - Lookup por código de barras com fallback inteligente
+    - Analytics agregados (LGPD-compliant)
+    - Webhooks em tempo real
+    
+    ## Autenticação
+    Todas as requisições exigem API Key no header:
+    ```
+    Authorization: Bearer pk_live_••••••••
+    ```
+    
+    ## Rate Limits
+    - Starter: 20 req/min • 1K req/mês
+    - Pro: 100 req/min • 50K req/mês  
+    - Enterprise: 500+ req/min • Ilimitado
+    ''',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'TAGS': [
+        {'name': 'Catalog', 'description': 'Catálogo global de produtos'},
+        {'name': 'Lookup', 'description': 'Busca por código de barras'},
+        {'name': 'Storefront', 'description': 'Vitrines públicas'},
+        {'name': 'Analytics', 'description': 'Analytics agregados (Enterprise)'},
+        {'name': 'Webhooks', 'description': 'Notificações em tempo real'},
+    ],
+    'SECURITY': [
+        {'ApiKeyAuth': []},
+    ],
+    'COMPONENTS': {
+        'securitySchemes': {
+            'ApiKeyAuth': {
+                'type': 'apiKey',
+                'in': 'header',
+                'name': 'Authorization',
+                'description': 'API Key no formato: Bearer pk_live_••••',
+            }
+        }
+    },
+}
 # ✅ User model
 AUTH_USER_MODEL = "inventory.CustomUser"
 
