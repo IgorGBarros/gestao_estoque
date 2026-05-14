@@ -108,7 +108,7 @@ INSTALLED_APPS = [
 # ✅ CORREÇÃO: CORS primeiro no middleware
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',  # ✅ PRIMEIRO
-    'inventory.middleware.ApiKeyMiddleware'
+  
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -116,6 +116,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'inventory.middleware.ApiKeyMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'

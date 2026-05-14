@@ -1,8 +1,7 @@
 # inventory/middleware.py
-from datetime import timezone
-
 from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
+from django.utils import timezone  # ✅ IMPORT NECESSÁRIO
 from .models import ApiKey
 import re
 
@@ -38,11 +37,7 @@ class ApiKeyMiddleware(MiddlewareMixin):
         if api_key.expires_at and timezone.now() > api_key.expires_at:
             return JsonResponse({'error': 'API Key expirada'}, status=401)
         
-        # Verificar quota mensal (implementar ApiUsageLog)
-        # if not api_key.check_quota():
-        #     return JsonResponse({'error': 'Quota mensal excedida'}, status=429)
-        
-        # Anexar API Key ao request para uso nas views
+        # Anexar API Key ao request
         request.api_key = api_key
         
         # Atualizar last_used (async para não bloquear)
