@@ -85,7 +85,7 @@ urlpatterns = [
     path('admin/analytics/products/', get_product_analytics, name='admin_product_analytics'),
     path('admin/analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
     path('admin/monitoring/api-usage/', monitor_api_usage, name='admin_api_usage'),
-
+    path('admin/api-monitor/', monitor_api_usage, name='admin_api_monitor'),
     path('check-plan-limits/', check_plan_limits_complete, name='check-plan-limits'),  
 
     # Endpoint público (sem auth)
