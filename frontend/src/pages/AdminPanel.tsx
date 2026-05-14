@@ -116,7 +116,22 @@ interface ProductAnalytics {
   }[];
   price_ranges: Record<string, number>;
 }
-
+export interface SystemHealth {
+  api_status: 'operational' | 'degraded' | 'down';
+  database_status: 'operational' | 'degraded' | 'down';
+  payment_gateway_status: 'operational' | 'degraded' | 'down';
+  last_check: string;
+  uptime_percentage: number;
+}
+export interface AuditLog {
+  id: string;
+  action: string;
+  user_email: string;
+  target_user?: string;
+  ip_address: string;
+  timestamp: string;
+  status: 'success' | 'failed';
+}
 type SortField = "display_name" | "email" | "plan" | "product_count" | "created_at" | "last_sign_in";
 type SortDir = "asc" | "desc";
 
