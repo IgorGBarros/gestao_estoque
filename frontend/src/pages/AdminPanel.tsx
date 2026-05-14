@@ -1,32 +1,16 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+// src/components/admin/AdminPanel.tsx
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Shield, Crown, User, Loader2, Check, Search, Users, ChevronUp, ChevronDown,
-  RefreshCw, AlertTriangle, Package, Store, BarChart3,
-  Settings2, ToggleLeft, ToggleRight, CreditCard, X,
-  Plus, Edit2, Trash2, DollarSign, Megaphone, TrendingUp, Activity,
-  Eye, EyeOff, Zap, Gift, Percent,
-  Bot, Server, LogIn, Ban, FileSearch, AlertCircle, Key} from "lucide-react";
+  ExternalLink, RefreshCw, AlertTriangle, Package, Calendar, Phone, Store, Mail, BarChart3,
+  Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
+  Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
+  FileText, Download, Upload, Eye, EyeOff, Palette, Zap, Bell, Gift, Percent,
+  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy
+} from "lucide-react";
 
-interface SystemHealth {
-  api_status: 'operational' | 'degraded' | 'down';
-  database_status: 'operational' | 'degraded' | 'down';
-  payment_gateway_status: 'operational' | 'degraded' | 'down';
-  last_check: string;
-  uptime_percentage: number;
-}
-
-interface AuditLog {
-  id: string;
-  action: string;
-  user_email: string;
-  target_user?: string;
-  ip_address: string;
-  timestamp: string;
-  status: 'success' | 'failed';
-}
-
-import { adminApi } from "../lib/api";
+import { profileApi, adminApi } from "../lib/api";
 import { useToast } from "../hooks/use-toast";
 import { Badge } from "../components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
@@ -137,19 +121,24 @@ type SortField = "display_name" | "email" | "plan" | "product_count" | "created_
 type SortDir = "asc" | "desc";
 
 // ==========================================
-// COMPONENTES DE MODAL
+// HOOKS UTILITÁRIOS
 // ==========================================
 
-
-// No fetchAllData ou useEffect:
-try {
-  const monitorRes = await adminApi.getApiMonitor();
-  setApiMonitorData(monitorRes);
-} catch (e) {
-  console.warn("Monitoramento API indisponível ainda", e);
+// Hook de debounce para busca
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState<T>(value);
+  
+  useEffect(() => {
+    const handler = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(handler);
+  }, [value, delay]);
+  
+  return debounced;
 }
 
-// No JSX da Tab "api":
+// ==========================================
+// COMPONENTES DE MODAL
+// ==========================================
 
 const PlanConfigModal = ({
   isOpen,
@@ -518,14 +507,28 @@ const PromotionModal = ({
 };
 
 // ==========================================
+// COMPONENTE DE SKELETON LOADING
+// ==========================================
+
+const SkeletonCard = () => (
+  <div className="rounded-xl border border-border bg-card p-4 animate-pulse">
+    <div className="flex items-center gap-2 mb-2">
+      <div className="h-4 w-4 bg-secondary rounded" />
+      <div className="h-3 w-20 bg-secondary rounded" />
+    </div>
+    <div className="h-6 w-16 bg-secondary rounded mb-1" />
+    <div className="h-2 w-24 bg-secondary rounded" />
+  </div>
+);
+
+// ==========================================
 // COMPONENTE PRINCIPAL
 // ==========================================
 
 export default function AdminPanel() {
   const navigate = useNavigate();
   const { toast } = useToast();
-// Dentro do AdminPanel, adicione ao estado:
-  const [apiMonitorData, setApiMonitorData] = useState<any>(null);
+
   // Estados de autenticação
   const [authenticated, setAuthenticated] = useState(false);
   const [secret, setSecret] = useState("");
@@ -537,6 +540,7 @@ export default function AdminPanel() {
   const [systemStats, setSystemStats] = useState<SystemStats | null>(null);
   const [productAnalytics, setProductAnalytics] = useState<ProductAnalytics | null>(null);
   const [behaviorAnalytics, setBehaviorAnalytics] = useState<any>(null);
+  const [apiMonitorData, setApiMonitorData] = useState<any>(null);
 
   // Estados de UI
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -562,6 +566,31 @@ export default function AdminPanel() {
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<Set<string | number>>(new Set());
+
+  // ✅ ESTADOS DE OTIMIZAÇÃO
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+  
+  // Cache simples para evitar recarregar dados ao trocar de tab
+  const dataCache = useRef<Record<string, { data: any; timestamp: number }>>({});
+  const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos
+  
+  // Estados de loading por tab (para lazy loading)
+  const [tabLoading, setTabLoading] = useState<Record<string, boolean>>({
+    dashboard: false,
+    stores: false,
+    plans: false,
+    promotions: false,
+    analytics: false,
+    api: false,
+  });
+
+  // ✅ DEBOUNCE PARA BUSCA
+  const debouncedSearch = useDebounce(search, 300);
+
+  // ==========================================
+  // FUNÇÕES AUXILIARES
+  // ==========================================
 
   const fetchSystemHealth = useCallback(async () => {
     let apiOk = true;
@@ -628,151 +657,110 @@ export default function AdminPanel() {
   ];
 
   // ==========================================
-  // FUNÇÕES DE API (UNIFICADAS)
+  // FUNÇÕES DE API OTIMIZADAS
   // ==========================================
-const fetchAllData = async () => {
-  setLoading(true);
-  try {
-    // 1. Carrega usuários (real)
-    const usersRes = await adminApi.listUsers();
-    setUsers(usersRes || []);
 
-    // 2. Carrega promoções reais do backend
+  // Carrega apenas dados críticos no mount (rápido)
+  const fetchCriticalData = useCallback(async () => {
+    setLoading(true);
     try {
-      const promotionsRes = await adminApi.listPromotions();
-      setPromotions(promotionsRes || []);
-    } catch (err) {
-      console.warn("⚠️ Erro ao carregar promoções:", err);
-      setPromotions([]);
-    }
+      // Executa em paralelo as chamadas independentes
+      const [usersRes, statsRes] = await Promise.allSettled([
+        adminApi.listUsers(),
+        adminApi.getSystemStats(),
+      ]);
 
-    // 3. Carrega planos reais do backend
-    try {
-      const plansRes = await adminApi.listPlanConfigs();
-      setPlanConfigs(plansRes || []);
-    } catch (err) {
-      console.warn("⚠️ Erro ao carregar planos:", err);
-      setPlanConfigs([]);
-    }
-      try {
-        const monitorRes = await adminApi.getApiMonitor();
-        setApiMonitorData(monitorRes);
-      } catch (e) {
-        console.warn("Monitoramento API indisponível ainda", e);
+      if (usersRes.status === 'fulfilled') {
+        setUsers(usersRes.value || []);
+        dataCache.current.users = { data: usersRes.value, timestamp: Date.now() };
       }
-    // 4. Carrega stats reais do backend
-    try {
-      const statsRes = await adminApi.getSystemStats();
-      setSystemStats(statsRes || null);
-    } catch (err) {
-      console.warn("⚠️ Erro ao carregar stats, usando cálculo local:", err);
-      // Fallback: calcular stats baseado nos usuários carregados
-      const totalUsers = usersRes?.length || 0;
-      const proUsers = usersRes?.filter((u: any) => u.plan === 'pro').length || 0;
-      const freeUsers = totalUsers - proUsers;
-      setSystemStats({
-        total_stores: totalUsers,
-        active_stores: Math.floor(totalUsers * 0.7),
-        pro_stores: proUsers,
-        free_stores: freeUsers,
-        total_products: totalUsers * 15,
-        total_revenue: proUsers * 39.90,
-        monthly_revenue: proUsers * 39.90,
-        churn_rate: 5.2,
-        conversion_rate: totalUsers > 0 ? (proUsers / totalUsers) * 100 : 0,
-        avg_products_per_store: 15
-      });
-    }
-
-    // 5. Carrega analytics de produtos (com fallback)
-    try {
-      const productRes = await adminApi.getProductAnalytics();
-      setProductAnalytics(productRes);
-    } catch {
-      setProductAnalytics({
-        overview: {
-          total_products: 1250,
-          products_with_barcode: 980,
-          products_with_image: 750,
-          completion_rate: 60.0
-        },
-        brands: [
-          { name: 'Natura', count: 320, avg_price: 45.90 },
-          { name: 'Avon', count: 280, avg_price: 35.50 },
-          { name: 'Boticário', count: 220, avg_price: 55.80 },
-          { name: 'Eudora', count: 180, avg_price: 42.30 },
-          { name: 'Mary Kay', count: 150, avg_price: 48.70 }
-        ],
-        categories: [
-          { name: 'Perfumaria', count: 450 },
-          { name: 'Cuidados Pessoais', count: 380 },
-          { name: 'Maquiagem', count: 320 },
-          { name: 'Tratamento', count: 100 }
-        ],
-        popular_products: [
-          { name: 'Perfume Kaiak Masculino', brand: 'Natura', usage_count: 45, official_price: 89.90 },
-          { name: 'Base Líquida', brand: 'Avon', usage_count: 38, official_price: 25.90 },
-          { name: 'Creme Antissinais', brand: 'Boticário', usage_count: 32, official_price: 65.50 }
-        ],
-        price_ranges: { '0-10': 120, '10-50': 680, '50-100': 380, '100+': 70 }
-      });
-    }
-
-    // 6. Carrega analytics comportamental (com fallback)
-    try {
-      const behaviorRes = await adminApi.getBehaviorAnalytics();
-      setBehaviorAnalytics(behaviorRes);
-    } catch {
-      const totalUsers = usersRes?.length || 0;
-      setBehaviorAnalytics({
-        behavior_patterns: {
-          onboarding_patterns: {
-            '0-7_days': { stores_count: 25, avg_products: 3.2, conversion_rate: 5.0, total_products: 80 },
-            '8-30_days': { stores_count: 45, avg_products: 12.5, conversion_rate: 15.8, total_products: 562 },
-            '31-90_days': { stores_count: 32, avg_products: 18.3, conversion_rate: 28.1, total_products: 586 },
-            '90+_days': { stores_count: 78, avg_products: 25.7, conversion_rate: 35.9, total_products: 2005 }
-          },
-          usage_patterns: {
-            free_plan: { avg_products: 14.2, stores_at_limit: 12, avg_days_to_limit: 15 },
-            pro_plan: { avg_products: 45.8, avg_monthly_growth: 25 }
-          },
-          product_preferences: [
-            { brand: 'Natura', stores_using: 85, total_quantity: 1250, popularity_score: 68.0 },
-            { brand: 'Avon', stores_using: 72, total_quantity: 980, popularity_score: 57.6 },
-            { brand: 'Boticário', stores_using: 58, total_quantity: 720, popularity_score: 46.4 }
-          ]
-        },
-        ml_insights: {
-          conversion_triggers: { avg_products_before_upgrade: 18.5, most_common_upgrade_day: 'Terça-feira', seasonal_factor: 1.2 },
-          churn_indicators: { days_without_activity: 30, product_threshold: 5, engagement_score_threshold: 0.3 },
-          personalization_data: { total_interactions: 15420, data_quality_score: 0.85, ready_for_ml: totalUsers > 50 }
-        },
-        data_summary: {
-          total_stores_analyzed: totalUsers,
-          data_points_collected: totalUsers * 15,
-          analysis_date: new Date().toISOString(),
-          lgpd_compliant: true
-        }
-      });
       
+      if (statsRes.status === 'fulfilled') {
+        setSystemStats(statsRes.value || null);
+        dataCache.current.stats = { data: statsRes.value, timestamp: Date.now() };
+      } else {
+        // Fallback leve se stats falhar
+        const users = usersRes.status === 'fulfilled' ? usersRes.value : [];
+        const total = users?.length || 0;
+        const pro = users?.filter((u: any) => u.plan === 'pro').length || 0;
+        setSystemStats({
+          total_stores: total,
+          active_stores: Math.floor(total * 0.7),
+          pro_stores: pro,
+          free_stores: total - pro,
+          total_products: total * 15,
+          total_revenue: pro * 39.90,
+          monthly_revenue: pro * 39.90,
+          churn_rate: 5.2,
+          conversion_rate: total > 0 ? (pro / total) * 100 : 0,
+          avg_products_per_store: 15,
+        });
+      }
+    } catch (err: any) {
+      console.error("Erro crítico:", err);
+      toast({ title: "Erro ao carregar dados", variant: "destructive" });
+    } finally {
+      setLoading(false);
     }
+  }, [toast]);
 
-  } catch (err: any) {
-    console.error(err);
-    if (err.message?.includes("403")) {
-      toast({
-        title: "Acesso Negado",
-        description: "Sua conta não tem privilégios de administrador.",
-        variant: "destructive"
-      });
-      setAuthenticated(false);
-    } else {
-      toast({ title: "Erro ao carregar dados", description: err.message, variant: "destructive" });
+  // Função para carregar dados pesados APENAS quando a tab é acessada
+  const loadTabData = useCallback(async (tab: string) => {
+    if (tabLoading[tab]) return; // Evita chamadas duplicadas
+    
+    setTabLoading(prev => ({ ...prev, [tab]: true }));
+    
+    try {
+      if (tab === 'promotions' && (!promotions.length || !dataCache.current.promotions)) {
+        const res = await adminApi.listPromotions();
+        setPromotions(res || []);
+        dataCache.current.promotions = { data: res, timestamp: Date.now() };
+      }
+      
+      if (tab === 'plans' && (!planConfigs.length || !dataCache.current.plans)) {
+        const res = await adminApi.listPlanConfigs();
+        setPlanConfigs(res || []);
+        dataCache.current.plans = { data: res, timestamp: Date.now() };
+      }
+      
+      if (tab === 'analytics' && !productAnalytics) {
+        const [prodRes, behavRes] = await Promise.allSettled([
+          adminApi.getProductAnalytics(),
+          adminApi.getBehaviorAnalytics(),
+        ]);
+        if (prodRes.status === 'fulfilled') {
+          setProductAnalytics(prodRes.value);
+          dataCache.current.productAnalytics = { data: prodRes.value, timestamp: Date.now() };
+        }
+        if (behavRes.status === 'fulfilled') {
+          setBehaviorAnalytics(behavRes.value);
+          dataCache.current.behaviorAnalytics = { data: behavRes.value, timestamp: Date.now() };
+        }
+      }
+      
+      if (tab === 'api' && !apiMonitorData) {
+        const res = await adminApi.getApiMonitor?.();
+        if (res) {
+          setApiMonitorData(res);
+          dataCache.current.apiMonitor = { data: res, timestamp: Date.now() };
+        }
+      }
+    } catch (e) {
+      console.warn(`Erro ao carregar dados da tab ${tab}:`, e);
+    } finally {
+      setTabLoading(prev => ({ ...prev, [tab]: false }));
     }
-  } finally {
-    setLoading(false);
-  }
-};
+  }, [tabLoading, promotions.length, planConfigs.length, productAnalytics, apiMonitorData]);
+
+  // Função de refresh inteligente
+  const handleRefresh = useCallback(async () => {
+    // Limpa cache e força recarregamento
+    dataCache.current = {};
+    await fetchCriticalData();
+    await loadTabData(activeTab);
+    toast({ title: "Dados atualizados" });
+  }, [activeTab]);
+
   const togglePlan = async (user: AdminUser) => {
     const newPlan = user.plan === "pro" ? "free" : "pro";
     setUpdatingId(user.id);
@@ -802,7 +790,7 @@ const fetchAllData = async () => {
         ...u,
         plan: "pro",
         subscription_started_at: subForm.started_at || new Date().toISOString(),
-                subscription_expires_at: subForm.expires_at || null,
+        subscription_expires_at: subForm.expires_at || null,
         payment_provider: globalProvider,
         payment_external_id: subForm.external_id || null,
       } : u));
@@ -815,81 +803,90 @@ const fetchAllData = async () => {
       setSubSaving(false);
     }
   };
-// ==========================================
-// FUNÇÕES ESTABILIZADAS COM USECALLBACK
-// ==========================================
 
-const savePlanConfig = useCallback(async (planData: Partial<PlanConfig>) => {
-  try {
-    if (editingPlan) {
-      setPlanConfigs(prev => prev.map(p => 
-        p.plan_type === editingPlan.plan_type ? { ...p, ...planData } : p
-      ));
-      toast({ title: "Plano atualizado com sucesso" });
-    } else {
-      const newPlan = { ...planData } as PlanConfig;
-      setPlanConfigs(prev => [...prev, newPlan]);
-      toast({ title: "Plano criado com sucesso" });
+  // ==========================================
+  // FUNÇÕES ESTABILIZADAS COM USECALLBACK
+  // ==========================================
+
+  const savePlanConfig = useCallback(async (planData: Partial<PlanConfig>) => {
+    try {
+      if (editingPlan) {
+        setPlanConfigs(prev => prev.map(p => 
+          p.plan_type === editingPlan.plan_type ? { ...p, ...planData } : p
+        ));
+        toast({ title: "Plano atualizado com sucesso" });
+      } else {
+        const newPlan = { ...planData } as PlanConfig;
+        setPlanConfigs(prev => [...prev, newPlan]);
+        toast({ title: "Plano criado com sucesso" });
+      }
+      
+      setShowPlanModal(false);
+      setEditingPlan(null);
+      
+    } catch (err: any) {
+      toast({ title: "Erro", description: "Falha ao salvar plano", variant: "destructive" });
     }
-    
-    setShowPlanModal(false);
-    setEditingPlan(null);
-    
-  } catch (err: any) {
-    toast({ title: "Erro", description: "Falha ao salvar plano", variant: "destructive" });
-  }
-}, [editingPlan, setPlanConfigs, toast, setShowPlanModal, setEditingPlan]);
+  }, [editingPlan, setPlanConfigs, toast, setShowPlanModal, setEditingPlan]);
 
-const savePromotion = useCallback(async (promotionData: Partial<Promotion>) => {
-  try {
-    if (editingPromotion) {
+  const savePromotion = useCallback(async (promotionData: Partial<Promotion>) => {
+    try {
+      if (editingPromotion) {
+        setPromotions(prev => prev.map(p => 
+          p.id === editingPromotion.id ? { ...p, ...promotionData } : p
+        ));
+        toast({ title: "Promoção atualizada" });
+      } else {
+        const newPromotion = { 
+          ...promotionData, 
+          id: Date.now().toString(),
+          created_at: new Date().toISOString()
+        } as Promotion;
+        setPromotions(prev => [...prev, newPromotion]);
+        toast({ title: "Promoção criada" });
+      }
+      
+      setShowPromotionModal(false);
+      setEditingPromotion(null);
+      
+    } catch (err: any) {
+      toast({ title: "Erro", description: "Falha ao salvar promoção", variant: "destructive" });
+    }
+  }, [editingPromotion, setPromotions, toast, setShowPromotionModal, setEditingPromotion]);
+
+  const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
+    try {
       setPromotions(prev => prev.map(p => 
-        p.id === editingPromotion.id ? { ...p, ...promotionData } : p
+        p.id === promotion.id ? { ...p, is_active: !p.is_active } : p
       ));
-      toast({ title: "Promoção atualizada" });
-    } else {
-      const newPromotion = { 
-        ...promotionData, 
-        id: Date.now().toString(),
-        created_at: new Date().toISOString()
-      } as Promotion;
-      setPromotions(prev => [...prev, newPromotion]);
-      toast({ title: "Promoção criada" });
+      
+      toast({ 
+        title: `Promoção ${promotion.is_active ? 'desativada' : 'ativada'}` 
+      });
+      
+    } catch (err: any) {
+      toast({ title: "Erro", description: "Falha ao alterar status", variant: "destructive" });
     }
-    
-    setShowPromotionModal(false);
-    setEditingPromotion(null);
-    
-  } catch (err: any) {
-    toast({ title: "Erro", description: "Falha ao salvar promoção", variant: "destructive" });
-  }
-}, [editingPromotion, setPromotions, toast, setShowPromotionModal, setEditingPromotion]);
+  }, [setPromotions, toast]);
 
-const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
-  try {
-    setPromotions(prev => prev.map(p => 
-      p.id === promotion.id ? { ...p, is_active: !p.is_active } : p
-    ));
-    
-    toast({ 
-      title: `Promoção ${promotion.is_active ? 'desativada' : 'ativada'}` 
-    });
-    
-  } catch (err: any) {
-    toast({ title: "Erro", description: "Falha ao alterar status", variant: "destructive" });
-  }
-}, [setPromotions, toast]);
   // ==========================================
   // EFEITOS
   // ==========================================
 
   useEffect(() => {
     if (authenticated) {
-      fetchAllData();
+      fetchCriticalData();      // Dados rápidos no mount
       fetchSystemHealth();
       logAuditEvent('LOGIN_ADMIN');
     }
   }, [authenticated]);
+
+  // Carrega dados pesados apenas quando muda de tab
+  useEffect(() => {
+    if (authenticated) {
+      loadTabData(activeTab);
+    }
+  }, [activeTab, authenticated]);
 
   // ==========================================
   // COMPUTAÇÕES
@@ -898,8 +895,10 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
   const filtered = useMemo(() => {
     let list = users;
     if (planFilter !== "all") list = list.filter((u) => u.plan === planFilter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    
+    // ✅ Usa debouncedSearch em vez de search
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       list = list.filter(
         (u) =>
           (u.display_name || "").toLowerCase().includes(q) ||
@@ -907,6 +906,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
           (u.store_slug || "").toLowerCase().includes(q)
       );
     }
+    
     list = [...list].sort((a, b) => {
       let va: any = a[sortField] || "";
       let vb: any = b[sortField] || "";
@@ -914,7 +914,13 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
       return sortDir === "asc" ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
     });
     return list;
-  }, [users, planFilter, search, sortField, sortDir]);
+  }, [users, planFilter, debouncedSearch, sortField, sortDir]);
+
+  // ✅ PAGINAÇÃO
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filtered.slice(start, start + ITEMS_PER_PAGE);
+  }, [filtered, currentPage]);
 
   const stats = useMemo(() => {
     return {
@@ -981,8 +987,6 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
         return <Badge variant="outline">PRO</Badge>;
     }
   };
-
-  
 
   // ==========================================
   // TELA DE LOGIN
@@ -1072,12 +1076,12 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
           </h1>
           <div className="flex-1" />
           <button
-            onClick={fetchAllData}
+            onClick={handleRefresh}
             disabled={loading}
             className="flex items-center gap-1.5 border rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-secondary transition-colors"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Atualizar
+            {loading ? 'Atualizando...' : 'Atualizar'}
           </button>
         </div>
       </header>
@@ -1124,7 +1128,12 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
               TAB: DASHBOARD
               ========================================== */}
           <TabsContent value="dashboard" className="space-y-6">
-            {dashboardStats && (
+            {/* ✅ SKELETON LOADING */}
+            {loading && !dashboardStats ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                {[...Array(6)].map((_, i) => <SkeletonCard key={i} />)}
+              </div>
+            ) : dashboardStats ? (
               <>
                 {/* Cards de Estatísticas */}
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -1268,7 +1277,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
                         <span className="text-sm">Ver Lojas</span>
                       </button>
                       <button 
-                        onClick={fetchAllData}
+                        onClick={handleRefresh}
                         className="flex items-center gap-2 p-3 border border-border rounded-lg hover:bg-secondary transition-colors text-left"
                       >
                         <RefreshCw className="h-4 w-4 text-primary" />
@@ -1278,7 +1287,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
                   </div>
                 </div>
               </>
-            )}
+            ) : null}
           </TabsContent>
 
           {/* ==========================================
@@ -1332,7 +1341,7 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
               ))}
             </div>
 
-            {/* Tabela de Usuários */}
+            {/* Tabela de Usuários com PAGINAÇÃO */}
             <div className="rounded-xl border border-border bg-card overflow-hidden">
               <Table>
                 <TableHeader className="bg-secondary/20">
@@ -1356,12 +1365,12 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {loading ? (
+                  {loading && currentPage === 1 ? (
                     <TableRow><TableCell colSpan={4} className="text-center py-10">Carregando...</TableCell></TableRow>
-                  ) : filtered.length === 0 ? (
+                  ) : paginated.length === 0 ? (
                     <TableRow><TableCell colSpan={4} className="text-center py-10">Nenhum usuário.</TableCell></TableRow>
                   ) : (
-                    filtered.map((u) => (
+                    paginated.map((u) => (
                       <React.Fragment key={u.id}>
                         <TableRow 
                           className="cursor-pointer hover:bg-secondary/30" 
@@ -1524,6 +1533,31 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
                   )}
                 </TableBody>
               </Table>
+              
+              {/* ✅ CONTROLES DE PAGINAÇÃO */}
+              {filtered.length > ITEMS_PER_PAGE && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                  <p className="text-sm text-muted-foreground">
+                    Página {currentPage} de {Math.ceil(filtered.length / ITEMS_PER_PAGE)} • {filtered.length} total
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1.5 text-sm border rounded disabled:opacity-50 hover:bg-secondary transition-colors"
+                    >
+                      Anterior
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(p => Math.min(Math.ceil(filtered.length / ITEMS_PER_PAGE), p + 1))}
+                      disabled={currentPage >= Math.ceil(filtered.length / ITEMS_PER_PAGE)}
+                      className="px-3 py-1.5 text-sm border rounded disabled:opacity-50 hover:bg-secondary transition-colors"
+                    >
+                      Próxima
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
           </TabsContent>
@@ -1578,792 +1612,788 @@ const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
                     )}
                   </div>
 
-<div className="space-y-2 mb-4">
-  <div className="flex justify-between text-sm">
-    <span>Máx. Produtos:</span>
-    <span className="font-medium">
-      {plan.max_products ? plan.max_products : 'Ilimitado'}
-    </span>
-  </div>
-  <div className="space-y-1">
-    {[
-      { key: 'can_use_scanner', label: 'Scanner' },
-      { key: 'can_use_storefront', label: 'Vitrine' },
-      { key: 'can_use_alerts', label: 'Alertas' },
-      { key: 'can_use_ai_assistant', label: 'IA Assistant' },
-      { key: 'can_use_analytics', label: 'Analytics' }
-    ].map(({ key, label }) => (
-      <div key={key} className="flex items-center gap-2 text-xs">
-        {plan[key as keyof PlanConfig] ? (
-          <Check className="h-3 w-3 text-green-500" />
-        ) : (
-          <X className="h-3 w-3 text-gray-400" />
-        )}
-        <span className={plan[key as keyof PlanConfig] ? 'text-foreground' : 'text-muted-foreground'}>
-          {label}
-        </span>
-      </div>
-    ))}
-  </div>
-</div>
-
-<div className="flex gap-2">
-  <button
-    onClick={() => {
-      setEditingPlan(plan);
-      setShowPlanModal(true);
-    }}
-    className="flex-1 flex items-center justify-center gap-1 border border-border rounded-lg py-2 text-sm hover:bg-secondary"
-  >
-    <Edit2 className="h-3 w-3" />
-    Editar
-  </button>
-  <button
-    onClick={() => {
-      if (plan.is_visible) {
-        setPlanConfigs(prev => prev.map(p =>
-          p.plan_type === plan.plan_type ? { ...p, is_visible: false } : p
-        ));
-        toast({ title: "Plano ocultado" });
-      } else {
-        setPlanConfigs(prev => prev.map(p =>
-          p.plan_type === plan.plan_type ? { ...p, is_visible: true } : p
-        ));
-        toast({ title: "Plano exibido" });
-      }
-    }}
-    className={`px-3 py-2 rounded-lg text-sm ${
-      plan.is_visible
-        ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-    }`}
-  >
-    {plan.is_visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
-  </button>
-</div>
-          </div>
-        ))}
-      </div>
-    </TabsContent>
-
-    {/* ==========================================
-        TAB: PROMOÇÕES
-        ========================================== */}
-    <TabsContent value="promotions" className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold">Promoções Ativas</h2>
-          <p className="text-muted-foreground">Gerencie campanhas e ofertas especiais</p>
-        </div>
-        <button
-          onClick={() => {
-            setEditingPromotion(null);
-            setShowPromotionModal(true);
-          }}
-          className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" />
-          Nova Promoção
-        </button>
-      </div>
-
-      <div className="space-y-4">
-        {promotions.length === 0 ? (
-          <div className="text-center py-12 border border-dashed border-border rounded-xl">
-            <Megaphone className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-foreground mb-2">Nenhuma promoção ativa</h3>
-            <p className="text-muted-foreground mb-4">Crie sua primeira campanha promocional</p>
-            <button
-              onClick={() => setShowPromotionModal(true)}
-              className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90"
-            >
-              Criar Promoção
-            </button>
-          </div>
-        ) : (
-          promotions.map((promotion) => (
-            <div key={promotion.id} className="border border-border rounded-xl p-6 bg-card">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-lg font-bold">{promotion.title}</h3>
-                    <Badge variant={promotion.is_active ? "default" : "secondary"}>
-                      {promotion.is_active ? "Ativa" : "Inativa"}
-                    </Badge>
-                    {promotion.discount_percent > 0 && (
-                      <Badge variant="outline">
-                        <Percent className="h-3 w-3 mr-1" />
-                        {promotion.discount_percent}% OFF
-                      </Badge>
-                    )}
+                  <div className="space-y-2 mb-4">
+                    <div className="flex justify-between text-sm">
+                      <span>Máx. Produtos:</span>
+                      <span className="font-medium">
+                        {plan.max_products ? plan.max_products : 'Ilimitado'}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {[
+                        { key: 'can_use_scanner', label: 'Scanner' },
+                        { key: 'can_use_storefront', label: 'Vitrine' },
+                        { key: 'can_use_alerts', label: 'Alertas' },
+                        { key: 'can_use_ai_assistant', label: 'IA Assistant' },
+                        { key: 'can_use_analytics', label: 'Analytics' }
+                      ].map(({ key, label }) => (
+                        <div key={key} className="flex items-center gap-2 text-xs">
+                          {plan[key as keyof PlanConfig] ? (
+                            <Check className="h-3 w-3 text-green-500" />
+                          ) : (
+                            <X className="h-3 w-3 text-gray-400" />
+                          )}
+                          <span className={plan[key as keyof PlanConfig] ? 'text-foreground' : 'text-muted-foreground'}>
+                            {label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <p className="text-muted-foreground mb-3">{promotion.message}</p>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                    <span>Público: {promotion.target_audience}</span>
-                    <span>Início: {formatDate(promotion.starts_at)}</span>
-                    {promotion.ends_at && (
-                      <span>Fim: {formatDate(promotion.ends_at)}</span>
-                    )}
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        setEditingPlan(plan);
+                        setShowPlanModal(true);
+                      }}
+                      className="flex-1 flex items-center justify-center gap-1 border border-border rounded-lg py-2 text-sm hover:bg-secondary"
+                    >
+                      <Edit2 className="h-3 w-3" />
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (plan.is_visible) {
+                          setPlanConfigs(prev => prev.map(p =>
+                            p.plan_type === plan.plan_type ? { ...p, is_visible: false } : p
+                          ));
+                          toast({ title: "Plano ocultado" });
+                        } else {
+                          setPlanConfigs(prev => prev.map(p =>
+                            p.plan_type === plan.plan_type ? { ...p, is_visible: true } : p
+                          ));
+                          toast({ title: "Plano exibido" });
+                        }
+                      }}
+                      className={`px-3 py-2 rounded-lg text-sm ${
+                        plan.is_visible
+                          ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {plan.is_visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => togglePromotionStatus(promotion)}
-                    className={`p-2 rounded-lg transition-colors ${
-                      promotion.is_active
-                        ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                    title={promotion.is_active ? 'Desativar' : 'Ativar'}
-                  >
-                    {promotion.is_active ? (
-                      <ToggleRight className="h-4 w-4" />
-                    ) : (
-                      <ToggleLeft className="h-4 w-4" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingPromotion(promotion);
-                      setShowPromotionModal(true);
-                    }}
-                    className="p-2 rounded-lg border border-border hover:bg-secondary transition-colors"
-                    title="Editar"
-                  >
-                    <Edit2 className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (confirm('Tem certeza que deseja excluir esta promoção?')) {
-                        setPromotions(prev => prev.filter(p => p.id !== promotion.id));
-                        toast({ title: "Promoção excluída" });
-                      }
-                    }}
-                    className="p-2 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                    title="Excluir"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Métricas da promoção (simuladas) */}
-              <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border">
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-primary">
-                    {Math.floor(Math.random() * 50) + 10}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Visualizações</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-green-600">
-                    {Math.floor(Math.random() * 15) + 1}
-                  </p>
-                  <p className="text-xs text-muted-foreground">Conversões</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-2xl font-bold text-amber-600">
-                    {((Math.floor(Math.random() * 15) + 1) / (Math.floor(Math.random() * 50) + 10) * 100).toFixed(1)}%
-                  </p>
-                  <p className="text-xs text-muted-foreground">Taxa Conversão</p>
-                </div>
-              </div>
+              ))}
             </div>
-          ))
-        )}
-      </div>
-    </TabsContent>
-                  {/* ✅ NOVA TAB: PAGAMENTOS */}
+          </TabsContent>
+
+          {/* ==========================================
+              TAB: PROMOÇÕES
+              ========================================== */}
+          <TabsContent value="promotions" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">Promoções Ativas</h2>
+                <p className="text-muted-foreground">Gerencie campanhas e ofertas especiais</p>
+              </div>
+              <button
+                onClick={() => {
+                  setEditingPromotion(null);
+                  setShowPromotionModal(true);
+                }}
+                className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90"
+              >
+                <Plus className="h-4 w-4" />
+                Nova Promoção
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {promotions.length === 0 ? (
+                <div className="text-center py-12 border border-dashed border-border rounded-xl">
+                  <Megaphone className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-foreground mb-2">Nenhuma promoção ativa</h3>
+                  <p className="text-muted-foreground mb-4">Crie sua primeira campanha promocional</p>
+                  <button
+                    onClick={() => setShowPromotionModal(true)}
+                    className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90"
+                  >
+                    Criar Promoção
+                  </button>
+                </div>
+              ) : (
+                promotions.map((promotion) => (
+                  <div key={promotion.id} className="border border-border rounded-xl p-6 bg-card">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-lg font-bold">{promotion.title}</h3>
+                          <Badge variant={promotion.is_active ? "default" : "secondary"}>
+                            {promotion.is_active ? "Ativa" : "Inativa"}
+                          </Badge>
+                          {promotion.discount_percent > 0 && (
+                            <Badge variant="outline">
+                              <Percent className="h-3 w-3 mr-1" />
+                              {promotion.discount_percent}% OFF
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-muted-foreground mb-3">{promotion.message}</p>
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <span>Público: {promotion.target_audience}</span>
+                          <span>Início: {formatDate(promotion.starts_at)}</span>
+                          {promotion.ends_at && (
+                            <span>Fim: {formatDate(promotion.ends_at)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => togglePromotionStatus(promotion)}
+                          className={`p-2 rounded-lg transition-colors ${
+                            promotion.is_active
+                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          }`}
+                          title={promotion.is_active ? 'Desativar' : 'Ativar'}
+                        >
+                          {promotion.is_active ? (
+                            <ToggleRight className="h-4 w-4" />
+                          ) : (
+                            <ToggleLeft className="h-4 w-4" />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingPromotion(promotion);
+                            setShowPromotionModal(true);
+                          }}
+                          className="p-2 rounded-lg border border-border hover:bg-secondary transition-colors"
+                          title="Editar"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (confirm('Tem certeza que deseja excluir esta promoção?')) {
+                              setPromotions(prev => prev.filter(p => p.id !== promotion.id));
+                              toast({ title: "Promoção excluída" });
+                            }
+                          }}
+                          className="p-2 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                          title="Excluir"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Métricas da promoção (simuladas) */}
+                    <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border">
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-primary">
+                          {Math.floor(Math.random() * 50) + 10}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Visualizações</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-green-600">
+                          {Math.floor(Math.random() * 15) + 1}
+                        </p>
+                        <p className="text-xs text-muted-foreground">Conversões</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-2xl font-bold text-amber-600">
+                          {((Math.floor(Math.random() * 15) + 1) / (Math.floor(Math.random() * 50) + 10) * 100).toFixed(1)}%
+                        </p>
+                        <p className="text-xs text-muted-foreground">Taxa Conversão</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </TabsContent>
+
+          {/* ✅ NOVA TAB: PAGAMENTOS */}
           <TabsContent value="payments" className="space-y-6">
             <PaymentGatewaysTab />
           </TabsContent>
 
-    {/* ==========================================
-        TAB: ANALYTICS
-        ========================================== */}
-    <TabsContent value="analytics" className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold">Analytics de Produtos & Comportamento</h2>
-          <p className="text-muted-foreground">Insights sobre catálogo e padrões de uso</p>
-        </div>
-        <button
-          onClick={fetchAllData}
-          disabled={loading}
-          className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm hover:bg-secondary"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Atualizar Dados
-        </button>
-      </div>
+          {/* ==========================================
+              TAB: ANALYTICS
+              ========================================== */}
+          <TabsContent value="analytics" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold">Analytics de Produtos & Comportamento</h2>
+                <p className="text-muted-foreground">Insights sobre catálogo e padrões de uso</p>
+              </div>
+              <button
+                onClick={handleRefresh}
+                disabled={loading}
+                className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm hover:bg-secondary"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Atualizar Dados
+              </button>
+            </div>
 
-      {productAnalytics && (
-        <>
-          {/* Overview de Produtos */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Package className="h-4 w-4 text-blue-500" />
-                <span className="text-xs text-muted-foreground font-medium">Total Produtos</span>
-              </div>
-              <p className="text-2xl font-bold text-blue-500">{productAnalytics.overview.total_products}</p>
-              <p className="text-xs text-muted-foreground">No catálogo global</p>
-            </div>
-            
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Check className="h-4 w-4 text-green-500" />
-                <span className="text-xs text-muted-foreground font-medium">Com Código</span>
-              </div>
-              <p className="text-2xl font-bold text-green-500">{productAnalytics.overview.products_with_barcode}</p>
-              <p className="text-xs text-muted-foreground">
-                {((productAnalytics.overview.products_with_barcode / productAnalytics.overview.total_products) * 100).toFixed(1)}%
-              </p>
-            </div>
-            
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <Eye className="h-4 w-4 text-purple-500" />
-                <span className="text-xs text-muted-foreground font-medium">Com Imagem</span>
-              </div>
-              <p className="text-2xl font-bold text-purple-500">{productAnalytics.overview.products_with_image}</p>
-              <p className="text-xs text-muted-foreground">
-                {productAnalytics.overview.completion_rate}% completo
-              </p>
-            </div>
-            
-            <div className="rounded-xl border border-border bg-card p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <TrendingUp className="h-4 w-4 text-amber-500" />
-                <span className="text-xs text-muted-foreground font-medium">Marcas Ativas</span>
-              </div>
-              <p className="text-2xl font-bold text-amber-500">{productAnalytics.brands.length}</p>
-              <p className="text-xs text-muted-foreground">Diferentes marcas</p>
-            </div>
-          </div>
+            {productAnalytics && (
+              <>
+                {/* Overview de Produtos */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Package className="h-4 w-4 text-blue-500" />
+                      <span className="text-xs text-muted-foreground font-medium">Total Produtos</span>
+                    </div>
+                    <p className="text-2xl font-bold text-blue-500">{productAnalytics.overview.total_products}</p>
+                    <p className="text-xs text-muted-foreground">No catálogo global</p>
+                  </div>
+                  
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Check className="h-4 w-4 text-green-500" />
+                      <span className="text-xs text-muted-foreground font-medium">Com Código</span>
+                    </div>
+                    <p className="text-2xl font-bold text-green-500">{productAnalytics.overview.products_with_barcode}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {((productAnalytics.overview.products_with_barcode / productAnalytics.overview.total_products) * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Eye className="h-4 w-4 text-purple-500" />
+                      <span className="text-xs text-muted-foreground font-medium">Com Imagem</span>
+                    </div>
+                    <p className="text-2xl font-bold text-purple-500">{productAnalytics.overview.products_with_image}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {productAnalytics.overview.completion_rate}% completo
+                    </p>
+                  </div>
+                  
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <TrendingUp className="h-4 w-4 text-amber-500" />
+                      <span className="text-xs text-muted-foreground font-medium">Marcas Ativas</span>
+                    </div>
+                    <p className="text-2xl font-bold text-amber-500">{productAnalytics.brands.length}</p>
+                    <p className="text-xs text-muted-foreground">Diferentes marcas</p>
+                  </div>
+                </div>
 
-          {/* Top Marcas e Categorias */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Top Marcas */}
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                <Store className="h-5 w-5 text-primary" />
-                Top Marcas por Quantidade
-              </h3>
-              <div className="space-y-3">
-                {productAnalytics.brands.slice(0, 10).map((brand, index) => (
-                  <div key={index} className="flex justify-between items-center">
-                    <div>
-                      <span className="text-sm font-medium">{brand.name}</span>
-                      <p className="text-xs text-muted-foreground">
-                        Preço médio: {formatCurrency(brand.avg_price)}
+                {/* Top Marcas e Categorias */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Top Marcas */}
+                  <div className="rounded-xl border border-border bg-card p-6">
+                    <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                      <Store className="h-5 w-5 text-primary" />
+                      Top Marcas por Quantidade
+                    </h3>
+                    <div className="space-y-3">
+                      {productAnalytics.brands.slice(0, 10).map((brand, index) => (
+                        <div key={index} className="flex justify-between items-center">
+                          <div>
+                            <span className="text-sm font-medium">{brand.name}</span>
+                            <p className="text-xs text-muted-foreground">
+                              Preço médio: {formatCurrency(brand.avg_price)}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary transition-all duration-500"
+                                style={{
+                                  width: `${(brand.count / (productAnalytics.brands[0]?.count || 1)) * 100}%`
+                                }}
+                              />
+                            </div>
+                            <span className="text-sm font-medium w-8 text-right">{brand.count}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Categorias */}
+                  <div className="rounded-xl border border-border bg-card p-6">
+                    <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                      <Package className="h-5 w-5 text-primary" />
+                      Distribuição por Categoria
+                    </h3>
+                    <div className="space-y-3">
+                      {productAnalytics.categories.slice(0, 10).map((cat, index) => (
+                        <div key={index} className="flex justify-between items-center">
+                          <span className="text-sm font-medium">{cat.name}</span>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="secondary">{cat.count}</Badge>
+                            <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-amber-500 transition-all duration-500"
+                                style={{
+                                  width: `${(cat.count / (productAnalytics.categories[0]?.count || 1)) * 100}%`
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Produtos Mais Populares */}
+                <div className="rounded-xl border border-border bg-card p-6">
+                  <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                    <TrendingUp className="h-5 w-5 text-primary" />
+                    Produtos Mais Utilizados pelas Lojas
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Produto</th>
+                          <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Marca</th>
+                          <th className="text-center py-2 px-3 text-xs font-medium text-muted-foreground">Lojas Usando</th>
+                          <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">Preço</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {productAnalytics.popular_products.map((product, index) => (
+                          <tr key={index} className="border-b border-border/50 last:border-0">
+                            <td className="py-3 px-3">
+                              <span className="text-sm font-medium">{product.name}</span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <Badge variant="outline" className="text-xs">{product.brand}</Badge>
+                            </td>
+                            <td className="py-3 px-3 text-center">
+                              <span className="text-sm font-bold text-primary">{product.usage_count}</span>
+                            </td>
+                            <td className="py-3 px-3 text-right">
+                              <span className="text-sm font-medium">{formatCurrency(product.official_price)}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Faixas de Preço */}
+                <div className="rounded-xl border border-border bg-card p-6">
+                  <h3 className="font-semibold text-lg mb-4">Distribuição de Preços</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {Object.entries(productAnalytics.price_ranges).map(([range, count]) => (
+                      <div key={range} className="text-center p-4 bg-secondary/30 rounded-lg">
+                        <p className="text-2xl font-bold text-primary">{count}</p>
+                        <p className="text-xs text-muted-foreground mt-1">R$ {range}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Analytics Comportamental (ML Insights) */}
+            {behaviorAnalytics && (
+              <div className="space-y-6">
+                <div className="flex items-center gap-2">
+                  <Zap className="h-5 w-5 text-amber-500" />
+                  <h3 className="font-semibold text-lg">Insights Comportamentais (IA)</h3>
+                  <Badge variant="outline" className="text-xs">LGPD Compliant</Badge>
+                </div>
+
+                {/* Padrões de Onboarding */}
+                <div className="rounded-xl border border-border bg-card p-6">
+                  <h4 className="font-medium mb-4">Padrões de Onboarding por Período</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {Object.entries(behaviorAnalytics.behavior_patterns.onboarding_patterns).map(([period, data]: [string, any]) => (
+                      <div key={period} className="p-4 border border-border rounded-lg">
+                        <p className="text-sm font-medium capitalize mb-2">{period.replace('_', ' ')}</p>
+                        <div className="space-y-1 text-xs">
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Lojas:</span>
+                            <span className="font-medium">{data.stores_count}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Média Produtos:</span>
+                            <span className="font-medium">{data.avg_products}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">Conversão:</span>
+                            <span className="font-medium text-green-600">{data.conversion_rate}%</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Preferências de Produto */}
+                <div className="rounded-xl border border-border bg-card p-6">
+                  <h4 className="font-medium mb-4">Preferências de Marca por Segmento</h4>
+                  <div className="space-y-4">
+                    {behaviorAnalytics.behavior_patterns.product_preferences.slice(0, 5).map((pref: any, index: number) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                            <span className="text-xs font-bold text-primary">{index + 1}</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium">{pref.brand}</p>
+                            <p className="text-xs text-muted-foreground">{pref.stores_using} lojas usando</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-primary">{pref.popularity_score}%</p>
+                          <p className="text-xs text-muted-foreground">Popularidade</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Insights de ML para Ação */}
+                <div className="rounded-xl border border-border bg-card p-6">
+                  <h4 className="font-medium mb-4 flex items-center gap-2">
+                    <Bot className="h-5 w-5 text-purple-500" />
+                    Recomendações da IA
+                  </h4>
+                  <div className="space-y-3">
+                    {[
+                      {
+                        title: 'Otimizar Conversão',
+                        description: 'Usuários com 18+ produtos têm 85% mais chance de converter para PRO',
+                        action: 'Criar campanha para usuários com 15-19 produtos',
+                        impact: '+25% conversão estimada',
+                        priority: 'high'
+                      },
+                      {
+                        title: 'Expandir Catálogo Premium',
+                        description: 'Marcas premium têm 40% maior retenção de usuários PRO',
+                        action: 'Adicionar mais produtos Natura, Boticário ao catálogo',
+                        impact: '+15% retenção estimada',
+                        priority: 'medium'
+                      },
+                      {
+                        title: 'Tutorial da Vitrine',
+                        description: 'Apenas 30% dos usuários PRO usam a vitrine online',
+                        action: 'Criar onboarding interativo para feature de vitrine',
+                        impact: '+40% engajamento estimado',
+                        priority: 'medium'
+                      }
+                    ].map((rec, index) => (
+                      <div key={index} className="p-4 border border-border rounded-lg hover:border-primary/50 transition-colors">
+                        <div className="flex items-start justify-between mb-2">
+                          <h5 className="font-medium text-sm">{rec.title}</h5>
+                          <Badge variant={rec.priority === 'high' ? 'destructive' : 'secondary'} className="text-xs">
+                            {rec.priority === 'high' ? 'Alta' : 'Média'} Prioridade
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-2">{rec.description}</p>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-primary font-medium">→ {rec.action}</span>
+                          <span className="text-green-600 font-medium">{rec.impact}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Status do Modelo ML */}
+                <div className="rounded-xl border border-border bg-card p-6">
+                  <h4 className="font-medium mb-4">Status do Modelo de Machine Learning</h4>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                    <div className="p-3 bg-secondary/30 rounded-lg">
+                      <p className="text-2xl font-bold text-primary">
+                        {behaviorAnalytics.data_summary.total_stores_analyzed}
                       </p>
+                      <p className="text-xs text-muted-foreground">Lojas Analisadas</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-primary transition-all duration-500"
-                          style={{
-                            width: `${(brand.count / (productAnalytics.brands[0]?.count || 1)) * 100}%`
-                          }}
-                        />
-                      </div>
-                      <span className="text-sm font-medium w-8 text-right">{brand.count}</span>
+                    <div className="p-3 bg-secondary/30 rounded-lg">
+                      <p className="text-2xl font-bold text-green-600">
+                        {(behaviorAnalytics.ml_insights.personalization_data.data_quality_score * 100).toFixed(0)}%
+                      </p>
+                      <p className="text-xs text-muted-foreground">Qualidade dos Dados</p>
+                    </div>
+                    <div className="p-3 bg-secondary/30 rounded-lg">
+                      <p className="text-2xl font-bold text-amber-600">
+                        {behaviorAnalytics.ml_insights.personalization_data.ready_for_ml ? '✅' : '⏳'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Pronto para Treino</p>
+                    </div>
+                    <div className="p-3 bg-secondary/30 rounded-lg">
+                      <p className="text-2xl font-bold text-blue-600">
+                        {behaviorAnalytics.ml_insights.personalization_data.total_interactions.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Interações Totais</p>
                     </div>
                   </div>
-                ))}
+                  <p className="text-xs text-muted-foreground mt-4 text-center">
+                    🔒 Dados anonimizados • Consentimento LGPD requerido • Retenção: 24 meses
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Categorias */}
-            <div className="rounded-xl border border-border bg-card p-6">
-              <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                <Package className="h-5 w-5 text-primary" />
-                Distribuição por Categoria
-              </h3>
-              <div className="space-y-3">
-                {productAnalytics.categories.slice(0, 10).map((cat, index) => (
-                  <div key={index} className="flex justify-between items-center">
-                    <span className="text-sm font-medium">{cat.name}</span>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="secondary">{cat.count}</Badge>
-                      <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-amber-500 transition-all duration-500"
-                          style={{
-                            width: `${(cat.count / (productAnalytics.categories[0]?.count || 1)) * 100}%`
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                ))}
+            {!productAnalytics && !behaviorAnalytics && (
+              <div className="text-center py-12 border border-dashed border-border rounded-xl">
+                <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-foreground mb-2">Carregando analytics...</h3>
+                <p className="text-muted-foreground">Coletando dados do catálogo e padrões de uso</p>
               </div>
+            )}
+          </TabsContent>
+
+          {/* ==========================================
+              TAB: SYSTEM HEALTH & AUDIT
+              ========================================== */}
+          <TabsContent value="system" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Server className="h-6 w-6 text-primary" />
+                  Saúde do Sistema & Auditoria
+                </h2>
+                <p className="text-muted-foreground">Monitore infraestrutura e atividades administrativas</p>
+              </div>
+              <button
+                onClick={fetchSystemHealth}
+                className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm hover:bg-secondary"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Verificar Agora
+              </button>
             </div>
-          </div>
 
-          {/* Produtos Mais Populares */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-              <TrendingUp className="h-5 w-5 text-primary" />
-              Produtos Mais Utilizados pelas Lojas
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-border">
-                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Produto</th>
-                    <th className="text-left py-2 px-3 text-xs font-medium text-muted-foreground">Marca</th>
-                    <th className="text-center py-2 px-3 text-xs font-medium text-muted-foreground">Lojas Usando</th>
-                    <th className="text-right py-2 px-3 text-xs font-medium text-muted-foreground">Preço</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {productAnalytics.popular_products.map((product, index) => (
-
-                    <tr key={index} className="border-b border-border/50 last:border-0">
-                      <td className="py-3 px-3">
-                        <span className="text-sm font-medium">{product.name}</span>
-                      </td>
-                      <td className="py-3 px-3">
-                        <Badge variant="outline" className="text-xs">{product.brand}</Badge>
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        <span className="text-sm font-bold text-primary">{product.usage_count}</span>
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <span className="text-sm font-medium">{formatCurrency(product.official_price)}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Faixas de Preço */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h3 className="font-semibold text-lg mb-4">Distribuição de Preços</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {Object.entries(productAnalytics.price_ranges).map(([range, count]) => (
-                <div key={range} className="text-center p-4 bg-secondary/30 rounded-lg">
-                  <p className="text-2xl font-bold text-primary">{count}</p>
-                  <p className="text-xs text-muted-foreground mt-1">R$ {range}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-
-      {/* Analytics Comportamental (ML Insights) */}
-      {behaviorAnalytics && (
-        <div className="space-y-6">
-          <div className="flex items-center gap-2">
-            <Zap className="h-5 w-5 text-amber-500" />
-            <h3 className="font-semibold text-lg">Insights Comportamentais (IA)</h3>
-            <Badge variant="outline" className="text-xs">LGPD Compliant</Badge>
-          </div>
-
-          {/* Padrões de Onboarding */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h4 className="font-medium mb-4">Padrões de Onboarding por Período</h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {Object.entries(behaviorAnalytics.behavior_patterns.onboarding_patterns).map(([period, data]: [string, any]) => (
-                <div key={period} className="p-4 border border-border rounded-lg">
-                  <p className="text-sm font-medium capitalize mb-2">{period.replace('_', ' ')}</p>
-                  <div className="space-y-1 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Lojas:</span>
-                      <span className="font-medium">{data.stores_count}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Média Produtos:</span>
-                      <span className="font-medium">{data.avg_products}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Conversão:</span>
-                      <span className="font-medium text-green-600">{data.conversion_rate}%</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Preferências de Produto */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h4 className="font-medium mb-4">Preferências de Marca por Segmento</h4>
-            <div className="space-y-4">
-              {behaviorAnalytics.behavior_patterns.product_preferences.slice(0, 5).map((pref: any, index: number) => (
-                <div key={index} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-                      <span className="text-xs font-bold text-primary">{index + 1}</span>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">{pref.brand}</p>
-                      <p className="text-xs text-muted-foreground">{pref.stores_using} lojas usando</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-bold text-primary">{pref.popularity_score}%</p>
-                    <p className="text-xs text-muted-foreground">Popularidade</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Insights de ML para Ação */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h4 className="font-medium mb-4 flex items-center gap-2">
-              <Bot className="h-5 w-5 text-purple-500" />
-              Recomendações da IA
-            </h4>
-            <div className="space-y-3">
+            {/* Cards de Saúde */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
-                {
-                  title: 'Otimizar Conversão',
-                  description: 'Usuários com 18+ produtos têm 85% mais chance de converter para PRO',
-                  action: 'Criar campanha para usuários com 15-19 produtos',
-                  impact: '+25% conversão estimada',
-                  priority: 'high'
-                },
-                {
-                  title: 'Expandir Catálogo Premium',
-                  description: 'Marcas premium têm 40% maior retenção de usuários PRO',
-                  action: 'Adicionar mais produtos Natura, Boticário ao catálogo',
-                  impact: '+15% retenção estimada',
-                  priority: 'medium'
-                },
-                {
-                  title: 'Tutorial da Vitrine',
-                  description: 'Apenas 30% dos usuários PRO usam a vitrine online',
-                  action: 'Criar onboarding interativo para feature de vitrine',
-                  impact: '+40% engajamento estimado',
-                  priority: 'medium'
-                }
-              ].map((rec, index) => (
-                <div key={index} className="p-4 border border-border rounded-lg hover:border-primary/50 transition-colors">
-                  <div className="flex items-start justify-between mb-2">
-                    <h5 className="font-medium text-sm">{rec.title}</h5>
-                    <Badge variant={rec.priority === 'high' ? 'destructive' : 'secondary'} className="text-xs">
-                      {rec.priority === 'high' ? 'Alta' : 'Média'} Prioridade
-                    </Badge>
+                { label: "API Backend", sub: "Django (Render)", status: systemHealth?.api_status, icon: Server, extra: `Uptime: ${systemHealth?.uptime_percentage ?? 0}%` },
+                { label: "Banco de Dados", sub: "PostgreSQL", status: systemHealth?.database_status, icon: Activity, extra: "Latência: ~80ms" },
+                { label: "Gateway Pagamento", sub: "Asaas", status: systemHealth?.payment_gateway_status, icon: CreditCard, extra: "Modo: Produção" },
+              ].map((s, i) => {
+                const ok = s.status === 'operational';
+                const degraded = s.status === 'degraded';
+                return (
+                  <div key={i} className="rounded-xl border border-border bg-card p-5">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <p className="font-semibold text-sm">{s.label}</p>
+                        <p className="text-xs text-muted-foreground">{s.sub}</p>
+                      </div>
+                      <s.icon className={`h-5 w-5 ${ok ? 'text-green-500' : degraded ? 'text-amber-500' : 'text-destructive'}`} />
+                    </div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`h-2 w-2 rounded-full ${ok ? 'bg-green-500 animate-pulse' : degraded ? 'bg-amber-500' : 'bg-destructive'}`} />
+                      <span className={`text-sm font-medium ${ok ? 'text-green-600' : degraded ? 'text-amber-600' : 'text-destructive'}`}>
+                        {ok ? 'Operacional' : degraded ? 'Degradado' : 'Indisponível'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{s.extra}</p>
                   </div>
-                  <p className="text-sm text-muted-foreground mb-2">{rec.description}</p>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-primary font-medium">→ {rec.action}</span>
-                    <span className="text-green-600 font-medium">{rec.impact}</span>
-                  </div>
+                );
+              })}
+            </div>
+
+            {/* Feature Flags / Manutenção */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="rounded-xl border border-border bg-card p-6">
+                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                  <Zap className="h-5 w-5 text-primary" /> Feature Flags Globais
+                </h3>
+                <div className="space-y-3">
+                  {[
+                    { key: 'ai_enabled', label: 'Assistente IA', desc: 'Liga/desliga chat IA globalmente' },
+                    { key: 'storefront_enabled', label: 'Vitrine Pública', desc: 'Permite vitrines públicas' },
+                    { key: 'ocr_enabled', label: 'OCR de Validade', desc: 'Reconhecimento via foto' },
+                  ].map((f) => {
+                    const active = (localStorage.getItem(`flag_${f.key}`) ?? 'true') === 'true';
+                    return (
+                      <div key={f.key} className="flex items-center justify-between p-3 border border-border rounded-lg">
+                        <div>
+                          <p className="text-sm font-medium">{f.label}</p>
+                          <p className="text-xs text-muted-foreground">{f.desc}</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            localStorage.setItem(`flag_${f.key}`, active ? 'false' : 'true');
+                            logAuditEvent(active ? `DISABLE_${f.key.toUpperCase()}` : `ENABLE_${f.key.toUpperCase()}`);
+                            toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
+                            setSystemHealth(h => h ? { ...h } : h);
+                          }}
+                          className={active ? 'text-green-600' : 'text-muted-foreground'}
+                        >
+                          {active ? <ToggleRight className="h-7 w-7" /> : <ToggleLeft className="h-7 w-7" />}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
+              </div>
+
+              <div className="rounded-xl border border-border bg-card p-6">
+                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-amber-500" /> Modo de Manutenção
+                </h3>
+                {(() => {
+                  const maintenance = localStorage.getItem('maintenance_mode') === 'true';
+                  return (
+                    <>
+                      <div className={`p-4 rounded-lg mb-4 ${maintenance ? 'bg-amber-50 border border-amber-200' : 'bg-secondary/30'}`}>
+                        <p className="text-sm font-medium mb-1">
+                          Status: {maintenance ? '🟡 EM MANUTENÇÃO' : '🟢 Operação normal'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {maintenance ? 'Usuários veem tela de manutenção ao acessar.' : 'Sistema disponível para todos os usuários.'}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const next = !maintenance;
+                          localStorage.setItem('maintenance_mode', String(next));
+                          logAuditEvent(next ? 'ENABLE_MAINTENANCE' : 'DISABLE_MAINTENANCE');
+                          toast({ title: next ? "Manutenção ativada" : "Manutenção desativada", variant: next ? "destructive" : "default" });
+                          setSystemHealth(h => h ? { ...h } : h);
+                        }}
+                        className={`w-full py-2 rounded-lg font-medium ${maintenance ? 'bg-primary text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
+                      >
+                        {maintenance ? 'Desativar Manutenção' : 'Ativar Modo Manutenção'}
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
             </div>
-          </div>
 
-          {/* Status do Modelo ML */}
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h4 className="font-medium mb-4">Status do Modelo de Machine Learning</h4>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-              <div className="p-3 bg-secondary/30 rounded-lg">
-                <p className="text-2xl font-bold text-primary">
-                  {behaviorAnalytics.data_summary.total_stores_analyzed}
-                </p>
-                <p className="text-xs text-muted-foreground">Lojas Analisadas</p>
+            {/* Audit Logs */}
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex justify-between items-center p-4 border-b border-border">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <FileSearch className="h-5 w-5 text-primary" />
+                  Logs de Auditoria
+                </h3>
+                <Badge variant="outline">{auditLogs.length} eventos</Badge>
               </div>
-              <div className="p-3 bg-secondary/30 rounded-lg">
-                <p className="text-2xl font-bold text-green-600">
-                  {(behaviorAnalytics.ml_insights.personalization_data.data_quality_score * 100).toFixed(0)}%
-                </p>
-                <p className="text-xs text-muted-foreground">Qualidade dos Dados</p>
-              </div>
-              <div className="p-3 bg-secondary/30 rounded-lg">
-                <p className="text-2xl font-bold text-amber-600">
-                  {behaviorAnalytics.ml_insights.personalization_data.ready_for_ml ? '✅' : '⏳'}
-                </p>
-                <p className="text-xs text-muted-foreground">Pronto para Treino</p>
-              </div>
-              <div className="p-3 bg-secondary/30 rounded-lg">
-                <p className="text-2xl font-bold text-blue-600">
-                  {behaviorAnalytics.ml_insights.personalization_data.total_interactions.toLocaleString()}
-                </p>
-                <p className="text-xs text-muted-foreground">Interações Totais</p>
-              </div>
+              <Table>
+                <TableHeader className="bg-secondary/20">
+                  <TableRow>
+                    <TableHead>Data/Hora</TableHead>
+                    <TableHead>Ação</TableHead>
+                    <TableHead>Admin</TableHead>
+                    <TableHead className="hidden md:table-cell">Alvo</TableHead>
+                    <TableHead className="hidden md:table-cell">IP</TableHead>
+                    <TableHead className="text-right">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {auditLogs.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">Nenhum log registrado.</TableCell></TableRow>
+                  ) : auditLogs.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="text-xs">{new Date(log.timestamp).toLocaleString('pt-BR')}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-xs font-mono">{log.action}</Badge></TableCell>
+                      <TableCell className="text-xs">{log.user_email}</TableCell>
+                      <TableCell className="text-xs hidden md:table-cell">{log.target_user || '—'}</TableCell>
+                      <TableCell className="text-xs font-mono hidden md:table-cell">{log.ip_address}</TableCell>
+                      <TableCell className="text-right">
+                        {log.status === 'success'
+                          ? <Badge className="bg-green-500/10 text-green-600 hover:bg-green-500/20"><Check className="h-3 w-3 mr-1" />OK</Badge>
+                          : <Badge variant="destructive"><AlertTriangle className="h-3 w-3 mr-1" />Falhou</Badge>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
-            <p className="text-xs text-muted-foreground mt-4 text-center">
-              🔒 Dados anonimizados • Consentimento LGPD requerido • Retenção: 24 meses
-            </p>
-          </div>
-        </div>
-      )}
+          </TabsContent>
 
-      {!productAnalytics && !behaviorAnalytics && (
-        <div className="text-center py-12 border border-dashed border-border rounded-xl">
-          <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-foreground mb-2">Carregando analytics...</h3>
-          <p className="text-muted-foreground">Coletando dados do catálogo e padrões de uso</p>
-        </div>
-      )}
-    </TabsContent>
-    {/* ==========================================
-        TAB: SYSTEM HEALTH & AUDIT
-        ========================================== */}
-    <TabsContent value="system" className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <Server className="h-6 w-6 text-primary" />
-            Saúde do Sistema & Auditoria
-          </h2>
-          <p className="text-muted-foreground">Monitore infraestrutura e atividades administrativas</p>
-        </div>
-        <button
-          onClick={fetchSystemHealth}
-          className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm hover:bg-secondary"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Verificar Agora
-        </button>
-      </div>
+          {/* ==========================================
+              TAB: API & WEBHOOKS (Monetização do Banco de Dados)
+              ========================================== */}
+          <TabsContent value="api" className="space-y-6">
+            <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
+          </TabsContent>
 
-      {/* Cards de Saúde */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {[
-          { label: "API Backend", sub: "Django (Render)", status: systemHealth?.api_status, icon: Server, extra: `Uptime: ${systemHealth?.uptime_percentage ?? 0}%` },
-          { label: "Banco de Dados", sub: "PostgreSQL", status: systemHealth?.database_status, icon: Activity, extra: "Latência: ~80ms" },
-          { label: "Gateway Pagamento", sub: "Asaas", status: systemHealth?.payment_gateway_status, icon: CreditCard, extra: "Modo: Produção" },
-        ].map((s, i) => {
-          const ok = s.status === 'operational';
-          const degraded = s.status === 'degraded';
-          return (
-            <div key={i} className="rounded-xl border border-border bg-card p-5">
-              <div className="flex items-start justify-between mb-3">
+        </Tabs>
+
+        {/* Modal de Assinatura Manual (mantido do código original) */}
+        {showSubForm && selectedUser && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-card border border-border rounded-xl p-6 w-full max-w-md">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold">Configurar Assinatura Manual</h2>
+                <button
+                  onClick={() => setShowSubForm(false)}
+                  className="p-2 hover:bg-secondary rounded-lg"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="space-y-4">
                 <div>
-                  <p className="font-semibold text-sm">{s.label}</p>
-                  <p className="text-xs text-muted-foreground">{s.sub}</p>
-                </div>
-                <s.icon className={`h-5 w-5 ${ok ? 'text-green-500' : degraded ? 'text-amber-500' : 'text-destructive'}`} />
-              </div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`h-2 w-2 rounded-full ${ok ? 'bg-green-500 animate-pulse' : degraded ? 'bg-amber-500' : 'bg-destructive'}`} />
-                <span className={`text-sm font-medium ${ok ? 'text-green-600' : degraded ? 'text-amber-600' : 'text-destructive'}`}>
-                  {ok ? 'Operacional' : degraded ? 'Degradado' : 'Indisponível'}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">{s.extra}</p>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Feature Flags / Manutenção */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="rounded-xl border border-border bg-card p-6">
-          <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-            <Zap className="h-5 w-5 text-primary" /> Feature Flags Globais
-          </h3>
-          <div className="space-y-3">
-            {[
-              { key: 'ai_enabled', label: 'Assistente IA', desc: 'Liga/desliga chat IA globalmente' },
-              { key: 'storefront_enabled', label: 'Vitrine Pública', desc: 'Permite vitrines públicas' },
-              { key: 'ocr_enabled', label: 'OCR de Validade', desc: 'Reconhecimento via foto' },
-            ].map((f) => {
-              const active = (localStorage.getItem(`flag_${f.key}`) ?? 'true') === 'true';
-              return (
-                <div key={f.key} className="flex items-center justify-between p-3 border border-border rounded-lg">
-                  <div>
-                    <p className="text-sm font-medium">{f.label}</p>
-                    <p className="text-xs text-muted-foreground">{f.desc}</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      localStorage.setItem(`flag_${f.key}`, active ? 'false' : 'true');
-                      logAuditEvent(active ? `DISABLE_${f.key.toUpperCase()}` : `ENABLE_${f.key.toUpperCase()}`);
-                      toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
-                      setSystemHealth(h => h ? { ...h } : h);
+                  <label className="block text-sm font-medium mb-1">Gateway de Pagamento</label>
+                  <select
+                    value={globalProvider}
+                    onChange={(e) => {
+                      setGlobalProvider(e.target.value);
+                      localStorage.setItem("admin_global_provider", e.target.value);
                     }}
-                    className={active ? 'text-green-600' : 'text-muted-foreground'}
+                    className="w-full border border-input rounded-lg px-3 py-2 text-sm"
                   >
-                    {active ? <ToggleRight className="h-7 w-7" /> : <ToggleLeft className="h-7 w-7" />}
+                    <option value="">Selecione...</option>
+                    {PROVIDERS.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">ID Externo</label>
+                  <input
+                    type="text"
+                    value={subForm.external_id}
+                    onChange={(e) => setSubForm({ ...subForm, external_id: e.target.value })}
+                    className="w-full border border-input rounded-lg px-3 py-2 text-sm"
+                    placeholder="ID da transação/cliente"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Data de Início</label>
+                  <input
+                    type="date"
+                    value={subForm.started_at}
+                    onChange={(e) => setSubForm({ ...subForm, started_at: e.target.value })}
+                    className="w-full border border-input rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium mb-1">Data de Expiração</label>
+                  <input
+                    type="date"
+                    value={subForm.expires_at}
+                    onChange={(e) => setSubForm({ ...subForm, expires_at: e.target.value })}
+                    className="w-full border border-input rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="flex gap-3 pt-4">
+                  <button
+                    onClick={() => saveSubscription(selectedUser.id)}
+                    disabled={subSaving}
+                    className="flex-1 bg-primary text-white py-2 px-4 rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {subSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salvar'}
+                  </button>
+                  <button
+                    onClick={() => setShowSubForm(false)}
+                    className="px-4 py-2 border border-border rounded-lg hover:bg-secondary"
+                  >
+                    Cancelar
                   </button>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-border bg-card p-6">
-          <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-            <AlertCircle className="h-5 w-5 text-amber-500" /> Modo de Manutenção
-          </h3>
-          {(() => {
-            const maintenance = localStorage.getItem('maintenance_mode') === 'true';
-            return (
-              <>
-                <div className={`p-4 rounded-lg mb-4 ${maintenance ? 'bg-amber-50 border border-amber-200' : 'bg-secondary/30'}`}>
-                  <p className="text-sm font-medium mb-1">
-                    Status: {maintenance ? '🟡 EM MANUTENÇÃO' : '🟢 Operação normal'}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {maintenance ? 'Usuários veem tela de manutenção ao acessar.' : 'Sistema disponível para todos os usuários.'}
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    const next = !maintenance;
-                    localStorage.setItem('maintenance_mode', String(next));
-                    logAuditEvent(next ? 'ENABLE_MAINTENANCE' : 'DISABLE_MAINTENANCE');
-                    toast({ title: next ? "Manutenção ativada" : "Manutenção desativada", variant: next ? "destructive" : "default" });
-                    setSystemHealth(h => h ? { ...h } : h);
-                  }}
-                  className={`w-full py-2 rounded-lg font-medium ${maintenance ? 'bg-primary text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
-                >
-                  {maintenance ? 'Desativar Manutenção' : 'Ativar Modo Manutenção'}
-                </button>
-              </>
-            );
-          })()}
-        </div>
-      </div>
-
-      {/* Audit Logs */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="flex justify-between items-center p-4 border-b border-border">
-          <h3 className="font-semibold flex items-center gap-2">
-            <FileSearch className="h-5 w-5 text-primary" />
-            Logs de Auditoria
-          </h3>
-          <Badge variant="outline">{auditLogs.length} eventos</Badge>
-        </div>
-        <Table>
-          <TableHeader className="bg-secondary/20">
-            <TableRow>
-              <TableHead>Data/Hora</TableHead>
-              <TableHead>Ação</TableHead>
-              <TableHead>Admin</TableHead>
-              <TableHead className="hidden md:table-cell">Alvo</TableHead>
-              <TableHead className="hidden md:table-cell">IP</TableHead>
-              <TableHead className="text-right">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {auditLogs.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">Nenhum log registrado.</TableCell></TableRow>
-            ) : auditLogs.map((log) => (
-              <TableRow key={log.id}>
-                <TableCell className="text-xs">{new Date(log.timestamp).toLocaleString('pt-BR')}</TableCell>
-                <TableCell><Badge variant="outline" className="text-xs font-mono">{log.action}</Badge></TableCell>
-                <TableCell className="text-xs">{log.user_email}</TableCell>
-                <TableCell className="text-xs hidden md:table-cell">{log.target_user || '—'}</TableCell>
-                <TableCell className="text-xs font-mono hidden md:table-cell">{log.ip_address}</TableCell>
-                <TableCell className="text-right">
-                  {log.status === 'success'
-                    ? <Badge className="bg-green-500/10 text-green-600 hover:bg-green-500/20"><Check className="h-3 w-3 mr-1" />OK</Badge>
-                    : <Badge variant="destructive"><AlertTriangle className="h-3 w-3 mr-1" />Falhou</Badge>}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </TabsContent>
-
-    {/* ==========================================
-        TAB: API & WEBHOOKS (Monetização do Banco de Dados)
-        ========================================== */}
-    <TabsContent value="api" className="space-y-6">
-      <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
-    </TabsContent>
-
-  </Tabs>
-
-  {/* Modal de Assinatura Manual (mantido do código original) */}
-  {showSubForm && selectedUser && (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-card border border-border rounded-xl p-6 w-full max-w-md">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold">Configurar Assinatura Manual</h2>
-          <button
-            onClick={() => setShowSubForm(false)}
-            className="p-2 hover:bg-secondary rounded-lg"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1">Gateway de Pagamento</label>
-            <select
-              value={globalProvider}
-              onChange={(e) => {
-                setGlobalProvider(e.target.value);
-                localStorage.setItem("admin_global_provider", e.target.value);
-              }}
-              className="w-full border border-input rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="">Selecione...</option>
-              {PROVIDERS.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">ID Externo</label>
-            <input
-              type="text"
-              value={subForm.external_id}
-              onChange={(e) => setSubForm({ ...subForm, external_id: e.target.value })}
-              className="w-full border border-input rounded-lg px-3 py-2 text-sm"
-              placeholder="ID da transação/cliente"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Data de Início</label>
-            <input
-              type="date"
-              value={subForm.started_at}
-              onChange={(e) => setSubForm({ ...subForm, started_at: e.target.value })}
-              className="w-full border border-input rounded-lg px-3 py-2 text-sm"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium mb-1">Data de Expiração</label>
-            <input
-              type="date"
-              value={subForm.expires_at}
-              onChange={(e) => setSubForm({ ...subForm, expires_at: e.target.value })}
-              className="w-full border border-input rounded-lg px-3 py-2 text-sm"
-            />
-          </div>
-          <div className="flex gap-3 pt-4">
-            <button
-              onClick={() => saveSubscription(selectedUser.id)}
-              disabled={subSaving}
-              className="flex-1 bg-primary text-white py-2 px-4 rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50"
-            >
-              {subSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salvar'}
-              </button>
-              <button
-                onClick={() => setShowSubForm(false)}
-                className="px-4 py-2 border border-border rounded-lg hover:bg-secondary"
-              >
-                Cancelar
-              </button>
               </div>
-              </div>
-              </div>
-              </div>
-              )}
-              </main>
-              </div>
-              );
-              }
-              
-function setApiMonitorData(monitorRes: any) {
-  throw new Error("Function not implemented.");
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
 }
-
