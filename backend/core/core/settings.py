@@ -9,6 +9,27 @@ from dotenv import load_dotenv
 from cryptography.fernet import Fernet
 from datetime import timedelta
 
+
+# django/settings.py
+
+import os
+import hashlib
+from django.utils.crypto import get_random_string
+
+# === LGPD - Configurações de Consentimento ===
+
+# Salt para hash de IPs (gerar uma vez e guardar em variável de ambiente)
+LGPD_IP_SALT = os.environ.get('LGPD_IP_SALT', get_random_string(64))
+
+# Tempo de retenção de consentimentos (em dias) - Art. 15, LGPD
+LGPD_CONSENT_RETENTION_DAYS = 730  # 2 anos
+
+# Finalidades que NÃO podem ser revogadas (essenciais para o serviço)
+LGPD_ESSENTIAL_PURPOSES = ['essential', 'authentication', 'legal_compliance']
+
+# Versão atual do termo de consentimento
+LGPD_CONSENT_VERSION = "v1.0_2026-05"
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 

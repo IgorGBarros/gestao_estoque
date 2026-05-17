@@ -1068,17 +1068,139 @@ class ApiUsageLog(models.Model):
         ]
 
 
-# django/app/consent/models.py
+# core/models.py (ou no app onde ficam seus modelos de negócio)
+from django.db import models
+from django.conf import settings
+from django.utils import timezone
+import hashlib
+
 class ConsentRecord(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True)
-    email = models.EmailField()  # Para usuários não logados ainda
-    version = models.CharField(max_length=20)  # "v1.0_2026-05"
-    purposes = models.JSONField(default=list)  # ["authentication", ...]
-    accepted_at = models.DateTimeField(auto_now_add=True)
-    ip_address = models.GenericIPAddressField()
-    user_agent = models.TextField(blank=True)
+    """
+    Registro de consentimento LGPD (Art. 8º)
+    Armazena manifestação de vontade do titular com versionamento, 
+    finalidades específicas e suporte a usuários anônimos.
+    """
     
+    PURPOSE_CHOICES = [
+        ('essential', 'Funcionamento essencial do sistema'),
+        ('authentication', 'Autenticação e gestão de conta'),
+        ('service_delivery', 'Entrega do serviço contratado'),
+        ('legal_compliance', 'Conformidade legal/fiscal'),
+        ('analytics', 'Analytics de uso e melhorias'),
+        ('marketing', 'Marketing e comunicações promocionais'),
+        ('behavior_tracking', 'Captura de comportamento para IA'),
+        ('ai_features', 'Recursos de IA/Amorinha'),
+    ]
+
+    # Identificação do titular
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='consent_records',
+        help_text="Usuário autenticado (nulo para pré-cadastro/anônimos)"
+    )
+    email = models.EmailField(
+        db_index=True,
+        blank=True,
+        help_text="Email do titular (obrigatório se user=null)"
+    )
+    session_id = models.CharField(
+        max_length=100,
+        blank=True,
+        help_text="ID da sessão para rastreamento de usuários não logados"
+    )
+
+    # Dados do consentimento
+    ip_hash = models.CharField(
+        max_length=64,
+        db_index=True,
+        help_text="Hash SHA-256 do IP (anonimização LGPD Art. 12)"
+    )
+    purpose_flags = models.JSONField(
+        default=list,
+        help_text="Finalidades consentidas: ['essential', 'analytics', ...]"
+    )
+    term_version = models.CharField(
+        max_length=20,
+        db_index=True,
+        help_text="Versão do termo: v1.0_2026-05"
+    )
+    accepted_at = models.DateTimeField(
+        db_index=True,
+        help_text="Data/hora da manifestação de vontade"
+    )
+    revoked_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Data/hora da revogação (se aplicável)"
+    )
+    user_agent = models.TextField(
+        blank=True,
+        help_text="User-Agent do dispositivo (truncado no serializer)"
+    )
+
+    # Timestamps automáticos
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
     class Meta:
+        ordering = ['-accepted_at']
+        verbose_name = 'Registro de Consentimento LGPD'
+        verbose_name_plural = 'Registros de Consentimento LGPD'
         indexes = [
-            models.Index(fields=['email', 'version']),
+            models.Index(fields=['email', 'term_version']),
+            models.Index(fields=['user', 'purpose_flags']),
+            models.Index(fields=['term_version', 'accepted_at']),
         ]
+
+    def __str__(self):
+        identifier = self.user.email if self.user else self.email
+        status = 'Revogado' if self.revoked_at else 'Ativo'
+        return f"[{status}] {identifier} • v{self.term_version}"
+
+    # ==========================================
+    # MÉTODOS AUXILIARES
+    # ==========================================
+    
+    def is_active(self):
+        """Verifica se o consentimento ainda está válido"""
+        return self.revoked_at is None
+
+    def revoke(self, purpose: str | None = None):
+        """
+        Revoga consentimento total ou por finalidade específica.
+        Art. 8º, §5º: revogação gratuita e facilitada.
+        """
+        if purpose and purpose in self.purpose_flags:
+            # Remove apenas a finalidade solicitada
+            self.purpose_flags = [p for p in self.purpose_flags if p != purpose]
+            if not self.purpose_flags:
+                self.revoked_at = timezone.now()
+        else:
+            # Revogação total
+            self.revoked_at = timezone.now()
+        
+        self.save(update_fields=['purpose_flags', 'revoked_at', 'updated_at'])
+
+    @classmethod
+    def hash_ip(cls, ip_address: str, salt: str | None = None) -> str:
+        """
+        Gera hash SHA-256 do IP + salt para anonimização.
+        Uso: ConsentRecord.hash_ip(request.META.get('REMOTE_ADDR'))
+        """
+        if salt is None:
+            from django.conf import settings
+            salt = getattr(settings, 'LGPD_IP_SALT', '')
+        return hashlib.sha256(f"{ip_address}{salt}".encode()).hexdigest()
+
+    @classmethod
+    def get_latest_active(cls, user_or_email, version: str):
+        """Retorna o consentimento ativo mais recente para um titular e versão"""
+        lookup = {'user': user_or_email} if hasattr(user_or_email, 'id') else {'email': user_or_email}
+        return cls.objects.filter(
+            **lookup,
+            term_version=version,
+            revoked_at__isnull=True
+        ).order_by('-accepted_at').first()

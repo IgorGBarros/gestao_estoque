@@ -5,7 +5,7 @@ from django.db import models
 from django.db import transaction
 from pydantic_core import ValidationError
 from rest_framework import viewsets,status, permissions, generics
-from rest_framework.views import APIView
+from rest_framework.views import APIView, settings
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated

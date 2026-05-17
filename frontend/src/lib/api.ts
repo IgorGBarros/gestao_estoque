@@ -909,3 +909,15 @@ export const adminThemeApi = {
       body: JSON.stringify(data),
     }),
 };
+
+export interface DashboardStats {
+  investedValue: number;
+  potentialValue: number;
+  projectedProfit: number;
+  monthSales: number;
+  monthProfit: number;
+}
+
+export const statsApi = {
+  getDashboard: () => apiRequest<DashboardStats>("/stats/dashboard/"),
+};

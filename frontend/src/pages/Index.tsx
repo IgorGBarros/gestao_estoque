@@ -1,3 +1,4 @@
+// pages/Index.tsx — VERSÃO SEGURA E OTIMIZADA
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
@@ -5,7 +6,7 @@ import {
   ArrowDownCircle, Settings, PieChart, Store, History, User, Bell, CheckCircle2
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { inventoryApi, movementsApi, profileApi } from "../lib/api";
+import { profileApi, statsApi } from "../lib/api"; // ✅ Nova importação
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import { ChatAssistant } from "../components/ChatAssistant";
@@ -41,47 +42,32 @@ export default function Index() {
 
   useEffect(() => {
     if (!user) return;
-    profileApi
-      .get()
-      .then((p) => setStoreSlug(p.store_slug))
-      .catch(() => setStoreSlug(null));
 
-    Promise.all([inventoryApi.list(), movementsApi.list()])
-      .then(([items, movements]) => {
-        const now = new Date();
-        const monthMovements = movements.filter((m) => {
-          const d = new Date(m.created_at);
-          return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-        }).map(m => {
-          const rawType = (m.transaction_type || (m as any).movement_type || "").toUpperCase();
-          const uiType = rawType === "ENTRADA" ? "entrada" : "saida";
-          return { ...m, raw_type: rawType, ui_type: uiType, profit: (m as any).profit ?? 0 };
-        });
+    // Carrega slug da loja em paralelo com stats
+    const fetchData = async () => {
+      try {
+        const [profileRes, statsRes] = await Promise.allSettled([
+          profileApi.get(),
+          statsApi.getDashboard() // ✅ Chama endpoint seguro do backend
+        ]);
 
-        const salesMovements = monthMovements.filter((m) => m.ui_type === "saida" && m.raw_type === "VENDA");
-        const monthSales = salesMovements.reduce((s, m) => s + (Number(m.unit_price) || 0) * Math.abs(m.quantity), 0);
-        const monthProfit = salesMovements.reduce((s, m) => s + (m.profit || 0), 0);
+        if (profileRes.status === 'fulfilled') {
+          setStoreSlug(profileRes.value.store_slug ?? null);
+        }
 
-        const totalInvested = items.reduce((s, i) => {
-          const qty = i.total_quantity ?? i.quantity ?? 0;
-          return s + (qty * i.cost_price);
-        }, 0);
-        const totalPotential = items.reduce((s, i) => {
-          const qty = i.total_quantity ?? i.quantity ?? 0;
-          const salePrice = i.sale_price || i.product?.official_price || 0;
-          return s + (qty * salePrice);
-        }, 0);
-
-        setStats({
-          investedValue: totalInvested,
-          potentialValue: totalPotential,
-          projectedProfit: totalPotential - totalInvested,
-          monthSales,
-          monthProfit,
-        });
+        if (statsRes.status === 'fulfilled') {
+          setStats(statsRes.value);
+        } else {
+          console.error("Erro ao carregar estatísticas:", statsRes.reason);
+        }
+      } catch (err) {
+        console.error("Erro inesperado:", err);
+      } finally {
         setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      }
+    };
+
+    fetchData();
   }, [user]);
 
   const fmt = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
@@ -100,7 +86,6 @@ export default function Index() {
       <header className="sticky top-0 z-20 border-b border-border bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            {/* ✅ border-brand/20 em vez de border-[#871745]/20 */}
             <div className="h-10 w-10 rounded-full overflow-hidden border-2 border-brand/20 shadow-sm">
               <img
                 src={amorinhaAvatar}
@@ -204,7 +189,6 @@ export default function Index() {
           />
         </div>
 
-        {/* ✅ Banner Amorinha — bg-brand-soft em vez de bg-[#FDF2F7] */}
         <div className="mt-10 text-center text-sm text-muted-foreground bg-brand-soft p-4 rounded-xl border border-brand/10">
           {!isLocked("chat_assistant") ? (
             <div className="flex items-center justify-center gap-2">
@@ -254,7 +238,7 @@ function ActionBtn({
       className={`flex items-center gap-3 rounded-xl p-4 text-left transition-all hover:scale-[1.02] hover:shadow-md ${
         primary
           ? "border-2 border-brand bg-gradient-to-br from-brand to-brand-hover shadow-sm"
-          : "border border-border bg-card hoverbg-brand-soft"
+          : "border border-border bg-card hover:bg-brand-soft" // ✅ Corrigido: hover:bg-brand-soft
       }`}
     >
       <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${primary ? "bg-white/20" : "bg-brand/10"}`}>
