@@ -5,7 +5,7 @@ from django.utils import timezone
 from django.utils.text import slugify
 from django.db import models
 from django.contrib.auth.models import (
-    AbstractBaseUser, BaseUserManager, PermissionsMixin, Permission
+    AbstractBaseUser, BaseUserManager, PermissionsMixin, Permission, User
 )
 from django.utils import timezone
 from django.conf import settings
@@ -1065,4 +1065,20 @@ class ApiUsageLog(models.Model):
         indexes = [
             models.Index(fields=['api_key', 'created_at']),
             models.Index(fields=['endpoint', 'status_code']),
+        ]
+
+
+# django/app/consent/models.py
+class ConsentRecord(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, null=True)
+    email = models.EmailField()  # Para usuários não logados ainda
+    version = models.CharField(max_length=20)  # "v1.0_2026-05"
+    purposes = models.JSONField(default=list)  # ["authentication", ...]
+    accepted_at = models.DateTimeField(auto_now_add=True)
+    ip_address = models.GenericIPAddressField()
+    user_agent = models.TextField(blank=True)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['email', 'version']),
         ]
