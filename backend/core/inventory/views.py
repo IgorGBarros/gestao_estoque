@@ -3281,3 +3281,35 @@ class ThemeConfigAdminView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_stats(request):
+    store = request.user.store
+    items = InventoryItem.objects.filter(store=store)
+    transactions = StockTransaction.objects.filter(store=store)
+    
+    # 1. Valor Investido (custo * quantidade)
+    invested = items.aggregate(total=Sum(F('cost_price') * F('total_quantity')))['total'] or 0
+    
+    # 2. Potencial de Venda (preço_venda * quantidade)
+    potential = items.aggregate(total=Sum(F('sale_price') * F('total_quantity')))['total'] or 0
+    
+    # 3. Vendas e Lucro do Mês
+    now = timezone.now()
+    month_txs = transactions.filter(
+        created_at__year=now.year,
+        created_at__month=now.month,
+        transaction_type='VENDA'
+    )
+    month_sales = month_txs.aggregate(total=Sum(F('unit_price') * F('quantity')))['total'] or 0
+    month_profit = month_txs.aggregate(total=Sum(F('profit')))['total'] or 0
+    
+    return Response({
+        "investedValue": float(invested),
+        "potentialValue": float(potential),
+        "projectedProfit": float(potential - invested),
+        "monthSales": float(month_sales),
+        "monthProfit": float(month_profit)
+    })

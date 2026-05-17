@@ -29,7 +29,8 @@ from .views import (
     public_storefront_view,
     dashboard_overview,
     dashboard_financial_summary,       
-    dashboard_inventory_analysis
+    dashboard_inventory_analysis,
+    dashboard_stats
     # FirebaseLoginView e CustomUserCreateView foram removidos daqui pois estão comentados na view
 )
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -97,6 +98,7 @@ urlpatterns = [
     path('dashboard/inventory/', dashboard_inventory_analysis, name='dashboard-inventory'),
     path('cash-flow/summary/', cash_flow_summary, name='cash-flow-summary'),
     path('cash-flow/detailed/', cash_flow_detailed, name='cash-flow-detailed'),
+    path('stats/dashboard/', dashboard_stats, name='dashboard_stats'),
 
 
     path('admin/plan-configs/', list_plan_configs, name='admin_plan_configs'),
