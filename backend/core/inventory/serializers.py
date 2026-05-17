@@ -9,8 +9,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from decimal import Decimal
 from django.utils.crypto import get_random_string
-from backend.core.core import settings
-
+from django.conf import settings
 # Importa seus modelos de negócio
 from .models import (
     ConsentRecord, CustomUser, Product, InventoryItem, InventoryBatch, Store, 
