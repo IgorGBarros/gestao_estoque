@@ -12,23 +12,12 @@ from datetime import timedelta
 
 # django/settings.py
 
+# ==========================================
+# LGPD - CONFIGURAÇÕES DE CONFORMIDADE
+# ==========================================
+
+# Salt para hash de IPs e dados sensíveis (gerar uma vez e manter fixo)
 import os
-import hashlib
-from django.utils.crypto import get_random_string
-
-# === LGPD - Configurações de Consentimento ===
-
-# Salt para hash de IPs (gerar uma vez e guardar em variável de ambiente)
-LGPD_IP_SALT = os.environ.get('LGPD_IP_SALT', get_random_string(64))
-
-# Tempo de retenção de consentimentos (em dias) - Art. 15, LGPD
-LGPD_CONSENT_RETENTION_DAYS = 730  # 2 anos
-
-# Finalidades que NÃO podem ser revogadas (essenciais para o serviço)
-LGPD_ESSENTIAL_PURPOSES = ['essential', 'authentication', 'legal_compliance']
-
-# Versão atual do termo de consentimento
-LGPD_CONSENT_VERSION = "v1.0_2026-05"
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -50,6 +39,8 @@ if fernet_key:
     f = Fernet(fernet_key)
 else:
     f = None
+
+
 
 # ✅ CORREÇÃO: Variáveis de banco com fallbacks seguros
 DB_NAME = os.getenv("DB_NAME", "natura_inventory")
@@ -331,3 +322,59 @@ ASAAS_BASE_URLS = {
     'production': 'https://api.asaas.com/v3',
 }
 ASAAS_BASE_URL = ASAAS_BASE_URLS.get(ASAAS_ENVIRONMENT, ASAAS_BASE_URLS['sandbox'])
+
+
+# ... CONFIGURAÇÃO DO LOGGING (DEFINA ANTES DE MODIFICAR) ...
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{levelname}] {asctime} {module} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}
+
+# ==========================================
+# ✅ CONFIGURAÇÕES LGPD (SÓ DEPOIS QUE DEBUG E LOGGING ESTIVEREM DEFINIDOS)
+# ==========================================
+
+# Salt para hash de IPs (gerar uma vez e manter fixo)
+LGPD_IP_SALT = os.environ.get("LGPD_IP_SALT", "mude-para-string-aleatoria-segura-min-32chars")
+
+# Tempo de retenção de consentimentos e logs (em dias) - Art. 15, LGPD
+LGPD_CONSENT_RETENTION_DAYS = 730  # 2 anos
+
+# Finalidades que NÃO podem ser revogadas (essenciais para o serviço)
+LGPD_ESSENTIAL_PURPOSES = ["essential", "authentication", "legal_compliance", "service_delivery"]
+
+# Versão atual do termo de consentimento
+LGPD_CONSENT_VERSION = "v1.0_2026-05"
+
+# ==========================================
+# LOGGING SEGURO PARA PRODUÇÃO (só modifica LOGGING depois de definido)
+# ==========================================
+if not DEBUG:
+    # Em produção, não logar dados pessoais em texto puro
+    LOGGING["formatters"]["safe"] = {  # ✅ Agora LOGGING já existe
+        "format": "[%(asctime)s] %(levelname)s %(message)s",
+        "datefmt": "%Y-%m-%d %H:%M:%S",
+    }
+    LOGGING["handlers"]["console_safe"] = {  # ✅ Agora LOGGING já existe
+        "level": "INFO",
+        "class": "logging.StreamHandler",
+        "formatter": "safe",
+    }
+    # Opcional: redirecionar root logger para o handler seguro
+    # LOGGING["root"]["handlers"] = ["console_safe"]

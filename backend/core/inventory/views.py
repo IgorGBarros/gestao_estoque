@@ -1,51 +1,54 @@
+# ==========================================
+# IMPORTS GERAIS - CORRIGIDOS
+# ==========================================
 from time import time
+from django.db import models, transaction
+from django.db.models import Q, Count, Sum, F, Prefetch
+from django.utils import timezone
+from django.utils.crypto import get_random_string  # ✅ IMPORT CORRETO
+from django.utils.text import slugify
+from django.conf import settings  # ✅ IMPORT CORRETO
+from django.shortcuts import get_object_or_404
+from django.core.paginator import Paginator
+from django_filters.rest_framework import DjangoFilterBackend
 
-from aiohttp import request
-from django.db import models
-from django.db import transaction
-from pydantic_core import ValidationError
-from rest_framework import viewsets,status, permissions, generics
-from rest_framework.views import APIView, settings
+from rest_framework import viewsets, status, permissions, generics
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
-from django.db.models import Q, Count, Sum, F
-from django.utils import timezone
-from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.exceptions import ValidationError
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
 import re
+import hashlib  # ✅ Para hash de dados sensíveis
+import traceback
 
 # Imports do Django Auth
-from rest_framework_simplejwt.views import TokenObtainPairView
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model, login
 
-from rest_framework_simplejwt.views import TokenObtainPairView,TokenRefreshView
-from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import CustomTokenObtainPairSerializer, CustomUserSerializer, ProfileSerializer, ThemeConfigSerializer
-from .models import CustomUser, RegistrationSession, ThemeConfig
+# Imports dos seus modelos
+from .models import (
+    CustomUser, RegistrationSession, ThemeConfig,
+    Product, Store, InventoryItem, InventoryBatch,
+    Sale, SaleItem, PriceHistory, StockTransaction,
+    PlanConfig, Promotion, ConsentRecord  # ✅ Novo modelo LGPD
+)
 
+# Imports dos seus serializers
+from .serializers import (
+    CustomTokenObtainPairSerializer, CustomUserSerializer,
+    ProfileSerializer, ThemeConfigSerializer,
+    ProductSerializer, InventoryItemSerializer,
+    StockEntrySerializer, SaleSerializer, StockTransactionSerializer,
+    ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer  # ✅ Novos serializers LGPD
+)
 
-# Imports do seu Projeto
-from .models import Product, InventoryItem, InventoryBatch, Store, Sale, SaleItem, PriceHistory
-# OBS: Removi 'CustomUserSerializer' e 'CustomTokenObtainPairSerializer' pois eles dependem do CustomUser
-from .serializers import InventoryItemSerializer, ProductSerializer, StockEntrySerializer, SaleSerializer
 from .scraper import search_google_shopping
-import re
-from django.contrib.auth import login
-
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import get_user_model
-
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework import generics, status
-from rest_framework.permissions import AllowAny
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from django.contrib.auth import login, get_user_model
-
 
 User = get_user_model()
-
 # ============================================================================
 # 1. AUTHENTICATION VIEWS
 # ============================================================================
@@ -83,7 +86,49 @@ class FirebaseLoginView(APIView):
             print(f"🔥 ERRO FIREBASE VIEW: {str(e)}")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-# ... (Abaixo seguem as rotas do Estoque: ProductViewSet, StockEntryView, etc) ...
+# ==========================================
+# UTILITÁRIOS LGPD - ANONIMIZAÇÃO E SEGURANÇA
+# ==========================================
+
+def hash_for_lgpd(value: str, salt_key: str = 'LGPD_SALT') -> str:
+    """
+    Gera hash SHA-256 para anonimização de dados pessoais (LGPD Art. 12)
+    Uso: hash_for_lgpd(user.email) ou hash_for_lgpd(ip, 'LGPD_IP_SALT')
+    """
+    if not value:
+        return ''
+    salt = getattr(settings, salt_key, settings.SECRET_KEY[:32])
+    return hashlib.sha256(f"{value}{salt}".encode('utf-8')).hexdigest()
+
+
+def log_safe(message: str, **context):
+    """
+    Log que anonimiza automaticamente dados sensíveis no contexto
+    Uso: log_safe("Login attempt", user_email=user.email, ip_address=ip)
+    """
+    safe_context = {}
+    for key, value in context.items():
+        if any(sensitive in key.lower() for sensitive in ['email', 'ip', 'phone', 'cpf', 'name', 'user_agent']):
+            safe_context[key] = hash_for_lgpd(str(value))
+        else:
+            safe_context[key] = value
+    # Só loga em DEBUG ou desenvolvimento
+    if settings.DEBUG:
+        print(f"[SAFE_LOG] {message}", **safe_context)
+
+
+def has_consent_for_purpose(user, purpose: str) -> bool:
+    """
+    Verifica se usuário consentiu com finalidade específica (LGPD Art. 8º)
+    """
+    if not user or not user.is_authenticated:
+        return False
+    
+    return ConsentRecord.objects.filter(
+        user=user,
+        purpose_flags__contains=[purpose],
+        revoked_at__isnull=True
+    ).exists()
 # ============================================================================
 # 2. CORE BUSINESS (ESTOQUE)
 # ============================================================================
@@ -111,87 +156,81 @@ from .scraper import search_google_shopping
 
 # inventory/views.py - VERSÃO FINAL da função get_current_store
 
+
 def get_current_store(user):
     """
-    ✅ Versão final com fallback automático para criar loja
+    ✅ Versão atualizada com fallback e logs de auditoria
     """
     try:
-        print(f"🔍 get_current_store para usuário: {user.id} ({user.email})")
+        # Log de segurança (anonimizado se necessário)
+        print(f"🔍 get_current_store: Usuário {user.id if user else 'Anon'}")
         
         if not user or not user.id:
             print("❌ Usuário inválido ou sem ID")
             return None
         
-        from .models import Store
-        
         # Estratégia 1: Buscar por relacionamento owner
         try:
             store = Store.objects.filter(owner=user).first()
             if store:
-                print(f"✅ Loja encontrada via relacionamento: {store.id} - {store.name}")
+                print(f"✅ Loja encontrada (owner): {store.id}")
                 return store
         except Exception as e:
-            print(f"⚠️ Erro ao buscar por relacionamento: {e}")
+            print(f"⚠️ Erro busca owner: {e}")
         
         # Estratégia 2: Buscar por owner_id direto
         try:
             stores = Store.objects.filter(owner_id=user.id)
             if stores.exists():
                 store = stores.first()
-                print(f"✅ Loja encontrada por owner_id: {store.id} - {store.name}")
+                print(f"✅ Loja encontrada (owner_id): {store.id}")
                 return store
         except Exception as e:
-            print(f"⚠️ Erro ao buscar por owner_id: {e}")
+            print(f"⚠️ Erro busca owner_id: {e}")
         
         # Estratégia 3: FALLBACK - Criar loja automaticamente
-        print(f"🏪 Criando loja automaticamente para usuário {user.email}")
-        
+        print(f"🏪 Criando loja automática para {user.email}")
         try:
             store = Store.objects.create(
                 name=f"Loja de {user.email}",
                 owner=user,
-                slug=f"loja-{user.id}-{int(time.time())}"  # Slug único
+                slug=f"loja-{user.id}-{int(time())}",
+                plan="free"
             )
-            print(f"✅ Loja criada automaticamente: {store.id} - {store.name}")
+            print(f"✅ Loja criada: {store.id}")
             return store
-            
         except Exception as create_error:
             print(f"❌ Erro ao criar loja: {create_error}")
             
-            # Estratégia 4: ÚLTIMO RECURSO - Usar primeira loja disponível
-            try:
-                first_store = Store.objects.first()
-                if first_store:
-                    print(f"⚠️ Usando primeira loja disponível: {first_store.id}")
-                    return first_store
-            except Exception as e:
-                print(f"❌ Erro ao buscar primeira loja: {e}")
-        
-        print(f"❌ Nenhuma loja encontrada/criada para usuário {user.id}")
-        return None
+            # 🚨 ESTRATÉGIA 4 (PERIGOSA - LEAKAGE):
+            # A linha abaixo foi comentada para evitar vazamento de dados entre usuários.
+            # Se descomentar, um erro na criação pode expor a loja de outro cliente.
+            
+            # try:
+            #     first_store = Store.objects.first()
+            #     if first_store:
+            #         print(f"⚠️ Usando primeira loja disponível: {first_store.id}")
+            #         return first_store
+            # except Exception: pass
+            
+            # Retorno seguro: Se não achou e não criou, retorna None
+            return None
         
     except Exception as e:
-        print(f"❌ Erro geral em get_current_store: {e}")
-        import traceback
+        print(f"❌ Erro geral get_current_store: {e}")
         traceback.print_exc()
         return None
 
-# inventory/views.py - CORRIGIR a função
 
 def ensure_user_has_store(user):
     """
-    ✅ VERSÃO CORRIGIDA: Garantir que o usuário tenha uma loja
+    ✅ Garante que o usuário tenha uma loja, lançando erro se falhar
     """
     try:
         store = get_current_store(user)
         
         if not store:
-            print(f"🏪 Criando loja para usuário {user.email}")
-            
-            from .models import Store
-            from django.utils.text import slugify
-            
-            # ✅ CORREÇÃO: Criar loja com campos corretos
+            print(f"🏪 Tentativa secundária de criação para {user.email}")
             try:
                 store = Store.objects.create(
                     owner=user,
@@ -200,26 +239,16 @@ def ensure_user_has_store(user):
                     storefront_enabled=True,
                     plan="free"
                 )
-                print(f"✅ Loja criada: {store.id} - {store.name}")
+                print(f"✅ Loja criada via ensure: {store.id}")
             except Exception as create_error:
-                print(f"❌ Erro ao criar loja: {create_error}")
-                
-                # ✅ FALLBACK: Tentar criar com campos mínimos
-                try:
-                    store = Store.objects.create(
-                        owner=user,
-                        name=f"Loja de {user.email}"
-                    )
-                    print(f"✅ Loja criada via fallback: {store.id}")
-                except Exception as fallback_error:
-                    print(f"❌ Erro no fallback: {fallback_error}")
-                    raise
+                print(f"❌ Falha crítica ao garantir loja: {create_error}")
+                # Retorna None para que a View trate o erro (ex: 403 Forbidden)
+                return None
         
         return store
     
     except Exception as e:
-        print(f"❌ Erro ao garantir loja: {e}")
-        import traceback
+        print(f"❌ Erro ensure_user_has_store: {e}")
         traceback.print_exc()
         raise
 # inventory/mixins.py ou views.py
@@ -615,11 +644,6 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
                 'message': str(e)
             }, status=500)
 
-from django.db import transaction
-from django.db.models import Sum
-
-from django.db import transaction
-from django.db.models import Sum
 
 class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
     """Extrato de Movimentações da Loja - VERSÃO CORRIGIDA FINAL"""
@@ -1951,7 +1975,7 @@ def dashboard_inventory_analysis(request):
     
 
 @api_view(["GET"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated]) 
 def feature_gates_view(request):
     """
     Fornece lista de feature gates para o frontend.
@@ -3312,4 +3336,132 @@ def dashboard_stats(request):
         "projectedProfit": float(potential - invested),
         "monthSales": float(month_sales),
         "monthProfit": float(month_profit)
+    })
+
+
+# ==========================================
+# ENDPOINTS LGPD - GESTÃO DE CONSENTIMENTO
+# ==========================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])  # Permite cadastro antes do login
+def record_consent(request):
+    """
+    Registra consentimento LGPD (Art. 8º)
+    POST /api/consent/
+    Body: {
+        "email": "user@example.com",
+        "session_id": "abc123",  # Para usuários não logados
+        "version": "v1.0_2026-05",
+        "purposes": ["essential", "analytics"],
+        "accepted_at": "2026-05-18T10:00:00Z"
+    }
+    """
+    serializer = ConsentRecordSerializer(data=request.data, context={'request': request})
+    
+    if serializer.is_valid():
+        consent = serializer.save()
+        log_safe("Consentimento registrado", email=request.data.get('email'), purposes=consent.purpose_flags)
+        
+        return Response({
+            "status": "consent_recorded",
+            "consent_id": consent.id,
+            "version": consent.term_version,
+            "purposes_granted": consent.purpose_flags,
+            "can_revoke": [p for p in consent.purpose_flags if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', [])]
+        }, status=status.HTTP_201_CREATED)
+    
+    return Response({
+        "status": "error",
+        "errors": serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def revoke_consent(request, purpose: str):
+    """
+    Revoga consentimento para finalidade específica (Art. 8º, §5º)
+    DELETE /api/consent/revoke/analytics/
+    """
+    essential = getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', ['essential', 'authentication', 'legal_compliance'])
+    
+    if purpose in essential:
+        return Response({
+            "error": f"A finalidade '{purpose}' é essencial e não pode ser revogada"
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    updated = ConsentRecord.objects.filter(
+        user=request.user,
+        purpose_flags__contains=[purpose],
+        revoked_at__isnull=True
+    ).update(revoked_at=timezone.now())
+    
+    if updated == 0:
+        return Response({
+            "status": "no_consent_found",
+            "message": "Nenhum consentimento ativo encontrado para esta finalidade"
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    log_safe("Consentimento revogado", user_id=request.user.id, purpose=purpose)
+    
+    return Response({
+        "status": "consent_revoked",
+        "purpose": purpose,
+        "revoked_count": updated
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_consents(request):
+    """
+    Lista consentimentos do usuário (Art. 18, II - Direito de acesso)
+    GET /api/consent/my/
+    """
+    consents = ConsentRecord.objects.filter(user=request.user).order_by('-accepted_at')
+    serializer = ConsentSummarySerializer(consents, many=True)
+    
+    return Response({
+        "consents": serializer.data,
+        "essential_purposes": getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', []),
+        "revocable_purposes": [p for p in ['analytics', 'marketing', 'behavior_tracking', 'ai_features'] 
+                              if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', [])],
+        "current_version": getattr(settings, 'LGPD_CONSENT_VERSION', 'v1.0_2026-05')
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_my_data(request):
+    """
+    Portabilidade de dados (Art. 18, V) - Exporta dados do usuário
+    GET /api/consent/export/
+    """
+    store = ensure_user_has_store(request.user)
+    
+    # Limita período para evitar exportação massiva
+    cutoff_date = timezone.now() - timedelta(days=730)  # 2 anos
+    
+    # Coleta dados de forma paginada/limitada
+    inventory = InventoryItem.objects.filter(
+        store=store, updated_at__gte=cutoff_date
+    ).select_related('product')[:500]  # Limite de segurança
+    
+    transactions = StockTransaction.objects.filter(
+        store=store, created_at__gte=cutoff_date
+    ).select_related('product', 'batch')[:1000]
+    
+    log_safe("Exportação de dados solicitada", user_id=request.user.id, store_id=store.id)
+    
+    return Response({
+        "exported_at": timezone.now().isoformat(),
+        "user_email": request.user.email,
+        "store_slug": store.slug,
+        "period": {"from": cutoff_date.isoformat(), "to": timezone.now().isoformat()},
+        "inventory_count": inventory.count(),
+        "transactions_count": transactions.count(),
+        "inventory": InventoryItemSerializer(inventory, many=True).data,
+        "transactions": StockTransactionSerializer(transactions, many=True).data,
+        "note": "Dados exportados conforme Art. 18, V da LGPD"
     })
