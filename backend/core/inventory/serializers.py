@@ -641,7 +641,12 @@ class ConsentRecordSerializer(serializers.Serializer):
     
     # === Metadados técnicos (preenchidos automaticamente pelo backend) ===
     ip_address = serializers.CharField(required=False, write_only=True)
-    user_agent = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    user_agent = serializers.CharField(
+    required=False, 
+    allow_blank=True, 
+    write_only=True,
+    max_length=500  # ← Adicionar limite
+)
     
     # === Campos de leitura (gerados pelo backend) ===
     id = serializers.IntegerField(read_only=True)
@@ -702,17 +707,16 @@ class ConsentRecordSerializer(serializers.Serializer):
         
         # Validação de email único para consentimentos ativos
         if email and not user_id:
-            existing = ConsentRecord.objects.filter(
+            existing_consent = ConsentRecord.objects.filter(
                 email=email.lower(),
                 revoked_at__isnull=True,
-                version=attrs['version']
-            ).exists()
-            if existing:
-                # Permitir re-consentimento se versões forem diferentes
-                if attrs['version'] == existing.version:
-                    raise serializers.ValidationError(
-                        "Consentimento para esta versão já registrado para este email"
-                    )
+                term_version=attrs['version']  # ← Nome correto do campo
+            ).first()
+            
+            if existing_consent:
+                raise serializers.ValidationError(
+                    "Consentimento para esta versão do termo já foi registrado para este email"
+                )
         
         return attrs
 
@@ -720,8 +724,27 @@ class ConsentRecordSerializer(serializers.Serializer):
     
     def _hash_ip(self, ip_address: str) -> str:
         """Gera hash SHA-256 do IP + salt para anonimização (Art. 12, LGPD)"""
-        salt = getattr(settings, 'LGPD_IP_SALT', get_random_string(32))
-        return hashlib.sha256(f"{ip_address}{salt}".encode()).hexdigest()
+        from django.core.exceptions import ImproperlyConfigured
+        
+        salt = getattr(settings, 'LGPD_IP_SALT', None)
+        
+        if not salt:
+            if settings.DEBUG:
+                salt = getattr(settings, 'SECRET_KEY', 'dev-fallback')[:32]
+            else:
+                raise ImproperlyConfigured(
+                    "LGPD_IP_SALT deve ser configurado para anonimização de IPs"
+                )
+        
+        salt = (salt * 2)[:32]  # Garante 32 chars mínimos
+
+    def validate_accepted_at(self, value):
+        """Impede consentimento com data futura"""
+        if value > timezone.now():
+            raise serializers.ValidationError(
+                "A data de aceite não pode ser futura"
+            )
+        return value    
     
     def create(self, validated_data):
         """Cria novo registro de consentimento"""

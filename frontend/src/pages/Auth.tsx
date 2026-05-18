@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Mail, Lock, User, Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from "../hooks/use-toast";
+import { useConsent, PURPOSES } from "../hooks/useConsent"; // ✅ Import correto
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
 
 // Versão do termo de consentimento (mudar quando atualizar a política)
@@ -17,14 +18,15 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  
-  // ✅ Estados LGPD
+
+  // ✅ Estados LGPD - UNIFICADOS (removido duplicado)
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [consentError, setConsentError] = useState("");
 
   const { toast } = useToast();
   const navigate = useNavigate();
   const { signIn, signUp, signInWithGoogle } = useAuth();
+  const { recordConsent } = useConsent(); // ✅ Hook de consentimento
 
   // ✅ Validação de senha forte (mínimo LGPD + segurança)
   const validatePassword = (pwd: string): { valid: boolean; error?: string } => {
@@ -34,29 +36,13 @@ export default function Auth() {
     return { valid: true };
   };
 
-  // ✅ Salvar consentimento no localStorage (e enviar para backend depois)
-  const saveConsent = () => {
-    const consentData = {
-      version: CONSENT_VERSION,
-      accepted_at: new Date().toISOString(),
-      email: email.toLowerCase(),
-      purposes: ["authentication", "service_delivery", "legal_compliance"],
-      ip_address: "client_side", // Backend deve capturar o IP real
-    };
-    
-    localStorage.setItem("lgpd_consent", JSON.stringify(consentData));
-    
-    // 🔜 Enviar para backend quando estiver autenticado
-    // api.post("/consent/", consentData).catch(() => {});
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setConsentError("");
 
     // ✅ Validações para CADASTRO
     if (!isLogin) {
-      // Validar consentimento LGPD
+      // Validar consentimento LGPD (obrigatório)
       if (!consentAccepted) {
         setConsentError("É necessário aceitar a Política de Privacidade para criar sua conta.");
         return;
@@ -80,15 +66,25 @@ export default function Auth() {
         await signIn(email, password);
         navigate("/");
       } else {
+        // 1. Criar usuário
         await signUp(email, password, name);
         
-        // ✅ Registrar consentimento após cadastro bem-sucedido
-        saveConsent();
+        // 2. ✅ Registrar consentimento LGPD via API (após cadastro bem-sucedido)
+        const consentSuccess = await recordConsent(
+          [PURPOSES.ESSENTIAL, PURPOSES.AUTH, PURPOSES.SERVICE],
+          email.toLowerCase()
+        );
         
-        toast({ 
-          title: "Conta criada!", 
-          description: "Bem-vindo ao Minha Amora 🍇" 
-        });
+        if (consentSuccess) {
+          toast({ 
+            title: "Conta criada!", 
+            description: "Bem-vindo ao Minha Amora 🍇" 
+          });
+        } else {
+          // Consentimento falhou, mas usuário foi criado (log para auditoria)
+          console.warn("Usuário criado, mas consentimento LGPD falhou");
+        }
+        
         navigate("/");
       }
     } catch (err: any) {
@@ -109,9 +105,11 @@ export default function Auth() {
       await signInWithGoogle();
       
       // ✅ Para Google Sign-In, registrar consentimento implícito
-      if (!localStorage.getItem("lgpd_consent")) {
-        saveConsent();
-      }
+      // O backend já deve ter criado o usuário, então registramos o consentimento
+      await recordConsent(
+        [PURPOSES.ESSENTIAL, PURPOSES.AUTH, PURPOSES.SERVICE],
+        email.toLowerCase() // O email vem do Firebase
+      );
       
       navigate("/");
     } catch (err: any) {
@@ -311,7 +309,7 @@ export default function Auth() {
           {/* ─── Botão Principal ─── */}
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || (!isLogin && !consentAccepted)} // ✅ Desabilita se não aceitou
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-bold text-white shadow-lg shadow-brand/25 transition-all hover:opacity-90 hover:shadow-brand/40 active:scale-[0.98] disabled:opacity-50"
           >
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}

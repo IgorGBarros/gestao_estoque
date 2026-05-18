@@ -56,11 +56,69 @@ User = get_user_model()
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
+# ==========================================
+# 1. AUTHENTICATION VIEWS - VERSÃO LGPD
+# ==========================================
+
 class CustomUserCreateView(generics.CreateAPIView):
+    """
+    Cadastro de usuário com registro AUTOMÁTICO de consentimento LGPD (Art. 8º)
+    """
     queryset = CustomUser.objects.all()
     serializer_class = CustomUserSerializer
     permission_classes = [AllowAny]
-
+    
+    def perform_create(self, serializer):
+        """
+        ✅ Cria usuário E registra consentimento LGPD automaticamente
+        """
+        # 1. Cria o usuário normalmente
+        user = serializer.save()
+        
+        # 2. Coleta dados para auditoria (anonimizados)
+        ip_address = self.request.META.get(
+            'HTTP_X_FORWARDED_FOR', 
+            self.request.META.get('REMOTE_ADDR', '')
+        )
+        user_agent = self.request.META.get('HTTP_USER_AGENT', '')[:500]  # Limita tamanho
+        
+        # 3. Define finalidades ESSENCIAIS para cadastro (não podem ser revogadas)
+        essential_purposes = ['essential', 'authentication', 'service_delivery']
+        
+        # 4. Cria registro de consentimento
+        try:
+            consent = ConsentRecord.objects.create(
+                user=user,
+                email=user.email.lower(),
+                ip_hash=ConsentRecord.hash_ip(ip_address),  # Hash do IP para LGPD
+                purpose_flags=essential_purposes,
+                term_version=getattr(settings, 'LGPD_CONSENT_VERSION', 'v1.0_2026-05'),
+                accepted_at=timezone.now(),
+                user_agent=user_agent
+            )
+            log_safe(
+                "Consentimento registrado no cadastro", 
+                user_id=user.id, 
+                purposes=essential_purposes
+            )
+        except Exception as e:
+            # Se falhar ao registrar consentimento, ainda cria o usuário
+            # Mas loga o erro para correção posterior
+            log_safe(
+                "Erro ao registrar consentimento no cadastro", 
+                user_id=user.id, 
+                error=str(e)
+            )
+            # Opcional: você pode decidir NÃO criar o usuário se consentimento falhar
+            # if not consent:
+            #     user.delete()
+            #     raise ValidationError("Não foi possível registrar seu consentimento")
+        
+        # 5. Cria loja automaticamente para o novo usuário
+        try:
+            ensure_user_has_store(user)
+        except Exception as e:
+            log_safe("Erro ao criar loja no cadastro", user_id=user.id, error=str(e))
 
 class FirebaseLoginView(APIView):
     permission_classes = [AllowAny]

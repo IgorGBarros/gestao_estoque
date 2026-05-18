@@ -1,3 +1,4 @@
+import hashlib
 import uuid
 
 from django.db import models
@@ -1035,11 +1036,9 @@ class ApiUsageLog(models.Model):
         ]
 
 
-# core/models.py (ou no app onde ficam seus modelos de negócio)
-from django.db import models
-from django.conf import settings
-from django.utils import timezone
-import hashlib
+# ==========================================
+# MODELO LGPD: REGISTRO DE CONSENTIMENTO
+# ==========================================
 
 class ConsentRecord(models.Model):
     """
@@ -1127,10 +1126,6 @@ class ConsentRecord(models.Model):
         status = 'Revogado' if self.revoked_at else 'Ativo'
         return f"[{status}] {identifier} • v{self.term_version}"
 
-    # ==========================================
-    # MÉTODOS AUXILIARES
-    # ==========================================
-    
     def is_active(self):
         """Verifica se o consentimento ainda está válido"""
         return self.revoked_at is None
@@ -1141,24 +1136,18 @@ class ConsentRecord(models.Model):
         Art. 8º, §5º: revogação gratuita e facilitada.
         """
         if purpose and purpose in self.purpose_flags:
-            # Remove apenas a finalidade solicitada
             self.purpose_flags = [p for p in self.purpose_flags if p != purpose]
             if not self.purpose_flags:
                 self.revoked_at = timezone.now()
         else:
-            # Revogação total
             self.revoked_at = timezone.now()
         
         self.save(update_fields=['purpose_flags', 'revoked_at', 'updated_at'])
 
     @classmethod
     def hash_ip(cls, ip_address: str, salt: str | None = None) -> str:
-        """
-        Gera hash SHA-256 do IP + salt para anonimização.
-        Uso: ConsentRecord.hash_ip(request.META.get('REMOTE_ADDR'))
-        """
+        """Gera hash SHA-256 do IP + salt para anonimização."""
         if salt is None:
-            from django.conf import settings
             salt = getattr(settings, 'LGPD_IP_SALT', '')
         return hashlib.sha256(f"{ip_address}{salt}".encode()).hexdigest()
 

@@ -921,3 +921,75 @@ export interface DashboardStats {
 export const statsApi = {
   getDashboard: () => apiRequest<DashboardStats>("/stats/dashboard/"),
 };
+
+// src/lib/api.ts - ADICIONAR NO FINAL
+
+// ==========================================
+// CONSENTIMENTO LGPD (Art. 8º)
+// ==========================================
+
+export interface ConsentRecord {
+  id: number;
+  version: string;
+  purposes: string[];
+  accepted_at: string;
+  revoked_at: string | null;
+  is_active: boolean;
+  purposes_granted?: string[];
+  can_revoke?: string[];
+}
+
+export interface ConsentRequest {
+  email?: string;
+  session_id?: string;
+  version: string;
+  purposes: string[];
+  accepted_at: string;
+}
+
+export const consentApi = {
+  /**
+   * Registra novo consentimento (público ou autenticado)
+   */
+  record: async (data: ConsentRequest): Promise<ConsentRecord> => {
+    return apiRequest<ConsentRecord>("/consent/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Revoga consentimento para finalidade específica
+   */
+  revoke: async (purpose: string): Promise<{ status: string; purpose: string }> => {
+    return apiRequest(`/consent/revoke/${purpose}/`, {
+      method: "DELETE",
+    });
+  },
+
+  /**
+   * Lista todos os consentimentos do usuário logado
+   */
+  getMyConsents: async (): Promise<{
+    consents: ConsentRecord[];
+    essential_purposes: string[];
+    revocable_purposes: string[];
+    current_version: string;
+  }> => {
+    return apiRequest("/consent/my/");
+  },
+
+  /**
+   * Verifica se usuário tem consentimento ativo para finalidade
+   */
+  hasConsent: async (purpose: string): Promise<boolean> => {
+    try {
+      const { consents } = await consentApi.getMyConsents();
+      return consents.some(
+        (c) => c.is_active && c.purposes.includes(purpose)
+      );
+    } catch {
+      return false;
+    }
+  },
+};
