@@ -1,10 +1,13 @@
+// src/hooks/useAuth.tsx
 import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { api } from "../services/api";
-// 1. IMPORTAÇÕES DO FIREBASE
+// 1. IMPORTAÇÕES DO FIREBASE (Ajuste o caminho conforme sua estrutura)
 import { auth, googleProvider, signInWithPopup } from "../firebaseConfig";
-import { profileApi, clearAppCache } from "../lib/api";
+import { clearAppCache } from "../lib/api";
 
+// ==========================================
 // ✅ SISTEMA DE CACHE DE PROFILE OTIMIZADO
+// ==========================================
 let profileCache: any | null = null;
 let profileCacheTimestamp: number = 0;
 const PROFILE_CACHE_DURATION = 2 * 60 * 1000; // 2 minutos
@@ -14,33 +17,33 @@ function isProfileCacheValid(): boolean {
          (Date.now() - profileCacheTimestamp) < PROFILE_CACHE_DURATION;
 }
 
-// ✅ CONTROLE DE REQUISIÇÕES EM ANDAMENTO (evita duplicação)
+// ✅ CONTROLE DE REQUISIÇÕES EM ANDAMENTO (evita duplicação/race conditions)
 let activeProfileRequest: Promise<any> | null = null;
 
 const optimizedProfileApi = {
   get: async (forceRefresh = false): Promise<any> => {
     console.log(`👤 Carregando profile (forceRefresh: ${forceRefresh})`);
     
-    // ✅ Se há uma requisição em andamento, aguardar ela
+    // Se há uma requisição em andamento, aguardar ela terminar
     if (activeProfileRequest && !forceRefresh) {
       console.log("⏳ Aguardando requisição de profile em andamento...");
       return activeProfileRequest;
     }
     
-    // ✅ Usar cache se válido e não forçar refresh
+    // Usar cache se válido e não forçar refresh
     if (!forceRefresh && isProfileCacheValid()) {
       console.log("⚡ Usando cache do profile");
       return Promise.resolve(profileCache!);
     }
     
-    // ✅ Criar nova requisição
+    // Criar nova requisição
     activeProfileRequest = (async () => {
       try {
         console.log("🔄 Buscando profile da API...");
         const response = await api.get('/profile/');
         const data = response.data;
         
-        // ✅ Atualizar cache
+        // Atualizar cache
         profileCache = data;
         profileCacheTimestamp = Date.now();
         
@@ -50,15 +53,15 @@ const optimizedProfileApi = {
       } catch (error: any) {
         console.error("❌ Erro ao carregar profile:", error);
         
-        // ✅ Fallback para cache antigo se existir
+        // Fallback para cache antigo se existir e não for refresh forçado
         if (profileCache && !forceRefresh) {
-          console.log("🔄 Usando cache antigo do profile");
+          console.log("🔄 Usando cache antigo do profile como fallback");
           return profileCache;
         }
         
         throw error;
       } finally {
-        // ✅ Limpar promise após completar
+        // Limpar promise após completar
         activeProfileRequest = null;
       }
     })();
@@ -74,19 +77,23 @@ const optimizedProfileApi = {
   }
 };
 
+// ==========================================
 // 2. INTERFACE DO USUÁRIO EXPANDIDA
+// ==========================================
 export interface User {
   id: number;
   email: string;
   name?: string;
   first_name?: string;
-  // ✅ Campos do profile completo
+  // ✅ Campos do profile completo vindos do backend
   display_name?: string;
   store_name?: string;
   plan?: string;
   whatsapp_number?: string;
   store_slug?: string;
   storefront_enabled?: boolean;
+  has_store?: boolean;
+  can_add_products?: boolean;
 }
 
 interface AuthContextData {
@@ -98,7 +105,7 @@ interface AuthContextData {
   signInDemo: () => void;
   signOut: () => Promise<void>;
   isAuthenticated: boolean;
-  refreshProfile: () => Promise<void>; // ✅ NOVA FUNÇÃO
+  refreshProfile: () => Promise<void>; // ✅ NOVA FUNÇÃO PÚBLICA
 }
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
@@ -106,7 +113,7 @@ const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isInitialized, setIsInitialized] = useState(false); // ✅ NOVO ESTADO
+  const [isInitialized, setIsInitialized] = useState(false); 
 
   // ✅ CARREGAR SESSÃO INICIAL OTIMIZADA - APENAS UMA VEZ
   useEffect(() => {
@@ -125,10 +132,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // ✅ Configurar token primeiro
+    // Configurar token primeiro para futuras chamadas
     api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
     
-    // ✅ Usar dados do localStorage temporariamente
+    // Usar dados do localStorage temporariamente para evitar tela branca
     if (storedUser) {
       const tempUser = JSON.parse(storedUser);
       setUser(tempUser);
@@ -136,12 +143,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      console.log("🔐 Token encontrado, carregando profile...");
+      console.log("🔐 Token encontrado, validando sessão e carregando profile...");
       
-      // ✅ UMA ÚNICA CHAMADA DE PROFILE COM CACHE
+      // UMA ÚNICA CHAMADA DE PROFILE COM CACHE
       const profileData = await optimizedProfileApi.get();
       
-      // ✅ Mesclar dados do profile com dados básicos do usuário
+      // Mesclar dados do profile com dados básicos do usuário
       const userData: User = {
         ...(storedUser ? JSON.parse(storedUser) : {}),
         ...profileData,
@@ -152,7 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setUser(userData);
       
-      // ✅ Atualizar localStorage com dados completos
+      // Atualizar localStorage com dados completos e frescos
       localStorage.setItem("auth_user", JSON.stringify(userData));
       
       console.log("✅ Profile carregado na inicialização:", userData);
@@ -161,31 +168,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("❌ Erro ao carregar profile inicial:", error);
       
       if (error.response?.status === 401) {
-        // ✅ Limpar tudo se não autorizado
+        // Limpar tudo se não autorizado (token expirado ou inválido)
+        console.warn("🔒 Token inválido/expirado. Fazendo logout...");
         localStorage.clear();
         delete api.defaults.headers.common["Authorization"];
         optimizedProfileApi.clearCache();
         setUser(null);
       }
-      // ✅ Se erro não for 401, manter dados do localStorage
+      // Se erro não for 401 (ex: 500), manter dados do localStorage para não travar a UI
     } finally {
       setLoading(false);
       setIsInitialized(true);
     }
   };
 
+  // ==========================================
   // ✅ LOGIN NORMAL OTIMIZADO
+  // ==========================================
   const signIn = async (email: string, password: string) => {
     try {
       const response = await api.post("/auth/login/", { email, password });
       const { access } = response.data;
       
-      // ✅ Configurar token
+      // Configurar token
       localStorage.setItem("auth_token", access);
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
       
       try {
-        // ✅ Carregar profile completo após login
+        // Carregar profile completo após login
         const profileData = await optimizedProfileApi.get(true); // Forçar refresh
         
         const userData: User = {
@@ -200,7 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         console.log("✅ Login realizado com profile completo:", userData);
       } catch (profileError) {
-        // ✅ Fallback se profile falhar
+        // Fallback se profile falhar (ex: backend lento)
         console.warn("⚠️ Erro ao carregar profile após login, usando dados básicos");
         const basicUserData: User = {
           id: 0,
@@ -219,10 +229,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // --- CADASTRO MANUAL ---
   const signUp = async (email: string, password: string, name: string) => {
+    // O registro apenas cria a conta. O login deve ser feito em seguida ou redirecionar para login.
+    // Se o backend já loga após registro, ajuste aqui. Assumindo que retorna apenas sucesso.
     await api.post("/auth/register/", { email, password, name });
   };
 
+  // ==========================================
   // ✅ LOGIN GOOGLE OTIMIZADO
+  // ==========================================
   const signInWithGoogle = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
@@ -239,12 +253,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("Token de acesso não retornado pelo servidor Django.");
       }
       
-      // ✅ Configurar token
+      // Configurar token
       localStorage.setItem("auth_token", token);
       api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
       
       try {
-        // ✅ Carregar profile completo
+        // Carregar profile completo
         const profileData = await optimizedProfileApi.get(true); // Forçar refresh
         
         const userData: User = {
@@ -259,7 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         console.log("✅ Login Google realizado com profile completo:", userData);
       } catch (profileError) {
-        // ✅ Fallback se profile falhar
+        // Fallback se profile falhar
         console.warn("⚠️ Erro ao carregar profile após login Google, usando dados básicos");
         const basicUserData: User = {
           id: response.data.id || 0,
@@ -296,27 +310,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.defaults.headers.common["Authorization"] = `Bearer demo_token_123`;
   };
 
+  // ==========================================
   // ✅ LOGOUT OTIMIZADO
+  // ==========================================
   const signOut = async () => {
     localStorage.removeItem("auth_token");
     localStorage.removeItem("auth_user");
     delete api.defaults.headers.common["Authorization"];
     
-    // ✅ Limpar cache do profile
+    // Limpar cache do profile e outros caches da app
     optimizedProfileApi.clearCache();
+    clearAppCache(); // Se existir essa função no lib/api
     
     setUser(null);
-    setIsInitialized(false); // ✅ Resetar inicialização
+    setIsInitialized(false); // Resetar inicialização para permitir novo login limpo
     
     try {
       await auth.signOut().catch(() => {});
-      localStorage.clear();
+      // Opcional: localStorage.clear() se quiser limpar TUDO (cuidado com outras configs)
     } catch (e) {
       console.warn("Erro ao fazer logout do Firebase:", e);
     }
   };
 
-  // ✅ FUNÇÃO OTIMIZADA: Atualizar profile manualmente
+  // ✅ FUNÇÃO PÚBLICA: Atualizar profile manualmente (útil após editar perfil)
   const refreshProfile = async () => {
     try {
       console.log("🔄 Atualizando profile manualmente...");

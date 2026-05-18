@@ -120,6 +120,8 @@ class CustomUserCreateView(generics.CreateAPIView):
         except Exception as e:
             log_safe("Erro ao criar loja no cadastro", user_id=user.id, error=str(e))
 
+# backend/core/inventory/views.py
+
 class FirebaseLoginView(APIView):
     permission_classes = [AllowAny]
     
@@ -129,17 +131,24 @@ class FirebaseLoginView(APIView):
             return Response({'error': 'Token ausente'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
+            # Cria/atualiza usuário local
             user = CustomUser.objects.create_user_with_firebase(firebase_token)
-            login(request, user)  
+            
+            # ✅ GERA TOKENS JWT SIMPLE-JWT
             refresh = RefreshToken.for_user(user)
             
+            # ✅ RETORNA ESTRUTURA PADRÃO ESPERADA PELO FRONTEND
             return Response({
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
+                'access': str(refresh.access_token),  # ← NOME CORRETO
+                'refresh': str(refresh),              # ← NOME CORRETO
                 'email': user.email,
                 'name': getattr(user, 'name', user.email),
-                'is_authenticated': True
+                'is_authenticated': True,
+                # Opcional: dados da store
+                'store_slug': getattr(getattr(user, 'store', None), 'slug', None),
+                'plan': getattr(getattr(user, 'store', None), 'plan', 'free'),
             }, status=status.HTTP_200_OK)
+            
         except Exception as e:
             print(f"🔥 ERRO FIREBASE VIEW: {str(e)}")
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)

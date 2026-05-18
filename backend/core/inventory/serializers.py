@@ -1,6 +1,5 @@
 import hashlib
 import re
-
 from django.utils import timezone
 from datetime import timedelta
 from rest_framework import serializers
@@ -10,6 +9,7 @@ from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from decimal import Decimal
 from django.utils.crypto import get_random_string
 from django.conf import settings
+
 # Importa seus modelos de negócio
 from .models import (
     ConsentRecord, CustomUser, Product, InventoryItem, InventoryBatch, Store, 
@@ -31,14 +31,16 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             "email": attrs.get("email"),
             "password": attrs.get("password"),
         }
+        # Autentica usando email e senha
         user = authenticate(email=credentials["email"], password=credentials["password"])
+        
         if not user:
             raise serializers.ValidationError("Credenciais inválidas.")
         
-        # Validação padrão do JWT
+        # Validação padrão do JWT (gera access e refresh tokens)
         data = super().validate(attrs)
         
-        # ✅ NOVO: Adicionar dados da Store no token
+        # ✅ NOVO: Adicionar dados da Store na resposta do login
         store = getattr(user, 'store', None)
         data.update({
             "email": user.email,
@@ -57,13 +59,14 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token["email"] = user.email
         token["name"] = getattr(user, 'name', user.email)
         
-        # ✅ NOVO: Dados da Store no token
+        # ✅ NOVO: Dados da Store no payload do token
         store = getattr(user, 'store', None)
         if store:
             token["store_slug"] = store.slug
             token["plan"] = store.plan
         
         return token
+
 
 class CustomUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
@@ -91,6 +94,7 @@ class CustomUserSerializer(serializers.ModelSerializer):
         ensure_user_has_store(user)
         
         return user
+
 
 # ==========================================
 # 2. SERIALIZERS DE CONFIGURAÇÃO (NOVOS)
@@ -123,7 +127,6 @@ class PlanConfigSerializer(serializers.ModelSerializer):
             return round((obj.monthly_price * 12) - obj.yearly_price, 2)
         return 0
 
-# inventory/serializers.py - CORRIGIR PromotionSerializer
 
 class PromotionSerializer(serializers.ModelSerializer):
     is_valid = serializers.SerializerMethodField()
@@ -138,8 +141,8 @@ class PromotionSerializer(serializers.ModelSerializer):
     
     def get_is_valid(self, obj):
         """Método corrigido para verificar validade"""
-        # Usar a property is_valid em vez do método is_valid_for_store
         return obj.is_valid
+
 
 # ==========================================
 # 3. SERIALIZERS DE PRODUTO E ESTOQUE (melhorados)
@@ -152,6 +155,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'id', 'name', 'bar_code', 'natura_sku', 'image_url', 
             'category', 'brand', 'description', 'official_price', 'min_quantity'
         ]
+
 
 class InventoryBatchSerializer(serializers.ModelSerializer):
     formatted_date = serializers.SerializerMethodField()
@@ -197,6 +201,7 @@ class InventoryBatchSerializer(serializers.ModelSerializer):
         else:
             return 'valid'
 
+
 class InventoryItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
     batches = InventoryBatchSerializer(many=True, read_only=True)
@@ -229,10 +234,10 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         revenue = self.get_display_price(obj) * obj.total_quantity
         return revenue - cost
 
+
 # ==========================================
 # 4. SERIALIZER DE ENTRADA COM VALIDAÇÃO DE LIMITE (melhorado)
 # ==========================================
-
 
 class StockEntrySerializer(serializers.Serializer):
     bar_code = serializers.CharField(required=False, allow_blank=True, allow_null=True)
@@ -267,18 +272,15 @@ class StockEntrySerializer(serializers.Serializer):
     
     def _get_store_from_context(self):
         """✅ AUTOMÁTICO: Obter store do contexto ou request"""
-        # Primeiro: tentar do contexto (passado pela view)
         store = self.context.get('store')
         if store:
             return store
         
-        # Fallback: tentar do request.user
         request = self.context.get('request')
         if request and hasattr(request, 'user') and request.user.is_authenticated:
             try:
                 return request.user.store
             except AttributeError:
-                # Se usuário não tem store, criar uma
                 from .utils import ensure_user_has_store
                 return ensure_user_has_store(request.user)
         
@@ -289,22 +291,20 @@ class StockEntrySerializer(serializers.Serializer):
         bar_code = attrs.get('bar_code')
         natura_sku = attrs.get('natura_sku')
         
-        # Se não tem identificadores, é produto novo
         if not bar_code and not natura_sku:
             return True
         
-        # Verificar se já existe no estoque DESTA loja (tenant isolation)
         existing_item = None
         
         if bar_code:
             existing_item = InventoryItem.objects.filter(
-                store=store,  # ✅ TENANT: só desta loja
+                store=store,
                 product__bar_code=bar_code
             ).first()
         
         if not existing_item and natura_sku:
             existing_item = InventoryItem.objects.filter(
-                store=store,  # ✅ TENANT: só desta loja
+                store=store,
                 product__natura_sku=natura_sku
             ).first()
         
@@ -312,15 +312,12 @@ class StockEntrySerializer(serializers.Serializer):
     
     def _validate_tenant_limits(self, store):
         """✅ AUTOMÁTICO: Validação de limites por tenant"""
-        # Usar propriedade automática can_add_products
         if hasattr(store, 'can_add_products'):
             can_add = store.can_add_products
         else:
-            # Fallback manual se propriedade não existir
             can_add = self._manual_limit_check(store)
         
         if not can_add:
-            # Obter dados para erro estruturado
             limit_info = self._get_limit_info(store)
             
             raise ValidationError({
@@ -337,14 +334,12 @@ class StockEntrySerializer(serializers.Serializer):
         """✅ FALLBACK: Verificação manual se propriedade não existir"""
         current_count = InventoryItem.objects.filter(store=store).values('product').distinct().count()
         
-        # Tentar pegar configuração do plano
         try:
             plan_config = getattr(store, 'plan_config', None)
             max_products = plan_config.max_products if plan_config else None
         except:
             max_products = None
         
-        # Fallback hardcoded
         if max_products is None:
             max_products = 20 if store.plan == 'free' else None
         
@@ -368,6 +363,7 @@ class StockEntrySerializer(serializers.Serializer):
             'limit': limit
         }
 
+
 # ==========================================
 # 5. SERIALIZERS DE VENDA (mantidos)
 # ==========================================
@@ -378,12 +374,14 @@ class SaleItemInputSerializer(serializers.Serializer):
     batch_id = serializers.IntegerField(required=False, allow_null=True) 
     price_sold = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
 
+
 class SaleSerializer(serializers.Serializer):
     items = SaleItemInputSerializer(many=True)
     client_name = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     payment_method = serializers.CharField(default="DINHEIRO")
     transaction_type = serializers.CharField(default="VENDA") 
     notes = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
 
 class StockTransactionSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
@@ -402,6 +400,7 @@ class StockTransactionSerializer(serializers.ModelSerializer):
     def get_formatted_date(self, obj):
         return obj.created_at.strftime('%d/%m/%Y %H:%M')
 
+
 # ==========================================
 # 6. SERIALIZERS DE PERFIL / LOJA (melhorados)
 # ==========================================
@@ -412,6 +411,7 @@ class UserNestedSerializer(serializers.ModelSerializer):
         model = CustomUser
         fields = ["id", "email", "name"]
 
+
 class StoreStatsSerializer(serializers.Serializer):
     """Estatísticas da loja"""
     total_products = serializers.IntegerField()
@@ -419,6 +419,7 @@ class StoreStatsSerializer(serializers.Serializer):
     expired_products = serializers.IntegerField()
     near_expiry_products = serializers.IntegerField()
     low_stock_products = serializers.IntegerField()
+
 
 class ProfileSerializer(serializers.ModelSerializer):
     """✅ MELHORADO: Serializer de perfil baseado na Store"""
@@ -483,17 +484,14 @@ class ProfileSerializer(serializers.ModelSerializer):
             for item in items
         )
         
-        # Contar produtos com problemas
         expired_count = 0
         near_expiry_count = 0
         low_stock_count = 0
         
         for item in items:
-            # Verificar estoque baixo
             if item.total_quantity <= item.min_quantity:
                 low_stock_count += 1
             
-            # Verificar validade nos lotes
             for batch in item.batches.all():
                 if batch.expiration_date:
                     if batch.expiration_date < timezone.now().date():
@@ -515,6 +513,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     def validate_whatsapp_number(self, value):
         return value if value else ""
 
+
 # ==========================================
 # 7. SERIALIZERS PARA ASAAS (NOVOS)
 # ==========================================
@@ -529,7 +528,6 @@ class AsaasCheckoutSerializer(serializers.Serializer):
     
     def validate(self, attrs):
         """Validação do checkout"""
-        # Verificar se store pode fazer upgrade
         store = self.context.get('store')
         if not store:
             raise ValidationError("Store não encontrada")
@@ -538,6 +536,7 @@ class AsaasCheckoutSerializer(serializers.Serializer):
             raise ValidationError("Loja já possui plano PRO ativo")
         
         return attrs
+
 
 class AsaasWebhookSerializer(serializers.Serializer):
     """Serializer para processar webhooks do Asaas"""
@@ -556,6 +555,7 @@ class AsaasWebhookSerializer(serializers.Serializer):
             raise ValidationError(f"Evento {value} não suportado")
         
         return value
+
 
 # ==========================================
 # 8. SERIALIZERS DE ADMIN (NOVOS)
@@ -581,8 +581,6 @@ class AdminStoreSerializer(serializers.ModelSerializer):
         ]
 
 
-# backend/core/inventory/serializers.py (adicionar)
-
 class ThemeConfigSerializer(serializers.ModelSerializer):
     class Meta:
         model = ThemeConfig
@@ -593,6 +591,7 @@ class ThemeConfigSerializer(serializers.ModelSerializer):
             'color_border', 'app_name', 'logo_url', 'updated_at',
         ]
         read_only_fields = ['updated_at']
+
 
 # ==========================================
 # 9. SERIALIZERS LGPD - CONSENTIMENTO (NOVOS)
@@ -623,14 +622,14 @@ class ConsentRecordSerializer(serializers.Serializer):
     
     purposes = serializers.ListField(
         child=serializers.ChoiceField(choices=[
-            'essential',              # Funcionamento essencial do sistema
-            'authentication',         # Autenticação e gestão de conta
-            'service_delivery',       # Entrega do serviço contratado
-            'legal_compliance',       # Conformidade legal/fiscal
-            'analytics',              # Analytics de uso (opcional)
-            'marketing',              # Marketing e comunicações promocionais (opcional)
-            'behavior_tracking',      # Captura de comportamento para IA (opcional)
-            'ai_features',            # Recursos de IA/Amorinha (opcional)
+            'essential',
+            'authentication',
+            'service_delivery',
+            'legal_compliance',
+            'analytics',
+            'marketing',
+            'behavior_tracking',
+            'ai_features',
         ]),
         required=True,
         allow_empty=False,
@@ -639,16 +638,11 @@ class ConsentRecordSerializer(serializers.Serializer):
     
     accepted_at = serializers.DateTimeField(required=True)
     
-    # === Metadados técnicos (preenchidos automaticamente pelo backend) ===
+    # === Metadados técnicos ===
     ip_address = serializers.CharField(required=False, write_only=True)
-    user_agent = serializers.CharField(
-    required=False, 
-    allow_blank=True, 
-    write_only=True,
-    max_length=500  # ← Adicionar limite
-)
+    user_agent = serializers.CharField(required=False, allow_blank=True, write_only=True)
     
-    # === Campos de leitura (gerados pelo backend) ===
+    # === Campos de leitura ===
     id = serializers.IntegerField(read_only=True)
     ip_hash = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
@@ -657,7 +651,6 @@ class ConsentRecordSerializer(serializers.Serializer):
     # === VALIDAÇÕES ===
     
     def validate_version(self, value):
-        """Valida formato da versão do termo"""
         if not re.match(r'^v\d+\.\d+_\d{4}-\d{2}$', value):
             raise serializers.ValidationError(
                 "Versão deve seguir formato: vMAJOR.MINOR_YYYY-MM (ex: v1.0_2026-05)"
@@ -665,11 +658,9 @@ class ConsentRecordSerializer(serializers.Serializer):
         return value
     
     def validate_purposes(self, purposes):
-        """Valida finalidades do consentimento"""
         if not purposes:
             raise serializers.ValidationError("Pelo menos uma finalidade é obrigatória")
         
-        # Para cadastro de nova conta, 'essential' é obrigatório
         request = self.context.get('request')
         if request and request.parser_context.get('view').action == 'register':
             if 'essential' not in purposes:
@@ -680,16 +671,13 @@ class ConsentRecordSerializer(serializers.Serializer):
         return purposes
     
     def validate(self, attrs):
-        """Validação cruzada dos campos"""
         user_id = attrs.get('user_id')
         email = attrs.get('email')
         session_id = attrs.get('session_id')
         
-        # Se tiver user_id, deve ser um usuário válido
         if user_id:
             try:
                 user = User.objects.get(id=user_id)
-                # Se o request tiver user autenticado, deve bater com o user_id
                 request = self.context.get('request')
                 if request and request.user.is_authenticated:
                     if request.user.id != user_id:
@@ -699,23 +687,20 @@ class ConsentRecordSerializer(serializers.Serializer):
             except User.DoesNotExist:
                 raise serializers.ValidationError("Usuário não encontrado")
         
-        # Se não tiver user_id, precisa de email + session_id para anônimos
         elif not email or not session_id:
             raise serializers.ValidationError(
                 "Para usuários não autenticados, email e session_id são obrigatórios"
             )
         
-        # Validação de email único para consentimentos ativos
         if email and not user_id:
-            existing_consent = ConsentRecord.objects.filter(
+            existing = ConsentRecord.objects.filter(
                 email=email.lower(),
                 revoked_at__isnull=True,
-                term_version=attrs['version']  # ← Nome correto do campo
-            ).first()
-            
-            if existing_consent:
+                term_version=attrs['version']
+            ).exists()
+            if existing:
                 raise serializers.ValidationError(
-                    "Consentimento para esta versão do termo já foi registrado para este email"
+                    "Consentimento para esta versão já registrado para este email"
                 )
         
         return attrs
@@ -724,73 +709,45 @@ class ConsentRecordSerializer(serializers.Serializer):
     
     def _hash_ip(self, ip_address: str) -> str:
         """Gera hash SHA-256 do IP + salt para anonimização (Art. 12, LGPD)"""
-        from django.core.exceptions import ImproperlyConfigured
-        
-        salt = getattr(settings, 'LGPD_IP_SALT', None)
-        
-        if not salt:
-            if settings.DEBUG:
-                salt = getattr(settings, 'SECRET_KEY', 'dev-fallback')[:32]
-            else:
-                raise ImproperlyConfigured(
-                    "LGPD_IP_SALT deve ser configurado para anonimização de IPs"
-                )
-        
-        salt = (salt * 2)[:32]  # Garante 32 chars mínimos
-
-    def validate_accepted_at(self, value):
-        """Impede consentimento com data futura"""
-        if value > timezone.now():
-            raise serializers.ValidationError(
-                "A data de aceite não pode ser futura"
-            )
-        return value    
+        salt = getattr(settings, 'LGPD_IP_SALT', get_random_string(32))
+        return hashlib.sha256(f"{ip_address}{salt}".encode()).hexdigest()
     
     def create(self, validated_data):
         """Cria novo registro de consentimento"""
-        # Extrair campos write_only
         ip_address = validated_data.pop('ip_address', None)
         user_agent = validated_data.pop('user_agent', '')
         
-        # Hash do IP se fornecido (anonimização)
         ip_hash = self._hash_ip(ip_address) if ip_address else ''
         
-        # Determinar usuário (se autenticado)
         user = None
         request = self.context.get('request')
         if request and request.user.is_authenticated:
             user = request.user
             validated_data['user'] = user
-            # Usar email do usuário autenticado
             validated_data['email'] = user.email.lower()
         elif validated_data.get('email'):
             validated_data['email'] = validated_data['email'].lower()
         
-        # Criar registro no banco
         consent = ConsentRecord.objects.create(
             ip_hash=ip_hash,
-            user_agent=user_agent[:500],  # Limitar tamanho
+            user_agent=user_agent[:500],
             **validated_data
         )
         
         return consent
     
     def update(self, instance, validated_data):
-        """Atualização direta não permitida - usar endpoint de revogação"""
         raise serializers.ValidationError(
             "Atualização direta não permitida. Use o endpoint de revogação."
         )
     
     def to_representation(self, instance):
-        """Representação para resposta da API - remove dados sensíveis"""
         representation = super().to_representation(instance)
         
-        # Nunca retornar dados sensíveis na resposta
         representation.pop('ip_hash', None)
         representation.pop('user_agent', None)
         representation.pop('session_id', None)
         
-        # Adicionar informações úteis para o frontend
         representation['purposes_granted'] = instance.purpose_flags
         representation['can_revoke'] = [
             p for p in instance.purpose_flags 
@@ -801,9 +758,7 @@ class ConsentRecordSerializer(serializers.Serializer):
 
 
 class ConsentRevocationSerializer(serializers.Serializer):
-    """
-    Serializer para revogação de consentimento (Art. 8º, §5º)
-    """
+    """Serializer para revogação de consentimento (Art. 8º, §5º)"""
     purpose = serializers.ChoiceField(
         choices=[
             'analytics',
@@ -818,7 +773,7 @@ class ConsentRevocationSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
         max_length=500,
-        help_text="Motivo opcional para a revogação (para melhoria do serviço)"
+        help_text="Motivo opcional para a revogação"
     )
     
     def validate(self, attrs):
@@ -829,9 +784,7 @@ class ConsentRevocationSerializer(serializers.Serializer):
 
 
 class ConsentSummarySerializer(serializers.Serializer):
-    """
-    Serializer para listar consentimentos do usuário (Art. 18, II - Direito de acesso)
-    """
+    """Serializer para listar consentimentos do usuário (Art. 18, II)"""
     id = serializers.IntegerField(read_only=True)
     version = serializers.CharField(read_only=True)
     purposes = serializers.ListField(child=serializers.CharField(), read_only=True)
