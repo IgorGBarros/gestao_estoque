@@ -1974,13 +1974,19 @@ def dashboard_inventory_analysis(request):
         return Response({'error': str(e)}, status=500)
     
 
+# inventory/views.py
+
 @api_view(["GET"])
-@permission_classes([IsAuthenticated]) 
+@permission_classes([IsAuthenticated])  # ✅ Usa autenticação JWT padrão
 def feature_gates_view(request):
     """
     Fornece lista de feature gates para o frontend.
-    Pode ser substituída futuramente por regras dinâmicas.
+    ✅ Autenticação via JWT (não requer API Key de gateway)
     """
+    # Opcional: filtrar gates baseado no plano do usuário
+    store = get_current_store(request.user)
+    is_pro = store and store.plan == 'pro' if store else False
+    
     gates = [
         {"feature_key": "barcode_scanner", "label": "Scanner de Código", "description": None, "requires_pro": True},
         {"feature_key": "ocr_expiry", "label": "Leitor de Validade (IA)", "description": None, "requires_pro": True},
@@ -1991,7 +1997,11 @@ def feature_gates_view(request):
         {"feature_key": "chat_assistant", "label": "Assistente de Estoque", "description": None, "requires_pro": True},
         {"feature_key": "unlimited_products", "label": "Produtos Ilimitados", "description": None, "requires_pro": True},
     ]
-    return Response(gates)
+    
+    # Filtra gates baseado no plano (opcional)
+    visible_gates = [g for g in gates if not g['requires_pro'] or is_pro]
+    
+    return Response(visible_gates)
 
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])

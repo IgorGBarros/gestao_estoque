@@ -816,39 +816,6 @@ class MLInsight(models.Model):
     def __str__(self):
         return f"{self.get_insight_type_display()} - {self.target_segment} ({self.confidence_score:.2f})"
 
-class DataPrivacyConsent(models.Model):
-    """Controle de consentimento LGPD"""
-    
-    CONSENT_TYPES = [
-        ('analytics', 'Analytics e Métricas'),
-        ('ml_training', 'Treinamento de IA'),
-        ('personalization', 'Personalização'),
-        ('marketing', 'Marketing Direcionado'),
-    ]
-    
-    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='privacy_consents')
-    consent_type = models.CharField(max_length=20, choices=CONSENT_TYPES)
-    
-    # Controle de consentimento
-    granted = models.BooleanField(default=False)
-    granted_at = models.DateTimeField(null=True, blank=True)
-    revoked_at = models.DateTimeField(null=True, blank=True)
-    
-    # Auditoria LGPD
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.TextField(blank=True)
-    consent_version = models.CharField(max_length=10, default='1.0')
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-    class Meta:
-        db_table = 'data_privacy_consents'
-        unique_together = ['store', 'consent_type']
-        
-    def __str__(self):
-        status = "Concedido" if self.granted else "Negado"
-        return f"{self.store.name} - {self.get_consent_type_display()} ({status})"
     
     # inventory/models.py (adicionar)
 # inventory/models.py (adicionar campos)
