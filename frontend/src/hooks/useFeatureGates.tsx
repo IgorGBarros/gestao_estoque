@@ -1,6 +1,7 @@
+// src/hooks/useFeatureGates.tsx
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { api } from "../services/api"; // ✅ Usa a API do Django
-import { usePlan } from "./usePlan"; // Corrigi o caminho relativo
+import { api } from "../services/api"; // ✅ Usa a instância Axios configurada com interceptors
+import { usePlan } from "./usePlan"; // Hook que verifica se o usuário é PRO
 
 export type FeatureKey =
   | "barcode_scanner"
@@ -38,6 +39,7 @@ const FeatureGatesContext = createContext<FeatureGatesCtx>({
 });
 
 // Fallback estático caso a API do Django ainda não tenha a rota /feature-gates/
+// Isso garante que o app não quebre se o backend estiver em deploy ou offline
 const DEFAULT_GATES: FeatureGate[] = [
   { feature_key: "barcode_scanner", label: "Scanner de Código", description: null, requires_pro: true },
   { feature_key: "ocr_expiry", label: "Leitor de Validade (IA)", description: null, requires_pro: true },
@@ -58,15 +60,21 @@ export function FeatureGatesProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       // 🚨 MUDANÇA: Chama a API do Render (Django)
-      const { data } = await api.get<FeatureGate[]>("/admin/feature-gates/");
-      if (Array.isArray(data)) {
-         setGates(data);
+      // O interceptor do Axios já injeta o token JWT se existir
+      const response = await api.get<FeatureGate[]>("/admin/feature-gates/");
+      
+      if (Array.isArray(response.data)) {
+         setGates(response.data);
       } else {
+         console.warn("Formato inesperado da resposta de feature-gates");
          setGates(DEFAULT_GATES);
       }
-    } catch (err) {
-      console.warn("Rota /admin/feature-gates/ não encontrada ou falhou. Usando padrão local.");
-      // Fallback: Usa os portões estáticos definidos acima se o Django não estiver pronto
+    } catch (err: any) {
+      // Se der 401, o interceptor já limpou o token.
+      // Se der 404 ou 500, usamos o fallback.
+      if (err.response?.status !== 401) {
+        console.warn("Rota /admin/feature-gates/ não encontrada ou falhou. Usando padrão local.");
+      }
       setGates(DEFAULT_GATES);
     } finally {
       setLoading(false);
@@ -80,7 +88,9 @@ export function FeatureGatesProvider({ children }: { children: ReactNode }) {
   const requiresPro = useCallback(
     (key: FeatureKey): boolean => {
       const gate = gates.find((g) => g.feature_key === key);
-      // If gate not found, default to requiring pro
+      // Se não encontrar a gate no array (ex: nova feature não listada no backend),
+      // assumimos que requer PRO por segurança, ou false se quiser ser permissivo.
+      // Aqui assumimos true para evitar vazamento de features pagas.
       return gate ? gate.requires_pro : true;
     },
     [gates]
@@ -88,7 +98,10 @@ export function FeatureGatesProvider({ children }: { children: ReactNode }) {
 
   const isLocked = useCallback(
     (key: FeatureKey): boolean => {
+      // Se for PRO, nada está travado
       if (isPro) return false;
+      
+      // Se for FREE, verifica se a feature exige PRO
       return requiresPro(key);
     },
     [isPro, requiresPro]
@@ -101,4 +114,10 @@ export function FeatureGatesProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export const useFeatureGates = () => useContext(FeatureGatesContext);
+export const useFeatureGates = () => {
+  const context = useContext(FeatureGatesContext);
+  if (!context) {
+    throw new Error("useFeatureGates must be used within a FeatureGatesProvider");
+  }
+  return context;
+};
