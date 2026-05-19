@@ -833,27 +833,23 @@ export interface SessionSummary {
 
 // ✅ CORREÇÃO: SessionApi usando Axios (consistente com o resto da app) [1]
 export const sessionApi = {
-  getStatus: async (): Promise<SessionStatus> => {
+  getStatus: async (): Promise<{ has_session: boolean; products_count?: number; duration_minutes?: number; total_estimated_cost?: number }> => {
     try {
-      console.log('🔍 Verificando status da sessão...');
+      // Usa a instância 'api' do axios que já tem o token
       const response = await api.get('/session-control/');
-      console.log('✅ Status da sessão:', response.data);
       return response.data;
-    } catch (error: any) {
-      console.error('❌ Erro ao verificar sessão:', error);
-      if (error.response?.status === 404) {
-        return { has_session: false };
-      }
+    } catch (error) {
       return { has_session: false };
     }
   },
-
+  
   startSession: async () => {
     const response = await api.post('/session-control/', { action: 'start' });
     return response.data;
   },
-
+  
   finishSession: async () => {
+    // Endpoint Django: POST /session-control/ { action: 'finish' }
     const response = await api.post('/session-control/', { action: 'finish' });
     return response.data;
   },
