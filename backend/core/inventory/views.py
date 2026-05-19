@@ -2073,6 +2073,8 @@ def feature_gates_view(request):
     
     return Response(visible_gates)
 
+# inventory/views.py
+
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def profile_view(request):
@@ -2096,8 +2098,10 @@ def profile_view(request):
             
     except Exception as e:
         print(f"❌ Erro no profile_view: {e}")
+        import traceback
+        traceback.print_exc()
         return Response({
-            'error': 'Erro ao carregar perfil',
+            'error': 'Erro interno ao carregar perfil',
             'message': str(e)
         }, status=500)
 

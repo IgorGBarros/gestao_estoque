@@ -41,9 +41,16 @@ const optimizedProfileApi = {
     activeProfileRequest = (async () => {
       try {
         console.log("🔄 Buscando profile da API...");
-        const response = await api.get('/profile/');
+        
+        // ✅ AUMENTAR TIMEOUT PARA EVITAR ERROS NO RENDER (Cold Start)
+        const response = await api.get('/profile/', { timeout: 60000 }); 
         const data = response.data;
         
+        // Validação básica de integridade
+        if (!data || typeof data !== 'object') {
+          throw new Error("Resposta inválida do perfil");
+        }
+
         // Atualizar cache
         profileCache = data;
         profileCacheTimestamp = Date.now();
@@ -54,9 +61,10 @@ const optimizedProfileApi = {
       } catch (error: any) {
         console.error("❌ Erro ao carregar profile:", error);
         
-        // Fallback para cache antigo se existir e não for refresh forçado
+        // Se for erro de rede/timeout, não limpamos o cache antigo imediatamente
+        // para permitir fallback suave
         if (profileCache && !forceRefresh) {
-          console.log("🔄 Usando cache antigo do profile como fallback");
+          console.log("🔄 Usando cache antigo do profile como fallback devido a erro de rede");
           return profileCache;
         }
         
@@ -143,9 +151,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     // Usar dados do localStorage temporariamente para evitar tela branca
     if (storedUser) {
-      const tempUser = JSON.parse(storedUser);
-      setUser(tempUser);
-      console.log("📦 Dados temporários do localStorage carregados");
+      try {
+        const tempUser = JSON.parse(storedUser);
+        setUser(tempUser);
+        console.log("📦 Dados temporários do localStorage carregados");
+      } catch (e) {
+        console.error("Erro ao parsear usuário salvo", e);
+        localStorage.removeItem("auth_user");
+      }
     }
 
     try {
@@ -173,19 +186,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error: any) {
       console.error("❌ Erro ao carregar profile inicial:", error);
       
+      // Se for 401, o token é inválido. Limpamos tudo.
       if (error.response?.status === 401) {
-        // Limpar tudo se não autorizado (token expirado ou inválido)
         console.warn("🔒 Token inválido/expirado. Fazendo logout...");
-        localStorage.clear();
-        delete api.defaults.headers.common["Authorization"];
-        optimizedProfileApi.clearCache();
-        setUser(null);
+        handleLogoutCleanup();
+      } else {
+        // Para outros erros (500, timeout), mantemos o usuário logado com dados locais
+        // mas avisamos que pode haver dessincronização
+        console.warn("⚠️ Erro de servidor ao carregar perfil. Usando dados locais.");
       }
-      // Se erro não for 401 (ex: 500), manter dados do localStorage para não travar a UI
     } finally {
       setLoading(false);
       setIsInitialized(true);
     }
+  };
+
+  // Helper para limpeza segura
+  const handleLogoutCleanup = () => {
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("auth_user");
+    delete api.defaults.headers.common["Authorization"];
+    optimizedProfileApi.clearCache();
+    setUser(null);
   };
 
   // ==========================================
@@ -196,6 +218,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await api.post("/auth/login/", { email, password });
       const { access } = response.data;
       
+      if (!access) throw new Error("Token não recebido");
+
       // Configurar token
       localStorage.setItem("auth_token", access);
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
@@ -216,19 +240,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         console.log("✅ Login realizado com profile completo:", userData);
       } catch (profileError) {
-        // Fallback se profile falhar
         console.warn("⚠️ Erro ao carregar profile após login, usando dados básicos");
+        // Fallback seguro: cria usuário básico para não travar a UI
         const basicUserData: User = {
           id: 0,
           email: email,
-          name: email.split('@')[0]
+          name: email.split('@')[0],
+          plan: 'free' // Assume free por segurança
         };
         localStorage.setItem("auth_user", JSON.stringify(basicUserData));
         setUser(basicUserData);
       }
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro no login padrão:", error);
+      // Garante que não fique lixo no state se falhar
+      handleLogoutCleanup();
       throw error;
     }
   };
@@ -240,7 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // ==========================================
-  // ✅ LOGIN GOOGLE OTIMIZADO (IMPLEMENTADO)
+  // ✅ LOGIN GOOGLE OTIMIZADO
   // ==========================================
   const signInWithGoogle = async () => {
     try {
@@ -278,12 +305,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         console.log("✅ Login Google realizado com profile completo:", userData);
       } catch (profileError) {
-        // Fallback se profile falhar
         console.warn("⚠️ Erro ao carregar profile após login Google, usando dados básicos");
         const basicUserData: User = {
           id: response.data.id || 0,
           email: response.data.email,
-          name: response.data.name || "Consultora"
+          name: response.data.name || "Consultora",
+          plan: 'free'
         };
         localStorage.setItem("auth_user", JSON.stringify(basicUserData));
         setUser(basicUserData);
@@ -291,6 +318,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
     } catch (error: any) {
       console.error("Erro completo Google Sign-In:", error);
+      handleLogoutCleanup(); // Limpa estado em caso de erro crítico
+      
       if (error.response?.data?.error) {
         throw new Error(error.response.data.error);
       }
@@ -319,25 +348,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ✅ LOGOUT OTIMIZADO
   // ==========================================
   const signOut = async () => {
-    localStorage.removeItem("auth_token");
-    localStorage.removeItem("auth_user");
-    delete api.defaults.headers.common["Authorization"];
-    
-    // Limpar cache do profile e outros caches da app
-    optimizedProfileApi.clearCache();
-    
-    setUser(null);
-    setIsInitialized(false); // Resetar inicialização para permitir novo login limpo
+    handleLogoutCleanup();
     
     try {
       await auth.signOut().catch(() => {});
-      // Opcional: localStorage.clear() se quiser limpar TUDO (cuidado com outras configs)
     } catch (e) {
       console.warn("Erro ao fazer logout do Firebase:", e);
     }
+    
+    // Redireciona para home ou login
+    navigate("/"); 
   };
 
-  // ✅ FUNÇÃO PÚBLICA: Atualizar profile manualmente (útil após editar perfil)
+  // ✅ FUNÇÃO PÚBLICA: Atualizar profile manualmente
   const refreshProfile = async () => {
     try {
       console.log("🔄 Atualizando profile manualmente...");
