@@ -1,6 +1,6 @@
-// src/hooks/useAuth.tsx
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import axios from "axios"; // Importamos axios diretamente para o refresh manual
 import { api } from "../services/api";
 // 1. IMPORTAÇÕES DO FIREBASE
 import { auth, googleProvider, signInWithPopup } from "../firebaseConfig";
@@ -18,59 +18,31 @@ function isProfileCacheValid(): boolean {
          (Date.now() - profileCacheTimestamp) < PROFILE_CACHE_DURATION;
 }
 
-// ✅ CONTROLE DE REQUISIÇÕES EM ANDAMENTO (evita duplicação/race conditions)
 let activeProfileRequest: Promise<any> | null = null;
 
 const optimizedProfileApi = {
   get: async (forceRefresh = false): Promise<any> => {
-    console.log(`👤 Carregando profile (forceRefresh: ${forceRefresh})`);
-    
-    // Se há uma requisição em andamento, aguardar ela terminar
     if (activeProfileRequest && !forceRefresh) {
-      console.log("⏳ Aguardando requisição de profile em andamento...");
       return activeProfileRequest;
     }
     
-    // Usar cache se válido e não forçar refresh
     if (!forceRefresh && isProfileCacheValid()) {
-      console.log("⚡ Usando cache do profile");
       return Promise.resolve(profileCache!);
     }
     
-    // Criar nova requisição
     activeProfileRequest = (async () => {
       try {
-        console.log("🔄 Buscando profile da API...");
-        
-        // ✅ AUMENTAR TIMEOUT PARA EVITAR ERROS NO RENDER (Cold Start)
-        const response = await api.get('/profile/', { timeout: 60000 }); 
+        const response = await api.get('/profile/');
         const data = response.data;
-        
-        // Validação básica de integridade
-        if (!data || typeof data !== 'object') {
-          throw new Error("Resposta inválida do perfil");
-        }
-
-        // Atualizar cache
         profileCache = data;
         profileCacheTimestamp = Date.now();
-        
-        console.log("✅ Profile carregado e cacheado:", data);
         return data;
-        
       } catch (error: any) {
-        console.error("❌ Erro ao carregar profile:", error);
-        
-        // Se for erro de rede/timeout, não limpamos o cache antigo imediatamente
-        // para permitir fallback suave
         if (profileCache && !forceRefresh) {
-          console.log("🔄 Usando cache antigo do profile como fallback devido a erro de rede");
           return profileCache;
         }
-        
         throw error;
       } finally {
-        // Limpar promise após completar
         activeProfileRequest = null;
       }
     })();
@@ -79,7 +51,6 @@ const optimizedProfileApi = {
   },
 
   clearCache: () => {
-    console.log("🧹 Limpando cache do profile");
     profileCache = null;
     profileCacheTimestamp = 0;
     activeProfileRequest = null;
@@ -87,14 +58,12 @@ const optimizedProfileApi = {
 };
 
 // ==========================================
-// 2. INTERFACE DO USUÁRIO EXPANDIDA
+// 2. INTERFACE DO USUÁRIO
 // ==========================================
 export interface User {
   id: number;
   email: string;
   name?: string;
-  first_name?: string;
-  // ✅ Campos do profile completo vindos do backend
   display_name?: string;
   store_name?: string;
   plan?: string;
@@ -127,16 +96,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false); 
 
-  // ==========================================
-  // ✅ CARREGAR SESSÃO INICIAL OTIMIZADA
-  // ==========================================
-  useEffect(() => {
-    if (!isInitialized) {
-      initializeAuth();
-    }
-  }, [isInitialized]);
+  // Ref para evitar múltiplas inicializações simultâneas
+  const initRef = useRef(false);
 
-  const initializeAuth = async () => {
+  // ==========================================
+  // ✅ FUNÇÃO AUXILIAR: RENOVAR TOKEN
+  // ==========================================
+  const refreshToken = async (): Promise<string | null> => {
+    const storedRefreshToken = localStorage.getItem("refresh_token");
+    if (!storedRefreshToken) return null;
+
+    try {
+      // Chama endpoint de refresh do Django SimpleJWT
+      const response = await axios.post(`${import.meta.env.VITE_API_BASE_URL}/api/auth/token/refresh/`, {
+        refresh: storedRefreshToken
+      });
+      
+      const newAccessToken = response.data.access;
+      
+      // Atualiza tokens no storage e headers
+      localStorage.setItem("auth_token", newAccessToken);
+      api.defaults.headers.common["Authorization"] = `Bearer ${newAccessToken}`;
+      
+      return newAccessToken;
+    } catch (error) {
+      console.warn("❌ Falha ao renovar token. Sessão inválida.");
+      return null;
+    }
+  };
+
+  // ==========================================
+  // ✅ CARREGAR SESSÃO INICIAL
+  // ==========================================
+  const initializeAuth = useCallback(async () => {
+    if (initRef.current) return;
+    initRef.current = true;
+
     const storedToken = localStorage.getItem("auth_token");
     const storedUser = localStorage.getItem("auth_user");
     
@@ -146,180 +141,160 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // Configurar token primeiro para futuras chamadas
+    // Define token inicial
     api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
     
-    // Usar dados do localStorage temporariamente para evitar tela branca
     if (storedUser) {
-      try {
-        const tempUser = JSON.parse(storedUser);
-        setUser(tempUser);
-        console.log("📦 Dados temporários do localStorage carregados");
-      } catch (e) {
-        console.error("Erro ao parsear usuário salvo", e);
-        localStorage.removeItem("auth_user");
-      }
+      setUser(JSON.parse(storedUser));
     }
 
     try {
-      console.log("🔐 Token encontrado, validando sessão e carregando profile...");
+      // Tenta buscar perfil. Se der 401, tenta renovar.
+      let profileData;
+      try {
+        profileData = await optimizedProfileApi.get();
+      } catch (err: any) {
+        if (err.response?.status === 401) {
+          console.log("🔄 Token expirado. Tentando renovar...");
+          const newToken = await refreshToken();
+          
+          if (newToken) {
+            // Se renovou com sucesso, busca o perfil novamente
+            profileData = await optimizedProfileApi.get(true);
+          } else {
+            // Se falhou a renovação, força erro para cair no catch externo
+            throw new Error("Renewal failed");
+          }
+        } else {
+          throw err;
+        }
+      }
       
-      // UMA ÚNICA CHAMADA DE PROFILE COM CACHE
-      const profileData = await optimizedProfileApi.get();
-      
-      // Mesclar dados do profile com dados básicos do usuário
+      // Atualiza estado do usuário com dados frescos
       const userData: User = {
         ...(storedUser ? JSON.parse(storedUser) : {}),
         ...profileData,
-        id: profileData.id || (storedUser ? JSON.parse(storedUser).id : 0),
-        email: profileData.email || (storedUser ? JSON.parse(storedUser).email : ''),
-        name: profileData.display_name || profileData.name || (storedUser ? JSON.parse(storedUser).name : '')
+        id: profileData.id || 0,
+        email: profileData.email || '',
+        name: profileData.display_name || profileData.name || ''
       };
       
       setUser(userData);
-      
-      // Atualizar localStorage com dados completos e frescos
       localStorage.setItem("auth_user", JSON.stringify(userData));
       
-      console.log("✅ Profile carregado na inicialização:", userData);
-      
     } catch (error: any) {
-      console.error("❌ Erro ao carregar profile inicial:", error);
-      
-      // Se for 401, o token é inválido. Limpamos tudo.
-      if (error.response?.status === 401) {
-        console.warn("🔒 Token inválido/expirado. Fazendo logout...");
-        handleLogoutCleanup();
-      } else {
-        // Para outros erros (500, timeout), mantemos o usuário logado com dados locais
-        // mas avisamos que pode haver dessincronização
-        console.warn("⚠️ Erro de servidor ao carregar perfil. Usando dados locais.");
-      }
+      console.error("❌ Erro crítico na inicialização:", error);
+      // Limpa sessão apenas se for erro de autenticação irrecoverável
+      handleLogout(false); 
     } finally {
       setLoading(false);
       setIsInitialized(true);
+      initRef.current = false;
     }
-  };
+  }, []);
 
-  // Helper para limpeza segura
-  const handleLogoutCleanup = () => {
+  useEffect(() => {
+    if (!isInitialized) {
+      initializeAuth();
+    }
+  }, [isInitialized, initializeAuth]);
+
+  // ==========================================
+  // ✅ LOGOUT HELPER
+  // ==========================================
+  const handleLogout = (shouldNavigate = true) => {
     localStorage.removeItem("auth_token");
+    localStorage.removeItem("refresh_token"); // Importante remover o refresh também
     localStorage.removeItem("auth_user");
     delete api.defaults.headers.common["Authorization"];
     optimizedProfileApi.clearCache();
     setUser(null);
+    setIsInitialized(false);
+    initRef.current = false;
+    
+    if (shouldNavigate) {
+      navigate("/auth");
+    }
   };
 
   // ==========================================
-  // ✅ LOGIN NORMAL OTIMIZADO
+  // ✅ LOGIN NORMAL
   // ==========================================
   const signIn = async (email: string, password: string) => {
     try {
+      // Usa endpoint de login que retorna access E refresh
       const response = await api.post("/auth/login/", { email, password });
-      const { access } = response.data;
+      const { access, refresh } = response.data;
       
       if (!access) throw new Error("Token não recebido");
 
-      // Configurar token
       localStorage.setItem("auth_token", access);
+      if (refresh) localStorage.setItem("refresh_token", refresh); // Salva refresh token
+      
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
       
+      // Busca perfil imediato
       try {
-        // Carregar profile completo após login
-        const profileData = await optimizedProfileApi.get(true); // Forçar refresh
-        
+        const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
           id: profileData.id || 0,
           email: profileData.email || email,
           name: profileData.display_name || profileData.name || email.split('@')[0],
           ...profileData
         };
-        
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
-        
-        console.log("✅ Login realizado com profile completo:", userData);
-      } catch (profileError) {
-        console.warn("⚠️ Erro ao carregar profile após login, usando dados básicos");
-        // Fallback seguro: cria usuário básico para não travar a UI
-        const basicUserData: User = {
-          id: 0,
-          email: email,
-          name: email.split('@')[0],
-          plan: 'free' // Assume free por segurança
-        };
-        localStorage.setItem("auth_user", JSON.stringify(basicUserData));
-        setUser(basicUserData);
+      } catch (e) {
+        // Fallback básico se perfil falhar
+        setUser({ id: 0, email, name: email.split('@')[0] });
       }
       
-    } catch (error: any) {
-      console.error("Erro no login padrão:", error);
-      // Garante que não fique lixo no state se falhar
-      handleLogoutCleanup();
+    } catch (error) {
+      console.error("Erro no login:", error);
       throw error;
     }
   };
 
-  // --- CADASTRO MANUAL ---
   const signUp = async (email: string, password: string, name: string) => {
-    // O registro apenas cria a conta. O login deve ser feito em seguida ou redirecionar para login.
     await api.post("/auth/register/", { email, password, name });
   };
 
   // ==========================================
-  // ✅ LOGIN GOOGLE OTIMIZADO
+  // ✅ LOGIN GOOGLE
   // ==========================================
   const signInWithGoogle = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const idToken = await result.user.getIdToken(true);
       
-      if (!idToken) {
-        throw new Error("Falha ao gerar credencial do Google.");
-      }
+      if (!idToken) throw new Error("Falha Google Token");
       
       const response = await api.post("/auth/firebase/", { token: idToken });
-      const token = response.data.access;
+      const { access, refresh } = response.data;
       
-      if (!token) {
-        throw new Error("Token de acesso não retornado pelo servidor Django.");
-      }
+      if (!access) throw new Error("Token Django ausente");
+
+      localStorage.setItem("auth_token", access);
+      if (refresh) localStorage.setItem("refresh_token", refresh);
       
-      // Configurar token
-      localStorage.setItem("auth_token", token);
-      api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
       
       try {
-        // Carregar profile completo
-        const profileData = await optimizedProfileApi.get(true); // Forçar refresh
-        
+        const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
-          id: profileData.id || response.data.id || 0,
+          id: profileData.id || 0,
           email: profileData.email || response.data.email,
-          name: profileData.display_name || profileData.name || response.data.name || "Consultora",
+          name: profileData.display_name || response.data.name || "Consultora",
           ...profileData
         };
-        
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
-        
-        console.log("✅ Login Google realizado com profile completo:", userData);
-      } catch (profileError) {
-        console.warn("⚠️ Erro ao carregar profile após login Google, usando dados básicos");
-        const basicUserData: User = {
-          id: response.data.id || 0,
-          email: response.data.email,
-          name: response.data.name || "Consultora",
-          plan: 'free'
-        };
-        localStorage.setItem("auth_user", JSON.stringify(basicUserData));
-        setUser(basicUserData);
+      } catch (e) {
+        setUser({ id: 0, email: response.data.email, name: response.data.name || "Consultora" });
       }
       
     } catch (error: any) {
-      console.error("Erro completo Google Sign-In:", error);
-      handleLogoutCleanup(); // Limpa estado em caso de erro crítico
-      
+      console.error("Erro Google Sign-In:", error);
       if (error.response?.data?.error) {
         throw new Error(error.response.data.error);
       }
@@ -327,57 +302,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // --- LOGIN DE DEMONSTRAÇÃO ---
   const signInDemo = () => {
     const demoUser: User = { 
       id: 999, 
       email: "demo@natura.com", 
       name: "Consultora Teste",
-      display_name: "Consultora Teste",
-      store_name: "Loja Demo",
       plan: "FREE"
     };
-    
     setUser(demoUser);
     localStorage.setItem("auth_user", JSON.stringify(demoUser));
     localStorage.setItem("auth_token", "demo_token_123");
     api.defaults.headers.common["Authorization"] = `Bearer demo_token_123`;
   };
 
-  // ==========================================
-  // ✅ LOGOUT OTIMIZADO
-  // ==========================================
   const signOut = async () => {
-    handleLogoutCleanup();
-    
-    try {
-      await auth.signOut().catch(() => {});
-    } catch (e) {
-      console.warn("Erro ao fazer logout do Firebase:", e);
-    }
-    
-    // Redireciona para home ou login
-    navigate("/"); 
+    await auth.signOut().catch(() => {});
+    handleLogout(true);
   };
 
-  // ✅ FUNÇÃO PÚBLICA: Atualizar profile manualmente
   const refreshProfile = async () => {
     try {
-      console.log("🔄 Atualizando profile manualmente...");
-      const profileData = await optimizedProfileApi.get(true); // Forçar refresh
-      
-      const updatedUser: User = {
-        ...user,
-        ...profileData
-      };
-      
+      const profileData = await optimizedProfileApi.get(true);
+      const updatedUser: User = { ...user, ...profileData };
       setUser(updatedUser);
       localStorage.setItem("auth_user", JSON.stringify(updatedUser));
-      
-      console.log("✅ Profile atualizado:", updatedUser);
     } catch (error) {
-      console.error("❌ Erro ao atualizar profile:", error);
-      throw error;
+      console.error("Erro ao atualizar profile:", error);
     }
   };
 
