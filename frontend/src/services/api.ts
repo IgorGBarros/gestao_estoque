@@ -33,17 +33,13 @@ export const api = axios.create({
 
 // 🔁 Interceptador REQUEST
 api.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  (config) => {
     const token = getToken();
+    console.log("🔑 Token encontrado:", token ? "Sim" : "Não"); // Debug
     
-    // Injeta o token se existir e ainda não estiver no header
     if (token && !config.headers["Authorization"]) {
       config.headers["Authorization"] = `Bearer ${token}`;
-    }
-    
-    // Logs apenas em desenvolvimento
-    if (import.meta.env.DEV) {
-      console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`);
+      console.log("✅ Header Authorization injetado");
     }
     
     return config;
