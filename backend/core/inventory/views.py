@@ -122,31 +122,34 @@ class CustomUserCreateView(generics.CreateAPIView):
 
 # backend/core/inventory/views.py
 
+# inventory/views.py
+
 class FirebaseLoginView(APIView):
     permission_classes = [AllowAny]
-    
+
     def post(self, request):
         firebase_token = request.data.get('token')
         if not firebase_token:
             return Response({'error': 'Token ausente'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            # Cria/atualiza usuário local
+            # Cria ou atualiza usuário no Django baseado no Firebase
             user = CustomUser.objects.create_user_with_firebase(firebase_token)
             
-            # ✅ GERA TOKENS JWT SIMPLE-JWT
+            # Gera tokens JWT usando SimpleJWT
             refresh = RefreshToken.for_user(user)
             
-            # ✅ RETORNA ESTRUTURA PADRÃO ESPERADA PELO FRONTEND
+            # Obtém dados da loja para incluir na resposta
+            store = getattr(user, 'store', None)
+            
             return Response({
-                'access': str(refresh.access_token),  # ← NOME CORRETO
-                'refresh': str(refresh),              # ← NOME CORRETO
+                'access': str(refresh.access_token), # Token de acesso (curta duração)
+                'refresh': str(refresh),             # Token de refresh (longa duração)
                 'email': user.email,
                 'name': getattr(user, 'name', user.email),
-                'is_authenticated': True,
-                # Opcional: dados da store
-                'store_slug': getattr(getattr(user, 'store', None), 'slug', None),
-                'plan': getattr(getattr(user, 'store', None), 'plan', 'free'),
+                'plan': store.plan if store else 'free',
+                'is_pro': store.plan == 'pro' if store else False,
+                'is_authenticated': True
             }, status=status.HTTP_200_OK)
             
         except Exception as e:

@@ -1,9 +1,10 @@
 // src/hooks/useAuth.tsx
-import React, { createContext, useContext, useEffect, useState, ReactNode } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
-// 1. IMPORTAÇÕES DO FIREBASE (Ajuste o caminho conforme sua estrutura)
+// 1. IMPORTAÇÕES DO FIREBASE
 import { auth, googleProvider, signInWithPopup } from "../firebaseConfig";
-import { clearAppCache } from "../lib/api";
+import { useToast } from "./use-toast";
 
 // ==========================================
 // ✅ SISTEMA DE CACHE DE PROFILE OTIMIZADO
@@ -105,17 +106,22 @@ interface AuthContextData {
   signInDemo: () => void;
   signOut: () => Promise<void>;
   isAuthenticated: boolean;
-  refreshProfile: () => Promise<void>; // ✅ NOVA FUNÇÃO PÚBLICA
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false); 
 
-  // ✅ CARREGAR SESSÃO INICIAL OTIMIZADA - APENAS UMA VEZ
+  // ==========================================
+  // ✅ CARREGAR SESSÃO INICIAL OTIMIZADA
+  // ==========================================
   useEffect(() => {
     if (!isInitialized) {
       initializeAuth();
@@ -210,7 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         console.log("✅ Login realizado com profile completo:", userData);
       } catch (profileError) {
-        // Fallback se profile falhar (ex: backend lento)
+        // Fallback se profile falhar
         console.warn("⚠️ Erro ao carregar profile após login, usando dados básicos");
         const basicUserData: User = {
           id: 0,
@@ -230,12 +236,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // --- CADASTRO MANUAL ---
   const signUp = async (email: string, password: string, name: string) => {
     // O registro apenas cria a conta. O login deve ser feito em seguida ou redirecionar para login.
-    // Se o backend já loga após registro, ajuste aqui. Assumindo que retorna apenas sucesso.
     await api.post("/auth/register/", { email, password, name });
   };
 
   // ==========================================
-  // ✅ LOGIN GOOGLE OTIMIZADO
+  // ✅ LOGIN GOOGLE OTIMIZADO (IMPLEMENTADO)
   // ==========================================
   const signInWithGoogle = async () => {
     try {
@@ -320,7 +325,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     
     // Limpar cache do profile e outros caches da app
     optimizedProfileApi.clearCache();
-    clearAppCache(); // Se existir essa função no lib/api
     
     setUser(null);
     setIsInitialized(false); // Resetar inicialização para permitir novo login limpo
