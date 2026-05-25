@@ -1,6 +1,7 @@
+// src/hooks/useAuth.tsx
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios"; // Importamos axios diretamente para o refresh manual
+import axios from "axios";
 import { api } from "../services/api";
 // 1. IMPORTAÇÕES DO FIREBASE
 import { auth, googleProvider, signInWithPopup } from "../firebaseConfig";
@@ -32,13 +33,16 @@ const optimizedProfileApi = {
     
     activeProfileRequest = (async () => {
       try {
-        const response = await api.get('/profile/');
+        // ✅ TIMEOUT para evitar requisições pendentes indefinidamente
+        const response = await api.get('/profile/', { timeout: 15000 });
         const data = response.data;
         profileCache = data;
         profileCacheTimestamp = Date.now();
         return data;
       } catch (error: any) {
-        if (profileCache && !forceRefresh) {
+        // ✅ FALLBACK para cache em caso de erro de rede (não 401)
+        if (profileCache && !forceRefresh && error.response?.status !== 401) {
+          console.log("⚡ Usando cache do profile devido a erro de rede");
           return profileCache;
         }
         throw error;
@@ -107,10 +111,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!storedRefreshToken) return null;
 
     try {
-      // Chama endpoint de refresh do Django SimpleJWT
-      const response = await axios.post(`${import.meta.env.VITE_API_BASE_URL}/api/auth/token/refresh/`, {
-        refresh: storedRefreshToken
-      });
+      // ✅ TIMEOUT na renovação para evitar pendências
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_BASE_URL}/api/auth/token/refresh/`, 
+        { refresh: storedRefreshToken },
+        { timeout: 10000 }
+      );
       
       const newAccessToken = response.data.access;
       
@@ -118,15 +124,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem("auth_token", newAccessToken);
       api.defaults.headers.common["Authorization"] = `Bearer ${newAccessToken}`;
       
+      console.log("🔄 Token renovado com sucesso");
       return newAccessToken;
-    } catch (error) {
-      console.warn("❌ Falha ao renovar token. Sessão inválida.");
+    } catch (error: any) {
+      // ✅ LOG SEGURO: Não expõe token ou email em produção
+      console.warn("❌ Falha ao renovar token:", {
+        status: error.response?.status,
+        message: error.message
+      });
       return null;
     }
   };
 
   // ==========================================
-  // ✅ CARREGAR SESSÃO INICIAL
+  // ✅ CARREGAR SESSÃO INICIAL (CORRIGIDO)
   // ==========================================
   const initializeAuth = useCallback(async () => {
     if (initRef.current) return;
@@ -135,57 +146,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const storedToken = localStorage.getItem("auth_token");
     const storedUser = localStorage.getItem("auth_user");
     
+    // ✅ Se não tem token, define como não logado imediatamente
     if (!storedToken) {
+      setUser(null);
       setLoading(false);
       setIsInitialized(true);
       return;
     }
 
-    // Define token inicial
+    // Define token inicial no Axios
     api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
     
+    // ✅ Parse seguro do usuário salvo
     if (storedUser) {
-      setUser(JSON.parse(storedUser));
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch (e) {
+        console.warn("⚠️ Erro ao parsear usuário salvo, limpando...");
+        localStorage.removeItem("auth_user");
+      }
     }
 
     try {
-      // Tenta buscar perfil. Se der 401, tenta renovar.
-      let profileData;
+      let profileData = null;
+      
+      // ✅ Tenta buscar perfil com tratamento específico para 401
       try {
         profileData = await optimizedProfileApi.get();
       } catch (err: any) {
+        // Se for 401, tenta renovar UMA VEZ
         if (err.response?.status === 401) {
           console.log("🔄 Token expirado. Tentando renovar...");
           const newToken = await refreshToken();
           
           if (newToken) {
-            // Se renovou com sucesso, busca o perfil novamente
+            // Renovou com sucesso, busca perfil forçando refresh
             profileData = await optimizedProfileApi.get(true);
           } else {
-            // Se falhou a renovação, força erro para cair no catch externo
-            throw new Error("Renewal failed");
+            // ❌ Falha na renovação = sessão inválida
+            console.warn("🔒 Renovação falhou. Limpando sessão...");
+            handleLogout(false);
+            setLoading(false);
+            setIsInitialized(true);
+            return;
           }
         } else {
-          throw err;
+          // Outro erro (500, timeout, rede): mantém dados locais
+          console.warn("⚠️ Erro de rede ao carregar perfil, usando dados locais");
         }
       }
-      
-      // Atualiza estado do usuário com dados frescos
-      const userData: User = {
-        ...(storedUser ? JSON.parse(storedUser) : {}),
-        ...profileData,
-        id: profileData.id || 0,
-        email: profileData.email || '',
-        name: profileData.display_name || profileData.name || ''
-      };
-      
-      setUser(userData);
-      localStorage.setItem("auth_user", JSON.stringify(userData));
-      
+
+      // ✅ Se conseguiu dados do perfil, atualiza tudo
+      if (profileData) {
+        const userData: User = {
+          ...(storedUser ? JSON.parse(storedUser) : {}),
+          ...profileData,
+          id: profileData.id || 0,
+          email: profileData.email || '',
+          name: profileData.display_name || profileData.name || ''
+        };
+        setUser(userData);
+        localStorage.setItem("auth_user", JSON.stringify(userData));
+      }
+
     } catch (error: any) {
-      console.error("❌ Erro crítico na inicialização:", error);
-      // Limpa sessão apenas se for erro de autenticação irrecoverável
-      handleLogout(false); 
+      // ✅ LOG SEGURO sem expor dados sensíveis
+      console.error("❌ Erro crítico na inicialização:", {
+        message: error.message,
+        status: error.response?.status
+      });
+      handleLogout(false);
     } finally {
       setLoading(false);
       setIsInitialized(true);
@@ -200,20 +230,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isInitialized, initializeAuth]);
 
   // ==========================================
-  // ✅ LOGOUT HELPER
+  // ✅ LOGOUT HELPER (CORRIGIDO)
   // ==========================================
   const handleLogout = (shouldNavigate = true) => {
+    // ✅ Limpa TUDO de forma atômica
     localStorage.removeItem("auth_token");
-    localStorage.removeItem("refresh_token"); // Importante remover o refresh também
+    localStorage.removeItem("refresh_token");
     localStorage.removeItem("auth_user");
     delete api.defaults.headers.common["Authorization"];
     optimizedProfileApi.clearCache();
+    
+    // ✅ Reseta estado do React
     setUser(null);
     setIsInitialized(false);
     initRef.current = false;
     
-    if (shouldNavigate) {
-      navigate("/auth");
+    // ✅ Navega com replace para evitar histórico de volta
+    if (shouldNavigate && window.location.pathname !== '/auth') {
+      navigate("/auth", { replace: true });
     }
   };
 
@@ -222,18 +256,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ==========================================
   const signIn = async (email: string, password: string) => {
     try {
-      // Usa endpoint de login que retorna access E refresh
       const response = await api.post("/auth/login/", { email, password });
       const { access, refresh } = response.data;
       
       if (!access) throw new Error("Token não recebido");
 
+      // ✅ Salva tokens com segurança
       localStorage.setItem("auth_token", access);
-      if (refresh) localStorage.setItem("refresh_token", refresh); // Salva refresh token
+      if (refresh) localStorage.setItem("refresh_token", refresh);
       
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
       
-      // Busca perfil imediato
+      // ✅ Busca perfil imediato com fallback
       try {
         const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
@@ -245,12 +279,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
       } catch (e) {
-        // Fallback básico se perfil falhar
+        // Fallback mínimo para não travar a UI
+        console.warn("⚠️ Perfil não carregado no login, usando dados básicos");
         setUser({ id: 0, email, name: email.split('@')[0] });
       }
       
-    } catch (error) {
-      console.error("Erro no login:", error);
+    } catch (error: any) {
+      // ✅ Limpa estado em caso de erro crítico no login
+      handleLogout(false);
       throw error;
     }
   };
@@ -267,7 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await signInWithPopup(auth, googleProvider);
       const idToken = await result.user.getIdToken(true);
       
-      if (!idToken) throw new Error("Falha Google Token");
+      if (!idToken) throw new Error("Falha ao gerar credencial do Google");
       
       const response = await api.post("/auth/firebase/", { token: idToken });
       const { access, refresh } = response.data;
@@ -290,11 +326,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
       } catch (e) {
+        console.warn("⚠️ Perfil não carregado no login Google, usando dados básicos");
         setUser({ id: 0, email: response.data.email, name: response.data.name || "Consultora" });
       }
       
     } catch (error: any) {
-      console.error("Erro Google Sign-In:", error);
+      console.error("❌ Erro Google Sign-In:", {
+        message: error.message,
+        status: error.response?.status
+      });
+      handleLogout(false); // Limpa estado em caso de erro
       if (error.response?.data?.error) {
         throw new Error(error.response.data.error);
       }
@@ -327,7 +368,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(updatedUser);
       localStorage.setItem("auth_user", JSON.stringify(updatedUser));
     } catch (error) {
-      console.error("Erro ao atualizar profile:", error);
+      console.error("❌ Erro ao atualizar profile:", error);
+      throw error;
     }
   };
 
