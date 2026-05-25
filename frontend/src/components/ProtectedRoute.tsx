@@ -23,17 +23,21 @@ export default function ProtectedRoute({
     );
   }
 
-  // ✅ VERIFICAR AUTENTICAÇÃO
+  // ✅ VERIFICAR AUTENTICAÇÃO COM GUARDA CONTRA NULL
   if (!isAuthenticated || !user) {
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
 
   // ✅ VERIFICAR PERMISSÃO DE ADMIN (se requerido)
   if (requireAdmin && !user.is_staff) {
-    // Redireciona para página inicial se não for admin
     return <Navigate to="/" replace />;
   }
 
-  // ✅ RENDERIZAR CONTEÚDO PROTEGIDO
+  // ✅ GARANTIR QUE children NÃO É null/undefined
+  if (!children) {
+    if (import.meta.env.DEV) console.warn("⚠️ ProtectedRoute: children é null/undefined");
+    return null;
+  }
+
   return <>{children}</>;
 }
