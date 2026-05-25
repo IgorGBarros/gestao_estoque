@@ -26,15 +26,28 @@ export class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error, errorInfo: null };
   }
 
-  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error("🚨 ERRO CAPTURADO PELO ERROR BOUNDARY:", {
-      message: error.message,
-      stack: error.stack,
-      componentStack: errorInfo.componentStack,
-    });
-    
-    this.setState({ error, errorInfo });
+ // src/components/ErrorBoundary.tsx
+componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+  console.error("🚨 ERRO CAPTURADO:", {
+    message: error.message || '(mensagem vazia)',
+    name: error.name,
+    stack: error.stack?.split('\n').slice(0, 10), // Primeiras 10 linhas
+    componentStack: errorInfo.componentStack,
+    timestamp: new Date().toISOString()
+  });
+  
+  // Tentar identificar o componente problemático
+  const lines = errorInfo.componentStack?.split('\n') || [];
+  const problematicComponent = lines.find(line => 
+    line.includes('at ') && !line.includes('at sie') && !line.includes('at Gje')
+  );
+  
+  if (problematicComponent) {
+    console.error("🎯 Componente suspeito:", problematicComponent.trim());
   }
+  
+  this.setState({ error, errorInfo });
+}
 
   render() {
     if (this.state.hasError) {

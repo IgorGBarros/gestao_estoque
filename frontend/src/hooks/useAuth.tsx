@@ -53,6 +53,7 @@ const optimizedProfileApi = {
 // ✅ INTERFACES
 // ==========================================
 export interface User {
+  is_staff: any;
   id: number;
   email: string;
   name?: string;
@@ -242,7 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log("🔍 [DEBUG] Profile atualizado:", userData);
         setUser(userData);
       } catch (e) {
-        setUser({ id: 0, email, name: email.split('@')[0] });
+        setUser({ id: 0, email, name: email.split('@')[0], is_staff: false });
       }
     } catch (error) {
       handleLogout(false);
@@ -287,7 +288,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
       } catch (e) {
-        setUser({ id: 0, email: response.data.email, name: response.data.name || "Consultora" });
+        setUser({ id: 0, email: response.data.email, name: response.data.name || "Consultora", is_staff: false });
       }
     } catch (error: any) {
       handleLogout(false);
@@ -299,7 +300,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInDemo = () => {
-    const demoUser: User = { id: 999, email: "demo@natura.com", name: "Consultora Teste", plan: "FREE" };
+    const demoUser: User = { id: 999, email: "demo@natura.com", name: "Consultora Teste", plan: "FREE", is_staff: false };
     setUser(demoUser);
     localStorage.setItem("auth_user", JSON.stringify(demoUser));
     localStorage.setItem("auth_token", "demo_token_123");
