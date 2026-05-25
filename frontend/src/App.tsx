@@ -45,8 +45,9 @@ import Plans from "./pages/Plans";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false, // Evita requisições desnecessárias ao voltar a aba
+      refetchOnWindowFocus: false,
       retry: 1,
+      staleTime: 1000 * 60 * 5, // Cache válido por 5 min
     },
   },
 });
@@ -66,7 +67,7 @@ const App = () => {
       <ThemeProvider>
         <TooltipProvider>
           <Toaster />
-          <Sonner />
+  
           
           <AuthProvider>
             <PlanProvider>
