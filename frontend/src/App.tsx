@@ -1,7 +1,5 @@
-// src/App.tsx - Versão Final Integrada e Corrigida
+// src/App.tsx - VERSÃO CORRIGIDA
 import { Toaster } from "./components/ui/toaster";
-// ✅ REMOVIDO: Sonner duplicado para evitar conflitos
-// import { Toaster as Sonner } from "./components/ui/sonner";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
@@ -44,26 +42,22 @@ import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
 
-// ✅ QueryClient FORA do componente (evita recriação a cada render)
+// ✅ QueryClient FORA do componente
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
-      staleTime: 1000 * 60 * 5, // Cache válido por 5 min
-      // ✅ LGPD: Não enviar dados pessoais em analytics
-      meta: {
-        anonymize: true,
-      },
+      staleTime: 1000 * 60 * 5,
     },
   },
 });
 
 // ✅ Layout Wrapper para Rotas Protegidas
 const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
-  <div className="min-h-screen bg-background flex flex-col">
+  <div className="min-h-screen bg-background">
     <SessionHeader />
-    <main className="flex-1">{children}</main>
+    <main>{children}</main>
   </div>
 );
 
@@ -71,13 +65,16 @@ const App = () => {
   return (
     <ErrorBoundary 
       fallback={
-        <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
-          <div className="text-center space-y-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto" />
-            <p className="text-muted-foreground">Carregando aplicação...</p>
-            <p className="text-xs text-muted-foreground/60">
-              Se o erro persistir, limpe o cache do navegador
-            </p>
+        <div className="min-h-screen flex items-center justify-center bg-background p-4">
+          <div className="text-center">
+            <h2 className="text-xl font-bold text-destructive mb-2">⚠️ Algo deu errado</h2>
+            <p className="text-muted-foreground mb-4">Tente recarregar a página</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-primary text-primary-foreground px-4 py-2 rounded-lg"
+            >
+              Recarregar
+            </button>
           </div>
         </div>
       }
@@ -85,184 +82,142 @@ const App = () => {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <TooltipProvider>
-            {/* ✅ ESCOLHA APENAS UM: Toaster (shadcn) OU Sonner */}
             <Toaster />
             
-            <AuthProvider>
-              <PlanProvider>
-                <FeatureGatesProvider>
-                  <BrowserRouter>
+            {/* ✅ CORREÇÃO: BrowserRouter DEVE envolver AuthProvider */}
+            <BrowserRouter>
+              <AuthProvider>          {/* ← Agora useNavigate() funciona! */}
+                <PlanProvider>
+                  <FeatureGatesProvider>
                     <Routes>
-                      {/* ==========================================
-                          ROTAS PÚBLICAS (Sem Header de Sessão)
-                          ========================================== */}
+                      {/* Rotas públicas */}
                       <Route path="/lp" element={<LandingPage />} />
                       <Route path="/auth" element={<Auth />} />
                       
-                      {/* Vitrine Pública da Consultora */}
+                      {/* Vitrine Pública */}
                       <Route path="/vitrine/:slug" element={<Storefront />} />
                       <Route path="/vitrine" element={<Storefront />} />
 
-                      {/* Rotas de API / Desenvolvedores */}
+                      {/* Rotas de API / Dev */}
                       <Route path="/api" element={<ApiLanding />} />
                       <Route path="/api/docs" element={<ApiDocs />} />
                       <Route path="/api/pricing" element={<ApiPricing />} />
                       <Route path="/api/sandbox" element={<ApiSandbox />} />
                       <Route path="/api/dashboard" element={<ApiDashboard />} />
 
-                      {/* ==========================================
-                          ROTAS PROTEGIDAS (Com Header de Sessão)
-                          ========================================== */}
+                      {/* Rotas protegidas */}
+                      <Route path="/" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <Index />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
                       
-                      {/* Home / Dashboard Principal */}
-                      <Route 
-                        path="/" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <Index />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
+                      <Route path="/products" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <ProductList />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      
+                      <Route path="/products/new" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <ProductForm />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      
+                      <Route path="/products/:id/edit" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <ProductForm />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
 
-                      {/* Gestão de Produtos */}
-                      <Route 
-                        path="/products" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <ProductList />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
-                      <Route 
-                        path="/products/new" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <ProductForm />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
-                      <Route 
-                        path="/products/:id/edit" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <ProductForm />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
+                      <Route path="/stock/entry" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <StockWizard />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      
+                      <Route path="/add" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <AddProduct />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      
+                      <Route path="/withdraw" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <WithdrawProduct />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
 
-                      {/* Estoque (Entrada/Saída) */}
-                      <Route 
-                        path="/stock/entry" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <StockWizard />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
-                      <Route 
-                        path="/add" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <AddProduct />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
-                      <Route 
-                        path="/withdraw" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <WithdrawProduct />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
+                      <Route path="/dashboard" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <Dashboard />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      
+                      <Route path="/history" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <MovementHistory />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
 
-                      {/* Analytics & Histórico */}
-                      <Route 
-                        path="/dashboard" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <Dashboard />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
-                      <Route 
-                        path="/history" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <MovementHistory />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
+                      <Route path="/settings" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <Settings />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      
+                      <Route path="/profile" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <Profile />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      
+                      <Route path="/plans" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <Plans />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
 
-                      {/* Configurações & Perfil */}
-                      <Route 
-                        path="/settings" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <Settings />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
-                      <Route 
-                        path="/profile" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <Profile />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
-                      <Route 
-                        path="/plans" 
-                        element={
-                          <ProtectedRoute>
-                            <ProtectedLayout>
-                              <Plans />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
+                      <Route path="/admin-panel" element={
+                        <ProtectedRoute requireAdmin>
+                          <ProtectedLayout>
+                            <AdminPanel />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
 
-                      {/* Admin Panel - com requireAdmin */}
-                      <Route 
-                        path="/admin-panel" 
-                        element={
-                          <ProtectedRoute requireAdmin>
-                            <ProtectedLayout>
-                              <AdminPanel />
-                            </ProtectedLayout>
-                          </ProtectedRoute>
-                        } 
-                      />
-
-                      {/* Rota Catch-All */}
+                      {/* Catch-all */}
                       <Route path="*" element={<NotFound />} />
                     </Routes>
-                  </BrowserRouter>
-                </FeatureGatesProvider>
-              </PlanProvider>
-            </AuthProvider>
+                  </FeatureGatesProvider>
+                </PlanProvider>
+              </AuthProvider>
+            </BrowserRouter>
+            
           </TooltipProvider>
         </ThemeProvider>
       </QueryClientProvider>
