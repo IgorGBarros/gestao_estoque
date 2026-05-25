@@ -41,6 +41,7 @@ import MovementHistory from "./pages/MovementHistory";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -63,6 +64,11 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
 
 const App = () => {
   return (
+        <ErrorBoundary fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <p>Carregando...</p>
+      </div>
+    }>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <TooltipProvider>
@@ -248,6 +254,7 @@ const App = () => {
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>
+  </ErrorBoundary>
   );
 };
 

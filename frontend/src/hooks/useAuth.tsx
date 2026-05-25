@@ -137,6 +137,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ✅ INICIALIZAÇÃO (useCallback CORRETO)
   // ==========================================
   const initializeAuth = useCallback(async () => {
+    // No início do initializeAuth, adicione:
+    console.log("🔍 [DEBUG] initializeAuth iniciado", {
+      storedToken: !!localStorage.getItem("auth_token"),
+      storedUser: !!localStorage.getItem("auth_user"),
+      isInitialized,
+      initRef: initRef.current,
+    });
     if (initRef.current) return;
     initRef.current = true;
 
@@ -211,6 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ==========================================
   // ✅ LOGIN
   // ==========================================
+  
   const signIn = async (email: string, password: string) => {
     try {
       const response = await api.post("/auth/login/", { email, password });
@@ -228,14 +236,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: profileData.email || email,
           name: profileData.display_name || profileData.name || email.split('@')[0],
           ...profileData
+          
         };
         localStorage.setItem("auth_user", JSON.stringify(userData));
+        console.log("🔍 [DEBUG] Profile atualizado:", userData);
         setUser(userData);
       } catch (e) {
         setUser({ id: 0, email, name: email.split('@')[0] });
       }
     } catch (error) {
       handleLogout(false);
+            console.error("❌ [DEBUG] Erro em initializeAuth:", {
+        message: error?.message,
+        status: error?.response?.status,
+        stack: error?.stack,
+      });
       throw error;
     }
   };
