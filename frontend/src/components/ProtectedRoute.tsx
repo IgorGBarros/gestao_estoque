@@ -1,19 +1,25 @@
-import { Navigate } from "react-router-dom";
+// src/components/ProtectedRoute.tsx
 import { useAuth } from "../hooks/useAuth";
-import { Loader2 } from "lucide-react";
+import { Navigate, useLocation } from "react-router-dom";
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+  const location = useLocation();
 
+  // ✅ MOSTRAR LOADING ENQUANTO AUTENTICA
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      <div className="flex h-screen w-full items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     );
   }
 
-  if (!user) return <Navigate to="/auth" replace />;
+  // ✅ REDIRECIONAR SE NÃO AUTENTICADO
+  if (!isAuthenticated) {
+    return <Navigate to="/auth" state={{ from: location }} replace />;
+  }
 
+  // ✅ RENDERIZAR CONTEÚDO PROTEGIDO
   return <>{children}</>;
 }
