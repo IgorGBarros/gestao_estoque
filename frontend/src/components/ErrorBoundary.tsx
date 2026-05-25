@@ -27,23 +27,33 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
  // src/components/ErrorBoundary.tsx
+// src/components/ErrorBoundary.tsx - ATUALIZAR componentDidCatch
 componentDidCatch(error: Error, errorInfo: ErrorInfo) {
   console.error("🚨 ERRO CAPTURADO:", {
     message: error.message || '(mensagem vazia)',
     name: error.name,
-    stack: error.stack?.split('\n').slice(0, 10), // Primeiras 10 linhas
+    stack: error.stack?.split('\n').slice(0, 15),
     componentStack: errorInfo.componentStack,
     timestamp: new Date().toISOString()
   });
   
   // Tentar identificar o componente problemático
   const lines = errorInfo.componentStack?.split('\n') || [];
-  const problematicComponent = lines.find(line => 
-    line.includes('at ') && !line.includes('at sie') && !line.includes('at Gje')
-  );
+  const suspiciousComponents = lines
+    .filter(line => line.includes('at '))
+    .slice(0, 5)
+    .map(line => line.trim());
   
-  if (problematicComponent) {
-    console.error("🎯 Componente suspeito:", problematicComponent.trim());
+  console.error("🎯 Componentes suspeitos:", suspiciousComponents);
+  
+  // Verificar se é erro de hook
+  if (error.message.includes('Hook') || error.message.includes('render')) {
+    console.error("⚠️ Possível violação de regras de Hooks!");
+  }
+  
+  // Verificar se é erro de contexto
+  if (error.message.includes('Context') || error.message.includes('Provider')) {
+    console.error("⚠️ Possível erro de Context/Provider!");
   }
   
   this.setState({ error, errorInfo });
