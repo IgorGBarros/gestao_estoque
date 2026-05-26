@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "../services/api";
 import { useAuth } from "./useAuth";
 import { useToast } from "./use-toast";
+import { consentApi } from "@/lib/api";
 
 // ==========================================
 // ✅ CONSTANTES LGPD
@@ -92,43 +93,44 @@ export function useConsent(): ConsentContextData {
       setLoading(false);
     }
   }, [user?.id]);
-
-  // ✅ Registrar novo consentimento
+ // ✅ ATUALIZAR: Suportar usuários não autenticados
   const recordConsent = useCallback(async (
     purposes: Purpose[],
     email?: string,
     sessionId?: string
   ): Promise<boolean> => {
     try {
-      const resp = await api.post('/consent/', {
+      const data = await consentApi.record({
+        // Usa email do usuário logado OU email fornecido
         email: email || user?.email,
+        // Session ID para rastrear usuários não logados (opcional)
         session_id: sessionId,
         version: LGPD_VERSION,
         purposes,
         accepted_at: new Date().toISOString(),
       });
       
-      const data: ConsentRecord = resp.data;
-      
-      // Atualizar lista local
+      // Atualizar estado local
       setConsents(prev => [data, ...prev.filter(c => c.id !== data.id)]);
       
       // Feedback visual
-      toast?.({
-        title: "✅ Consentimento registrado",
-        description: "Seus dados serão tratados conforme a LGPD.",
-      });
+      if (typeof toast === 'function') {
+        toast({
+          title: "✅ Preferências salvas",
+          description: "Seus dados serão tratados conforme a LGPD.",
+        });
+      }
       
       return true;
     } catch (error: any) {
-      console.error("Erro ao registrar consentimento:", error);
-      
-      toast?.({
-        title: "❌ Erro ao registrar consentimento",
-        description: error.message || "Tente novamente",
-        variant: "destructive",
-      });
-      
+      // ✅ Não mostra toast se erro for 401 (usuário não autenticado ainda)
+      if (error.response?.status !== 401 && typeof toast === 'function') {
+        toast({
+          title: "⚠️ Não foi possível salvar",
+          description: "Tente novamente ou recarregue a página.",
+          variant: "destructive",
+        });
+      }
       return false;
     }
   }, [user?.email, toast]);

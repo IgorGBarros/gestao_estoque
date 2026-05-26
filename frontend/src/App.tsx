@@ -45,6 +45,7 @@ import MovementHistory from "./pages/MovementHistory";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
+import { CookieConsentBanner } from "./components/CookieConsentBanner";
 
 // ✅ QueryClient FORA do componente (evita recriação a cada render)
 const queryClient = new QueryClient({
@@ -232,6 +233,7 @@ const App = () => {
                       {/* Catch-all para 404 */}
                       <Route path="*" element={<NotFound />} />
                     </Routes>
+                    <CookieConsentBanner />
                   </FeatureGatesProvider>
                 </PlanProvider>
               </AuthProvider>
