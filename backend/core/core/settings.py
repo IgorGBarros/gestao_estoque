@@ -186,15 +186,6 @@ CSRF_TRUSTED_ORIGINS = [
 
 WSGI_APPLICATION = 'core.wsgi.application'
 
-# ✅ JWT Configuration
-SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=1), 
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
-}
 
 # ✅ Django REST Framework
 REST_FRAMEWORK = {
