@@ -3,72 +3,91 @@ import {
   isDemoMode, DEMO_INVENTORY, DEMO_MOVEMENTS,
   DEMO_PROFILE, DEMO_BATCHES
 } from "./demoData";
-import { api } from "../services/api";
+import { api } from "../services/api"; // ✅ Usa instância Axios configurada
 
 // ✅ CORREÇÃO: Base URL limpa (services/api.ts já adiciona /api/)
 const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || "https://dev-brih.onrender.com")
   .replace(/\/$/, "");
-    
+
+// ✅ Token helpers (usando services/api.ts para consistência)
 function getToken(): string | null {
   return localStorage.getItem("auth_token");
 }
 
 export function setToken(token: string) {
   localStorage.setItem("auth_token", token);
+  // ✅ Sincroniza com services/api.ts
+  api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 }
 
 export function clearToken() {
   localStorage.removeItem("auth_token");
+  localStorage.removeItem("refresh_token");
+  localStorage.removeItem("auth_user");
+  delete api.defaults.headers.common["Authorization"];
 }
 
-// ✅ CORREÇÃO: Função apiRequest SEM duplicar /api/
+// ✅ CORREÇÃO: Função apiRequest usando Axios (consistente com services/api.ts)
 async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  };
   
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  // ✅ CORREÇÃO: Não duplicar /api/ - services/api.ts já adiciona
+  // Endpoint deve começar com / para ser relativo à baseURL
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   
-  // ✅ CORREÇÃO: Usar API_BASE_URL + /api/ + endpoint (sem duplicação)
-  const fullUrl = `${API_BASE_URL}/api${endpoint}`;
-  console.log(`🔄 API Request: ${options.method || 'GET'} ${fullUrl}`);
+  console.log(`🔄 API Request: ${options.method || 'GET'} ${cleanEndpoint}`);
   
   try {
-    const response = await fetch(fullUrl, { ...options, headers });
+    // ✅ Usa instância Axios configurada (com interceptors, timeout, etc.)
+    const response = await api({
+      url: cleanEndpoint,
+      method: options.method || 'GET',
+      data: options.body ? JSON.parse(options.body as string) : undefined,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers as Record<string, string>),
+      },
+      // ✅ Não sobrescrever timeout/config do Axios instance
+    });
     
-    console.log(`📊 Response Status: ${response.status} for ${endpoint}`);
+    console.log(`📊 Response Status: ${response.status} for ${cleanEndpoint}`);
     
+    // ✅ Axios já lança erro para status < 200 ou >= 300
+    // Mas mantemos tratamento customizado para 401
     if (response.status === 401) {
-      console.log("🔐 Token expirado, redirecionando para login");
-      clearToken();
-      clearAppCache();
-      window.location.href = "/auth";
-      throw new Error("Sessão expirada");
-    }
-    
-    if (!response.ok) {
-      let errorMessage = `Erro ${response.status}`;
-      try {
-        const body = await response.json();
-        errorMessage = body.detail || body.error || errorMessage;
-      } catch {
-        errorMessage = `${errorMessage}: ${response.statusText}`;
-      }
+      // ✅ Só limpa sessão se NÃO for rota pública
+      const publicRoutes = ['/auth/', '/consent/', '/public/', '/vitrine/'];
+      const isPublicRoute = publicRoutes.some(route => cleanEndpoint.includes(route));
       
-      console.error(`❌ API Error ${response.status}:`, errorMessage);
-      throw new Error(errorMessage);
+      if (!isPublicRoute && token) {
+        console.log("🔐 Token expirado em rota protegida, limpando sessão");
+        clearToken();
+        clearAppCache();
+        // ✅ Só redireciona se não estiver já na página de auth
+        if (!window.location.pathname.includes('/auth')) {
+          window.location.href = "/auth";
+        }
+      }
+      throw new Error("Sessão expirada ou inválida");
     }
     
     if (response.status === 204) return null as T;
     
-    const data = await response.json();
-    console.log(`✅ API Success: ${endpoint}`, data);
-    return data;
+    console.log(`✅ API Success: ${cleanEndpoint}`, response.data);
+    return response.data as T;
     
-  } catch (error) {
-    console.error(`❌ API Request Failed: ${endpoint}`, error);
+  } catch (error: any) {
+    // ✅ Axios já captura erros de rede e HTTP
+    console.error(`❌ API Request Failed: ${endpoint}`, {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data
+    });
+    
+    // ✅ Propaga erro formatado para o caller
+    if (error.response?.data?.error || error.response?.data?.detail) {
+      throw new Error(error.response.data.error || error.response.data.detail);
+    }
     throw error;
   }
 }
@@ -87,7 +106,7 @@ export const authApi = {
       body: JSON.stringify({ email, password }),
     }),
   register: (email: string, password: string, name: string) =>
-    apiRequest<{ token: string; user: AuthUser }>("/auth/register/", {
+    apiRequest<{ access: string; refresh: string; user?: AuthUser }>("/auth/register/", {
       method: "POST",
       body: JSON.stringify({ email, password, name }),
     }),
@@ -125,6 +144,7 @@ export interface LookupResult {
 export const productLookupApi = {
   lookup: (barcodeOrName: string | null) => {
     const query = barcodeOrName ?? "";
+    // ✅ Endpoint correto sem duplicação de /api/
     return apiRequest<LookupResult>(
       `/products/lookup/?q=${encodeURIComponent(query)}`
     );
@@ -162,7 +182,7 @@ function isCacheValid(type: 'inventory' | 'movements'): boolean {
 
 // ── Inventory (endpoints corrigidos) ──
 export interface InventoryItem {
-  product_id: string | number | undefined;
+  product_id?: string | number;
   id: string;
   total_quantity?: number;
   min_quantity?: number;
@@ -205,7 +225,7 @@ export const stockApi = {
       method: "POST",
       body: JSON.stringify(data),
     });
-    clearAppCache();
+    clearAppCache(); // ✅ Limpa cache após criação
     return res;
   }
 };
@@ -237,8 +257,8 @@ export const inventoryApi = {
     } catch (error) {
       console.error("❌ Erro ao carregar inventário:", error);
       
-      // ✅ Fallback para cache se houver erro
-      if (inventoryCache) {
+      // ✅ Fallback para cache se houver erro de rede (não 401)
+      if (inventoryCache && (error as any).response?.status !== 401) {
         console.log("🔄 Usando cache como fallback");
         return inventoryCache;
       }
@@ -269,7 +289,7 @@ export const inventoryApi = {
       console.error(`❌ Erro ao buscar produto ${barcode}:`, error);
       
       // ✅ Se erro 404, retornar null em vez de lançar erro
-      if (error.message?.includes('404') || error.message?.includes('Não encontrado')) {
+      if (error.response?.status === 404 || error.message?.includes('404') || error.message?.includes('Não encontrado')) {
         console.log("📝 Produto não encontrado no estoque (404)");
         return null;
       }
@@ -370,20 +390,22 @@ export const fifoApi = {
 
 // ── Batches ──
 export interface InventoryBatch {
+  id: string; // ✅ CORREÇÃO: string para consistência
   batch_code: string;
-  expiry_date(expiry_date: any): import("react").ReactNode;
-  id: string; // ✅ CORREÇÃO: Mudar de number para string
   quantity: number;
   cost_price: number;
   expiration_date: string | null;
   created_at: string;
   updated_at?: string;
 }
+
 export const batchApi = {
   listByItem: async (inventoryItemId: string): Promise<InventoryBatch[]> => {
     console.log(`📦 Carregando lotes para item ${inventoryItemId}`);
     
-
+    if (isDemoMode()) {
+      return DEMO_BATCHES[inventoryItemId] || [];
+    }
     
     try {
       const data = await apiRequest<InventoryBatch[]>(`/inventory/${inventoryItemId}/batches/`);
@@ -398,7 +420,6 @@ export const batchApi = {
 
 // ── Movements ──
 export interface Movement {
-  movement_type: string;
   id: string;
   product_name: string;
   transaction_type: string;
@@ -407,6 +428,7 @@ export interface Movement {
   created_at: string;
   description?: string;
   notes?: string;
+  movement_type?: string; // Alias para transaction_type
 }
 
 export type TransactionType = "venda" | "presente" | "brinde" | "perda" | "uso_proprio";
@@ -437,8 +459,8 @@ export const movementsApi = {
     } catch (error) {
       console.error("❌ Erro ao carregar movimentações:", error);
       
-      // ✅ Fallback para cache
-      if (movementsCache) {
+      // ✅ Fallback para cache (exceto em 401)
+      if (movementsCache && (error as any).response?.status !== 401) {
         console.log("🔄 Usando cache como fallback");
         return movementsCache;
       }
@@ -474,7 +496,6 @@ export const movementsApi = {
 };
 
 // ── Payments (Asaas Integration) ──
-
 export interface CheckoutResponse {
   checkout_url: string;
   payment_link_id: string;
@@ -508,18 +529,15 @@ export interface AsaasConnectionTest {
 
 // ✅ API de Pagamentos (usuário autenticado)
 export const paymentsApi = {
-  // Cria checkout (link de pagamento) no Asaas
   createCheckout: (billingCycle: "monthly" | "yearly") =>
     apiRequest<CheckoutResponse>("/payments/asaas/checkout/", {
       method: "POST",
       body: JSON.stringify({ billing_cycle: billingCycle }),
     }),
 
-  // Consulta status da assinatura do usuário
   getSubscriptionStatus: () =>
     apiRequest<SubscriptionStatus>("/payments/asaas/status/"),
 
-  // Cancela assinatura
   cancelSubscription: () =>
     apiRequest<{ status: string; message: string }>("/payments/asaas/cancel/", {
       method: "POST",
@@ -528,11 +546,9 @@ export const paymentsApi = {
 
 // ✅ API Admin de Pagamentos (apenas staff)
 export const adminPaymentsApi = {
-  // Retorna configuração atual do Asaas
   getAsaasConfig: () =>
     apiRequest<AsaasConfig>("/admin/payments/asaas/config/"),
 
-  // Testa conexão com o Asaas (verifica API key e saldo)
   testAsaasConnection: () =>
     apiRequest<AsaasConnectionTest>("/admin/payments/asaas/test/", {
       method: "POST",
@@ -540,7 +556,7 @@ export const adminPaymentsApi = {
 };
 
 export const adminApi = {
-  // ✅ Existentes (sem alteração)
+  // Usuários
   listUsers: () => apiRequest<any[]>("/admin/users/"),
   updatePlan: (id: string | number, plan: "free" | "pro") =>
     apiRequest<{ message: string; plan: string }>(`/admin/users/${id}/plan/`, {
@@ -553,31 +569,27 @@ export const adminApi = {
       body: JSON.stringify(data),
     }),
 
-  // ✅ Analytics
-  getProductAnalytics: () =>
-    apiRequest<any>("/admin/analytics/products/"),
-  getBehaviorAnalytics: () =>
-    apiRequest<any>("/admin/analytics/behavior/"),
-  getMlInsights: () =>
-    apiRequest<any>("/admin/analytics/ml-insights/"),
+  // Analytics
+  getProductAnalytics: () => apiRequest<any>("/admin/analytics/products/"),
+  getBehaviorAnalytics: () => apiRequest<any>("/admin/analytics/behavior/"),
+  getMlInsights: () => apiRequest<any>("/admin/analytics/ml-insights/"),
 
-  // ✅ Planos, Promoções, Stats
-  listPlanConfigs: () =>
-    apiRequest<any[]>("/admin/plan-configs/"),
-  listPromotions: () =>
-    apiRequest<any[]>("/admin/promotions/"),
-  getSystemStats: () =>
-    apiRequest<any>("/admin/stats/"),
+  // Planos e Promoções
+  listPlanConfigs: () => apiRequest<any[]>("/admin/plan-configs/"),
+  listPromotions: () => apiRequest<any[]>("/admin/promotions/"),
+  getSystemStats: () => apiRequest<any>("/admin/stats/"),
 
+  // Monitoramento de API
   getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
-  // ✅ NOVO — Asaas (Admin)
-  getAsaasConfig: () =>
-    apiRequest<AsaasConfig>("/payments/asaas/config/"),
+  
+  // Asaas (Admin)
+  getAsaasConfig: () => apiRequest<AsaasConfig>("/payments/asaas/config/"),
   testAsaasConnection: () =>
     apiRequest<AsaasConnectionTest>("/payments/asaas/test/", {
       method: "POST",
     }),
 };
+
 // ── Profile ──
 export interface Profile {
   id: string;
@@ -586,16 +598,32 @@ export interface Profile {
   storefront_enabled: boolean;
   store_slug: string | null;
   plan: "free" | "pro";
+  // ✅ Campos adicionais do backend
+  user?: { id: number; email: string; name?: string };
+  stats?: {
+    total_products: number;
+    total_value: number;
+    expired_products: number;
+    near_expiry_products: number;
+    low_stock_products: number;
+  };
 }
 
 export const profileApi = {
-  get: () => (isDemoMode() ? Promise.resolve(DEMO_PROFILE) : apiRequest<Profile>("/profile/")),
-  update: (data: Partial<Profile>) => (isDemoMode() ? Promise.resolve({ ...DEMO_PROFILE, ...data } as Profile) : apiRequest<Profile>("/profile/", { method: "PATCH", body: JSON.stringify(data) })),
+  get: () => {
+    if (isDemoMode()) return Promise.resolve(DEMO_PROFILE);
+    return apiRequest<Profile>("/profile/");
+  },
+  update: (data: Partial<Profile>) => {
+    if (isDemoMode()) return Promise.resolve({ ...DEMO_PROFILE, ...data } as Profile);
+    return apiRequest<Profile>("/profile/", { 
+      method: "PATCH", 
+      body: JSON.stringify(data) 
+    });
+  },
 };
 
-
-
-// ── Storefront (public) - URLs completas mantidas ──
+// ── Storefront (public) ──
 export interface StorefrontItem {
   id: string;
   product_name?: string;
@@ -631,39 +659,22 @@ export interface StorefrontItem {
   };
 }
 
-// ✅ API pública mantém URL completa (endpoints públicos)
+// ✅ API pública usando Axios para consistência
 export const publicStorefrontApi = {
   listBySlug: async (slug: string) => {
     try {
       console.log(`🔍 Buscando vitrine por slug: ${slug}`);
       
-      // ✅ URL completa para endpoint público (sem mudanças)
-      const response = await fetch(`${API_BASE_URL}/api/public/storefront/${slug}/`, {
-        method: 'GET',
+      // ✅ Usa instância api (sem auth header para endpoint público)
+      const response = await api.get(`/public/storefront/${slug}/`, {
         headers: {
+          // ✅ Não envia Authorization para endpoint público
           'Content-Type': 'application/json'
         }
       });
       
-      console.log(`📊 Status da resposta: ${response.status}`);
-      
-      if (!response.ok) {
-        let errorMessage = `Erro ${response.status}: ${response.statusText}`;
-        
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch (parseError) {
-          console.warn('Não foi possível fazer parse do erro:', parseError);
-        }
-        
-        console.error(`❌ Erro ${response.status}:`, errorMessage);
-        throw new Error(errorMessage);
-      }
-      
-      const data = await response.json();
-      console.log('✅ Dados recebidos:', data);
-      return data;
+      console.log('✅ Dados recebidos:', response.data);
+      return response.data;
     } catch (error) {
       console.error('❌ Erro na API publicStorefront:', error);
       throw error;
@@ -674,30 +685,15 @@ export const publicStorefrontApi = {
     try {
       console.log(`🔍 Buscando vitrine por ID: ${sellerId}`);
       
-      // ✅ URL completa para endpoint público (sem mudanças)
-      const response = await fetch(`${API_BASE_URL}/api/public/storefront/?seller=${sellerId}`, {
-        method: 'GET',
+      const response = await api.get('/public/storefront/', {
+        params: { seller: sellerId },
         headers: {
           'Content-Type': 'application/json'
         }
       });
       
-      if (!response.ok) {
-        let errorMessage = `Erro ${response.status}: ${response.statusText}`;
-        
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch (parseError) {
-          console.warn('Não foi possível fazer parse do erro:', parseError);
-        }
-        
-        throw new Error(errorMessage);
-      }
-      
-      const data = await response.json();
-      console.log('✅ Dados recebidos:', data);
-      return data;
+      console.log('✅ Dados recebidos:', response.data);
+      return response.data;
     } catch (error) {
       console.error('❌ Erro na API publicStorefront:', error);
       throw error;
@@ -738,7 +734,7 @@ export const storefrontApi = {
       return publicStorefrontApi.listById(sellerId);
     }
     
-    // ✅ CORREÇÃO: Endpoint interno sem /api/ duplicado
+    // ✅ Endpoint interno sem /api/ duplicado
     return apiRequest<StorefrontItem[]>("/storefront/");
   },
   
@@ -756,13 +752,16 @@ export const ocrApi = {
     const token = getToken();
     const formData = new FormData();
     formData.append("image", file);
-    const response = await fetch(`${API_BASE_URL}/api/ocr-expiry/`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
+    
+    // ✅ Usa Axios com formData (não JSON)
+    const response = await api.post("/ocr-expiry/", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
-    if (!response.ok) throw new Error("Erro ao processar imagem");
-    return response.json();
+    
+    return response.data;
   },
 };
 
@@ -781,9 +780,7 @@ export const salesApi = {
 
 // ✅ FUNÇÕES HELPER
 export function getProductBrand(item: any): string | null {
-  return item.product?.brand ||
-         item.brand ||
-         null;
+  return item.product?.brand || item.brand || null;
 }
 
 export function getProductDisplayName(item: any): string {
@@ -801,10 +798,14 @@ export function getProductQuantity(item: any): number {
 export const debugApi = {
   checkHealth: async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/health/`);
-      return { status: response.status, ok: response.ok };
-    } catch (error) {
-      return { status: 0, ok: false, error };
+      const response = await api.get('/health/');
+      return { status: response.status, ok: response.status === 200 };
+    } catch (error: any) {
+      return { 
+        status: error.response?.status || 0, 
+        ok: false, 
+        error: error.message 
+      };
     }
   },
   
@@ -831,11 +832,9 @@ export interface SessionSummary {
   session_id: number;
 }
 
-// ✅ CORREÇÃO: SessionApi usando Axios (consistente com o resto da app) [1]
 export const sessionApi = {
-  getStatus: async (): Promise<{ has_session: boolean; products_count?: number; duration_minutes?: number; total_estimated_cost?: number }> => {
+  getStatus: async (): Promise<SessionStatus> => {
     try {
-      // Usa a instância 'api' do axios que já tem o token
       const response = await api.get('/session-control/');
       return response.data;
     } catch (error) {
@@ -849,7 +848,6 @@ export const sessionApi = {
   },
   
   finishSession: async () => {
-    // Endpoint Django: POST /session-control/ { action: 'finish' }
     const response = await api.post('/session-control/', { action: 'finish' });
     return response.data;
   },
@@ -859,7 +857,6 @@ export const sessionApi = {
     return response.data;
   },
 
-  // ✅ ADICIONAR
   confirmInvestment: async (sessionId: number, data: any) => {
     const response = await api.post('/session-summary/', {
       session_id: sessionId,
@@ -869,8 +866,7 @@ export const sessionApi = {
   }
 };
 
-// lib/api.ts (adicionar)
-
+// ── Theme Config ──
 export interface ThemeConfig {
   color_primary: string;
   color_primary_light: string;
@@ -887,12 +883,17 @@ export interface ThemeConfig {
   updated_at: string;
 }
 
-// Público — sem auth (para landing page e carregamento inicial)
+// Público — sem auth (para landing page)
 export const themeApi = {
   get: async (): Promise<ThemeConfig> => {
-    const response = await fetch(`${API_BASE_URL}/api/public/theme/`);
-    if (!response.ok) throw new Error('Erro ao carregar tema');
-    return response.json();
+    // ✅ Endpoint público não requer auth
+    const response = await api.get('/public/theme/', {
+      headers: {
+        // ✅ Não envia Authorization para endpoint público
+        'Content-Type': 'application/json'
+      }
+    });
+    return response.data;
   },
 };
 
@@ -906,6 +907,7 @@ export const adminThemeApi = {
     }),
 };
 
+// ── Dashboard Stats ──
 export interface DashboardStats {
   investedValue: number;
   potentialValue: number;
@@ -917,8 +919,6 @@ export interface DashboardStats {
 export const statsApi = {
   getDashboard: () => apiRequest<DashboardStats>("/stats/dashboard/"),
 };
-
-// src/lib/api.ts - ADICIONAR NO FINAL
 
 // ==========================================
 // CONSENTIMENTO LGPD (Art. 8º)

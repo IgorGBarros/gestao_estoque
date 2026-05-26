@@ -7,7 +7,12 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 // Providers
 import { AuthProvider } from "./hooks/useAuth";
 import { PlanProvider } from "./hooks/usePlan";
-import { FeatureGatesProvider } from "./hooks/useFeatureGates";
+import * as FeatureGatesModule from "./hooks/useFeatureGates";
+// Support either a named export `FeatureGatesProvider` or a default export.
+const FeatureGatesProvider: React.FC<{ children: React.ReactNode }> =
+  (FeatureGatesModule as any).FeatureGatesProvider ||
+  (FeatureGatesModule as any).default ||
+  (({ children }: { children: React.ReactNode }) => <>{children}</>);
 import { ThemeProvider } from "./hooks/useTheme";
 
 // Components

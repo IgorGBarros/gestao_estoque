@@ -1,123 +1,124 @@
-// src/hooks/useFeatureGates.tsx
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { api } from "../services/api"; // ✅ Usa a instância Axios configurada com interceptors
-import { usePlan } from "./usePlan"; // Hook que verifica se o usuário é PRO
+// src/hooks/useFeatureGates.ts
+import { useState, useEffect, useCallback } from "react";
+import { api } from "../services/api";
+import { useAuth } from "./useAuth";
 
-export type FeatureKey =
-  | "barcode_scanner"
-  | "ocr_expiry"
-  | "dashboard_charts"
-  | "dashboard_kpi_advanced"
-  | "ai_insights"
-  | "storefront"
-  | "chat_assistant"
-  | "unlimited_products";
+export const LGPD_VERSION = "v1.0_2026-05";
 
-interface FeatureGate {
-  feature_key: string;
-  label: string;
-  description: string | null;
-  requires_pro: boolean;
+export const PURPOSES = {
+  ESSENTIAL: "essential",
+  AUTH: "authentication",
+  SERVICE: "service_delivery",
+  ANALYTICS: "analytics",
+  MARKETING: "marketing",
+  BEHAVIOR: "behavior_tracking",
+  AI: "ai_features",
+} as const;
+
+export type Purpose = (typeof PURPOSES)[keyof typeof PURPOSES];
+
+export interface ConsentRecord {
+  id: number;
+  version: string;
+  purposes: string[];
+  accepted_at: string;
+  revoked_at: string | null;
+  is_active: boolean;
+  purposes_granted?: string[];
+  can_revoke?: string[];
 }
 
-interface FeatureGatesCtx {
-  gates: FeatureGate[];
-  loading: boolean;
-  /** Returns true if the feature is locked (requires pro and user is free) */
-  isLocked: (key: FeatureKey) => boolean;
-  /** Returns true if the feature requires pro plan */
-  requiresPro: (key: FeatureKey) => boolean;
-  refresh: () => void;
-}
+export function useConsent() {
+  const { user } = useAuth();
+  const [consents, setConsents] = useState<ConsentRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [essentialPurposes, setEssentialPurposes] = useState<string[]>([]);
+  const [revocablePurposes, setRevocablePurposes] = useState<string[]>([]);
 
-const FeatureGatesContext = createContext<FeatureGatesCtx>({
-  gates: [],
-  loading: true,
-  isLocked: () => true,
-  requiresPro: () => true,
-  refresh: () => {},
-});
+  // ✅ SÓ carregar se usuário estiver autenticado
+  useEffect(() => {
+    if (user?.id) {
+      loadConsents();
+    } else {
+      // Se não tem user, limpa consents
+      setConsents([]);
+      setLoading(false);
+    }
+  }, [user?.id]);
 
-// Fallback estático caso a API do Django ainda não tenha a rota /feature-gates/
-// Isso garante que o app não quebre se o backend estiver em deploy ou offline
-const DEFAULT_GATES: FeatureGate[] = [
-  { feature_key: "barcode_scanner", label: "Scanner de Código", description: null, requires_pro: true },
-  { feature_key: "ocr_expiry", label: "Leitor de Validade (IA)", description: null, requires_pro: true },
-  { feature_key: "dashboard_charts", label: "Gráficos Avançados", description: null, requires_pro: true },
-  { feature_key: "dashboard_kpi_advanced", label: "Lucro e Rentabilidade", description: null, requires_pro: true },
-  { feature_key: "ai_insights", label: "Insights com Inteligência Artificial", description: null, requires_pro: true },
-  { feature_key: "storefront", label: "Vitrine Digital", description: null, requires_pro: true },
-  { feature_key: "chat_assistant", label: "Assistente de Estoque", description: null, requires_pro: true },
-  { feature_key: "unlimited_products", label: "Produtos Ilimitados", description: null, requires_pro: true },
-];
-
-export function FeatureGatesProvider({ children }: { children: ReactNode }) {
-  const { isPro } = usePlan();
-  const [gates, setGates] = useState<FeatureGate[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchGates = useCallback(async () => {
+  const loadConsents = useCallback(async () => {
+    if (!user?.id) return;
+    
     setLoading(true);
     try {
-      // 🚨 MUDANÇA: Chama a API do Render (Django)
-      // O interceptor do Axios já injeta o token JWT se existir
-      const response = await api.get<FeatureGate[]>("/admin/feature-gates/");
-      
-      if (Array.isArray(response.data)) {
-         setGates(response.data);
-      } else {
-         console.warn("Formato inesperado da resposta de feature-gates");
-         setGates(DEFAULT_GATES);
-      }
-    } catch (err: any) {
-      // Se der 401, o interceptor já limpou o token.
-      // Se der 404 ou 500, usamos o fallback.
-      if (err.response?.status !== 401) {
-        console.warn("Rota /admin/feature-gates/ não encontrada ou falhou. Usando padrão local.");
-      }
-      setGates(DEFAULT_GATES);
+      const resp = await api.get("/consent/my/");
+      const data = resp.data;
+      setConsents(data.consents);
+      setEssentialPurposes(data.essential_purposes);
+      setRevocablePurposes(data.revocable_purposes);
+    } catch (error) {
+      console.error("Erro ao carregar consentimentos:", error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.id]);
 
-  useEffect(() => {
-    fetchGates();
-  }, [fetchGates]);
+  const recordConsent = useCallback(async (
+    purposes: Purpose[],
+    email?: string,
+    sessionId?: string
+  ) => {
+    try {
+      const resp = await api.post('/consent/', {
+        email: email || user?.email,
+        session_id: sessionId,
+        version: LGPD_VERSION,
+        purposes,
+        accepted_at: new Date().toISOString(),
+      });
+      const data = resp.data as ConsentRecord;
 
-  const requiresPro = useCallback(
-    (key: FeatureKey): boolean => {
-      const gate = gates.find((g) => g.feature_key === key);
-      // Se não encontrar a gate no array (ex: nova feature não listada no backend),
-      // assumimos que requer PRO por segurança, ou false se quiser ser permissivo.
-      // Aqui assumimos true para evitar vazamento de features pagas.
-      return gate ? gate.requires_pro : true;
-    },
-    [gates]
-  );
+      setConsents(prev => [data, ...prev.filter(c => c.id !== data.id)]);
+      return true;
+    } catch (error: any) {
+      console.error("Erro ao registrar consentimento:", error);
+      return false;
+    }
+  }, [user?.email]);
 
-  const isLocked = useCallback(
-    (key: FeatureKey): boolean => {
-      // Se for PRO, nada está travado
-      if (isPro) return false;
-      
-      // Se for FREE, verifica se a feature exige PRO
-      return requiresPro(key);
-    },
-    [isPro, requiresPro]
-  );
+  const revokeConsent = useCallback(async (purpose: Purpose) => {
+    if (essentialPurposes.includes(purpose)) {
+      return false;
+    }
+    
+    try {
+      await api.delete(`/consent/revoke/${purpose}/`);
+      setConsents(prev => 
+        prev.map(c => 
+          c.purposes.includes(purpose) && c.is_active
+            ? { ...c, is_active: false, revoked_at: new Date().toISOString() }
+            : c
+        )
+      );
+      return true;
+    } catch (error) {
+      console.error("Erro ao revogar consentimento:", error);
+      return false;
+    }
+  }, [essentialPurposes]);
 
-  return (
-    <FeatureGatesContext.Provider value={{ gates, loading, isLocked, requiresPro, refresh: fetchGates }}>
-      {children}
-    </FeatureGatesContext.Provider>
-  );
+  const hasConsent = useCallback((purpose: Purpose): boolean => {
+    return consents.some(c => c.is_active && c.purposes.includes(purpose));
+  }, [consents]);
+
+  return {
+    consents,
+    loading,
+    essentialPurposes,
+    revocablePurposes,
+    recordConsent,
+    revokeConsent,
+    hasConsent,
+    refresh: loadConsents,
+  };
 }
-
-export const useFeatureGates = () => {
-  const context = useContext(FeatureGatesContext);
-  if (!context) {
-    throw new Error("useFeatureGates must be used within a FeatureGatesProvider");
-  }
-  return context;
-};
