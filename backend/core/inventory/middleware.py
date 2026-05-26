@@ -1,63 +1,65 @@
 # inventory/middleware.py
-from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
-from django.utils import timezone
-from .models import ApiKey
+from django.conf import settings
 import re
 
 class ApiKeyMiddleware(MiddlewareMixin):
     """
-    Valida API Key no header Authorization: Bearer pk_••••
-    ✅ IGNORA rotas públicas e de autenticação
+    Middleware para validar API Key em endpoints comerciais.
+    ✅ EXCLUI endpoints de autenticação e LGPD da validação.
     """
     
-    # Rotas que NÃO precisam de API Key
-    EXEMPT_PATHS = [
-        '/api/auth/',       # Login, Register, Firebase
-        '/api/admin/',      # Admin Panel (usa JWT de staff)
-        '/api/public/',     # Vitrine pública
-        '/api/webhooks/',   # Webhooks Asaas/Stripe
-        '/api/docs',        # Swagger
-        '/api/schema',      # OpenAPI Schema
-        '/health/',         # Health Check
+    # ✅ Rotas que NÃO exigem API Key (autenticação de usuário ou públicas)
+    EXCLUDED_PATHS = [
+        # Auth
+        r'^/api/auth/',
+        r'^/api/token/',
+        
+        # LGPD / Consentimento
+        r'^/api/consent/',
+        
+        # Público
+        r'^/api/public/',
+        r'^/api/vitrine/',
+        r'^/api/health/',
+        
+        # Theme (público)
+        r'^/api/theme/',
     ]
-
+    
     def process_request(self, request):
+        # ✅ Verificar se a rota está excluída
         path = request.path_info
+        for excluded in self.EXCLUDED_PATHS:
+            if re.match(excluded, path):
+                return None  # Pula validação de API Key
         
-        # 1. Verifica se a rota é isenta
-        if any(path.startswith(exempt) for exempt in self.EXEMPT_PATHS):
-            return None
+        # ✅ Validar API Key apenas para rotas comerciais
+        api_key = request.headers.get('Authorization', '')
         
-        # 2. Extrai API Key do header
-        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if api_key.startswith('Bearer '):
+            api_key = api_key[7:]  # Remove 'Bearer '
+        else:
+            return self._error_response('API Key ausente. Use: Authorization: Bearer pk_live_••••')
         
-        # Regex para validar formato pk_live_••• ou pk_test_•••
-        match = re.match(r'^Bearer\s+(pk_(?:live|test)_[\w\-]+)$', auth_header)
-        
-        if not match:
-            return JsonResponse({
-                'error': 'API Key ausente ou inválida. Use: Authorization: Bearer pk_live_••••'
-            }, status=401)
-        
-        key_value = match.group(1)
-        
+        # ✅ Validar API Key no banco (implementar conforme sua lógica)
+        from .models import ApiKey
         try:
-            api_key = ApiKey.objects.select_related('store', 'owner').get(
-                key=key_value,
+            key_obj = ApiKey.objects.select_related('owner', 'store').get(
+                key=api_key,
                 is_active=True
             )
+            # Anexar informações da chave ao request para uso nas views
+            request.api_key = key_obj
+            request.api_plan = key_obj.plan
+            request.api_scopes = key_obj.scopes
         except ApiKey.DoesNotExist:
-            return JsonResponse({'error': 'API Key inválida'}, status=401)
-        
-        # Verificar expiração
-        if api_key.expires_at and timezone.now() > api_key.expires_at:
-            return JsonResponse({'error': 'API Key expirada'}, status=401)
-        
-        # Anexar API Key ao request
-        request.api_key = api_key
-        
-        # Atualizar last_used (async para não bloquear)
-        ApiKey.objects.filter(id=api_key.id).update(last_used=timezone.now())
+            return self._error_response('API Key inválida ou inativa')
         
         return None
+    
+    def _error_response(self, message):
+        from rest_framework.response import Response
+        from rest_framework import status
+        # Retorna resposta JSON para APIs
+        return Response({'error': message}, status=status.HTTP_401_UNAUTHORIZED)

@@ -989,3 +989,30 @@ export const consentApi = {
     }
   },
 };
+
+// src/lib/api.ts - No interceptor de request
+
+api.interceptors.request.use(
+  (config) => {
+    const token = getToken();
+    
+    // ✅ Lista de rotas públicas que NÃO devem levar token JWT
+    const publicRoutes = ['/auth/', '/consent/', '/public/', '/vitrine/', '/theme/', '/health/'];
+    const isPublicRoute = publicRoutes.some(route => config.url?.includes(route));
+    
+    // ✅ Só adiciona token JWT se NÃO for rota pública
+    if (token && !isPublicRoute) {
+      config.headers["Authorization"] = `Bearer ${token}`;
+    }
+    
+    // ✅ API Key de gateway é adicionada separadamente (se configurada)
+    const apiKey = import.meta.env.VITE_API_GATEWAY_KEY;
+    if (apiKey && !isPublicRoute) {
+      // Usa header diferente para não conflitar com JWT
+      config.headers["X-API-Key"] = apiKey;
+    }
+    
+    return config;
+  },
+  (error) => Promise.reject(error)
+);

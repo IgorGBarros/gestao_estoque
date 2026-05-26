@@ -1,356 +1,25 @@
+# backend/core/inventory/models.py
 import hashlib
 import uuid
-
+from decimal import Decimal
 from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
-from django.db import models
-from django.contrib.auth.models import (
-    AbstractBaseUser, BaseUserManager, PermissionsMixin, Permission, User
-)
-from django.utils import timezone
 from django.conf import settings
-
-from firebase_admin import auth
-import firebase_admin
-
-# ==========================================
-# 1. CAMADA PÚBLICA (CATÁLOGO GLOBAL)
-# ==========================================
-# Alimentada pelos Robôs. Todas as consultoras "leem" daqui.
-
-class Product(models.Model):
-    name = models.CharField(max_length=255, verbose_name="Nome do Produto")
-        # 🚀 ADICIONE ESTA LINHA:
-    brand = models.CharField(max_length=100, null=True, blank=True, verbose_name="Marca")
-    # Identificadores
-    bar_code = models.CharField(max_length=50, unique=True, null=True, blank=True, verbose_name="Código de Barras")
-    natura_sku = models.CharField(max_length=50, unique=True, null=True, blank=True, verbose_name="SKU Natura")
-    
-    # Detalhes
-    category = models.CharField(max_length=100, default="Geral")
-    description = models.TextField(null=True, blank=True)
-    image_url = models.URLField(max_length=500, null=True, blank=True)
-    min_quantity = models.PositiveIntegerField(default=5)
-    # Preço Oficial (Referência)
-    official_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, verbose_name="Preço Site")
-    
-    # Controle do Robô
-    last_checked_price = models.DecimalField(max_digits=10, decimal_places=2, null=True) # Preço na última checagem
-    last_checked_at = models.DateTimeField(null=True, blank=True, verbose_name="Última Checagem de Preço")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return self.name
-
-class PriceHistory(models.Model):
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="price_history")
-    price = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Preço Coletado")
-    captured_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"{self.product.name}: R$ {self.price} em {self.captured_at.strftime('%d/%m/%Y')}"
-
-class CrawlerLog(models.Model):
-    sku = models.CharField(max_length=50, db_index=True)
-    status_code = models.IntegerField(null=True, blank=True)
-    error_message = models.TextField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    retry_count = models.IntegerField(default=0)
-
-    def __str__(self):
-        return f"Erro SKU {self.sku}: {self.error_message}"
-
-
-# ==========================================
-# 2. CAMADA PRIVADA (DADOS DA CONSULTORA)
-# ==========================================
-
-class Store(models.Model):
-    """Loja da consultora"""
-    name = models.CharField(max_length=255, default='Minha Loja Natura')
-    slug = models.SlugField(unique=True, blank=True, max_length=120)
-    whatsapp = models.CharField(max_length=20, blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    
-
-    # ✅ RELACIONAMENTO CORRETO
-    owner = models.OneToOneField(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='store',
-        null=True,  # Permitir null temporariamente
-        blank=True
-    )
-
-    PLAN_CHOICES = [
-        ('free', 'Free'),
-        ('pro', 'Pro'),
-    ]
-    plan = models.CharField(
-        max_length=20,
-        choices=PLAN_CHOICES,
-        default='pro',
-        help_text="Plano de assinatura da loja"
-    )
-
-    payment_provider = models.CharField(max_length=50, blank=True, null=True, help_text="Ex: stripe, mercadopago")
-    payment_external_id = models.CharField(max_length=100, blank=True, null=True, help_text="ID da transação/assinatura")
-    subscription_started_at = models.DateTimeField(blank=True, null=True)
-    subscription_expires_at = models.DateTimeField(blank=True, null=True)
-    def save(self, *args, **kwargs):
-        if not self.slug:
-            base_slug = slugify(self.name)
-            slug = base_slug
-            counter = 1
-            while Store.objects.filter(slug=slug).exists():
-                slug = f"{base_slug}-{counter}"
-                counter += 1
-            self.slug = slug
-        super().save(*args, **kwargs)
-
-    # inventory/models.py - ATUALIZAR Store    
-    @property
-    def product_count(self):
-        """Contagem de produtos únicos da loja"""
-        return self.items.values('product').distinct().count()
-    
-    @property
-    def plan_config(self):
-        """Retorna configuração do plano atual"""
-        return PlanConfig.objects.filter(plan_type=self.plan).first()
-    
-    @property
-    def can_add_products(self):
-        """Verifica se a loja pode adicionar mais produtos"""
-        if self.plan == 'pro':
-            return True  # PRO tem produtos ilimitados
-        
-        # Free tem limite
-        current_count = self.items.count()
-        plan_config = getattr(self, 'plan_config', None)
-        max_products = plan_config.max_products if plan_config else 20
-        
-        return current_count < max_products
-    
-    def get_plan_limits(self):
-        """✅ INFORMAÇÕES COMPLETAS de limites"""
-        config = self.plan_config
-        current_count = self.product_count
-        
-        if config and config.max_products:
-            return {
-                'current_count': current_count,
-                'limit': config.max_products,
-                'can_add': current_count < config.max_products,
-                'remaining': config.max_products - current_count,
-                'percentage_used': (current_count / config.max_products) * 100
-            }
-        else:
-            return {
-                'current_count': current_count,
-                'limit': None,
-                'can_add': True,
-                'remaining': None,
-                'percentage_used': 0
-            }
-        
-    @property
-    def products_limit_reached(self):
-        """Verifica se atingiu limite de produtos"""
-        return not self.can_add_products
-    
-    @property
-    def can_use_feature(self):
-        """Retorna dict com recursos disponíveis"""
-        config = self.plan_config
-        if not config:
-            return {
-                'scanner': True,
-                'storefront': False,
-                'alerts': False,
-                'ai_assistant': False,
-                'analytics': False
-            }
-        
-        return {
-            'scanner': config.can_use_scanner,
-            'storefront': config.can_use_storefront,
-            'alerts': config.can_use_alerts,
-            'ai_assistant': config.can_use_ai_assistant,
-            'analytics': config.can_use_analytics
-        }
-    
-    @property
-    def subscription_status(self):
-        """Status da assinatura"""
-        if not self.subscription_expires_at:
-            return 'active' if self.plan == 'pro' else 'free'
-        
-        if timezone.now() > self.subscription_expires_at:
-            return 'expired'
-        
-        return 'active'
-    
-    @property
-    def days_until_expiry(self):
-        """Dias até expirar"""
-        if not self.subscription_expires_at:
-            return None
-        
-        delta = self.subscription_expires_at - timezone.now()
-        return max(0, delta.days)
-    
-    def upgrade_to_pro(self, billing_cycle='monthly'):
-        """Upgrade para PRO"""
-        self.plan = 'pro'
-        self.subscription_started_at = timezone.now()
-        
-        if billing_cycle == 'yearly':
-            self.subscription_expires_at = timezone.now() + timezone.timedelta(days=365)
-        else:
-            # Para assinatura mensal, não definir expiração (renovação automática)
-            self.subscription_expires_at = None
-            
-        self.save()
-    
-    def downgrade_to_free(self):
-        """Downgrade para Free"""
-        self.plan = 'free'
-        self.subscription_expires_at = None
-        self.payment_provider = None
-        self.payment_external_id = None
-        self.save()
-    
-    def get_active_promotions(self):
-        """Retorna promoções ativas para esta loja"""
-        from django.utils import timezone
-        
-        active_promotions = []
-        now = timezone.now()
-        
-        try:
-            for promo in Promotion.objects.filter(is_active=True):
-                # Verificações básicas
-                if now < promo.starts_at:
-                    continue
-                if promo.ends_at and now > promo.ends_at:
-                    continue
-                    
-                # Verificação por target_audience
-                if hasattr(promo, 'target_audience'):
-                    if promo.target_audience == 'free' and self.plan != 'free':
-                        continue
-                    if promo.target_audience == 'pro' and self.plan != 'pro':
-                        continue
-                    if promo.target_audience == 'new_stores':
-                        days_since_creation = (now - self.created_at).days
-                        if days_since_creation > 7:
-                            continue
-                
-                active_promotions.append({
-                    'id': str(promo.id),
-                    'title': promo.title,
-                    'message': promo.message,
-                    'discount_percent': promo.discount_percent
-                })
-            
-            return active_promotions
-            
-        except Exception as e:
-            print(f"❌ Erro ao buscar promoções: {e}")
-            return []
-    
-    def __str__(self):
-        return f"{self.name} ({self.owner.email if self.owner else 'Sem dono'})"
-    
-    class Meta:
-        verbose_name = 'Loja'
-        verbose_name_plural = 'Lojas'
-
-class InventoryItem(models.Model):
-    """
-    O vínculo entre a Loja e o Produto Global.
-    Define o preço que ELA cobra e o resumo do estoque DELA.
-    """
-    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name="items")
-    product = models.ForeignKey(Product, on_delete=models.PROTECT) # Se deletar prod global, não quebra estoque
-    
-    # Preços personalizados da consultora
-    cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, verbose_name="Custo Médio")
-    sale_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, verbose_name="Preço Venda")
-    
-    # Estoque consolidado (Soma dos lotes)
-    total_quantity = models.IntegerField(default=0)
-    min_quantity = models.IntegerField(default=5)
-    
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together = ('store', 'product') # Evita duplicidade do mesmo produto na loja
-
-    def __str__(self):
-        return f"{self.product.name} ({self.total_quantity})"
-
-class InventoryBatch(models.Model):
-    """
-    Lotes físicos (Validade e Quantidade específica).
-    """
-    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="batches")
-    quantity = models.IntegerField()
-    batch_code = models.CharField(max_length=50, blank=True, null=True, verbose_name="Lote")
-    expiration_date = models.DateField(null=True, blank=True, verbose_name="Validade")
-    entry_date = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"Lote {self.batch_code} - Val: {self.expiration_date}"
-
-
-# ==========================================
-# 3. CAMADA DE SAÍDA (VENDAS E BAIXAS)
-# ==========================================
-
-class Sale(models.Model):
-    SALE_TYPES = [
-        ('VENDA', 'Venda'),
-        ('PRESENTE', 'Presente Pessoal'),
-        ('BRINDE', 'Brinde Cliente'),
-        ('PERDA', 'Perda/Avaria'),
-        ('USO_PROPRIO', 'Uso Próprio')
-    ]
-
-    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name="sales")
-    transaction_type = models.CharField(max_length=20, choices=SALE_TYPES, default='VENDA')
-    
-    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
-    client_name = models.CharField(max_length=100, blank=True, null=True)
-    payment_method = models.CharField(max_length=50, default="DINHEIRO", blank=True)
-    
-    notes = models.TextField(blank=True, null=True, verbose_name="Observações")
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    def __str__(self):
-        return f"#{self.id} - {self.transaction_type} - R$ {self.total_amount}"
-
-class SaleItem(models.Model):
-    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name="items")
-    product = models.ForeignKey(Product, on_delete=models.PROTECT)
-    batch = models.ForeignKey(InventoryBatch, on_delete=models.SET_NULL, null=True, blank=True)
-    
-    quantity = models.IntegerField()
-    unit_price_sold = models.DecimalField(max_digits=10, decimal_places=2) # Preço no momento da venda
-    unit_cost_at_time = models.DecimalField(max_digits=10, decimal_places=2, default=0) # Para relatório de lucro
-
-
-from django.db import models
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
-from django.utils import timezone
-from firebase_admin import auth
+
+# Firebase (opcional, com try/except para evitar crash se não instalado)
+try:
+    from firebase_admin import auth
+except ImportError:
+    auth = None
+
 
 # ==========================================
-# 0. USUÁRIO CUSTOMIZADO (AUTH)
+# 0. USUÁRIO CUSTOMIZADO (AUTH) - DEVE VIR PRIMEIRO
 # ==========================================
+
 class CustomUserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
         if not email:
@@ -370,6 +39,8 @@ class CustomUserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
     
     def create_user_with_firebase(self, firebase_token, **extra_fields):
+        if not auth:
+            raise ValueError("Firebase Admin SDK não está instalado")
         try:
             decoded_token = auth.verify_id_token(firebase_token)
             email = decoded_token.get('email')
@@ -386,6 +57,7 @@ class CustomUserManager(BaseUserManager):
         except Exception as e:
             raise ValueError(f"Erro ao verificar o token do Firebase: {e}")
 
+
 class CustomUser(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     name = models.CharField(max_length=255)
@@ -401,8 +73,345 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     def __str__(self):
         return self.email
 
-# ... Resto do seu models.py (Product, Store, InventoryItem, etc)
-# ... (outros models: Product, Store, InventoryItem, etc)
+
+# ==========================================
+# 1. CAMADA PÚBLICA (CATÁLOGO GLOBAL)
+# ==========================================
+
+class Product(models.Model):
+    """Catálogo global de produtos - alimentado por scrapers"""
+    name = models.CharField(max_length=255, verbose_name="Nome do Produto")
+    brand = models.CharField(max_length=100, null=True, blank=True, verbose_name="Marca")
+    
+    # Identificadores únicos
+    bar_code = models.CharField(max_length=50, unique=True, null=True, blank=True, verbose_name="Código de Barras")
+    natura_sku = models.CharField(max_length=50, unique=True, null=True, blank=True, verbose_name="SKU Natura")
+    
+    # Detalhes do produto
+    category = models.CharField(max_length=100, default="Geral")
+    description = models.TextField(null=True, blank=True)
+    image_url = models.URLField(max_length=500, null=True, blank=True)
+    min_quantity = models.PositiveIntegerField(default=5)
+    
+    # Preço oficial de referência
+    official_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, verbose_name="Preço Site")
+    
+    # Controle do scraper
+    last_checked_price = models.DecimalField(max_digits=10, decimal_places=2, null=True)
+    last_checked_at = models.DateTimeField(null=True, blank=True, verbose_name="Última Checagem de Preço")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Produto'
+        verbose_name_plural = 'Produtos'
+        indexes = [
+            models.Index(fields=['bar_code']),
+            models.Index(fields=['natura_sku']),
+            models.Index(fields=['category']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class PriceHistory(models.Model):
+    """Histórico de preços coletados pelo scraper"""
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="price_history")
+    price = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Preço Coletado")
+    captured_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-captured_at']
+        verbose_name = 'Histórico de Preço'
+        verbose_name_plural = 'Históricos de Preço'
+
+    def __str__(self):
+        return f"{self.product.name}: R$ {self.price} em {self.captured_at.strftime('%d/%m/%Y')}"
+
+
+class CrawlerLog(models.Model):
+    """Log de execuções do scraper"""
+    sku = models.CharField(max_length=50, db_index=True)
+    status_code = models.IntegerField(null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    retry_count = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Log do Crawler'
+        verbose_name_plural = 'Logs do Crawler'
+
+    def __str__(self):
+        return f"Erro SKU {self.sku}: {self.error_message}"
+
+
+# ==========================================
+# 2. CAMADA PRIVADA (DADOS DA CONSULTORA)
+# ==========================================
+
+class Store(models.Model):
+    """Loja/Perfil da consultora"""
+    name = models.CharField(max_length=255, default='Minha Loja Natura')
+    slug = models.SlugField(unique=True, blank=True, max_length=120)
+    whatsapp = models.CharField(max_length=20, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    # Relacionamento com usuário
+    owner = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='store',
+        null=True,
+        blank=True
+    )
+
+    PLAN_CHOICES = [('free', 'Free'), ('pro', 'Pro')]
+    plan = models.CharField(
+        max_length=20,
+        choices=PLAN_CHOICES,
+        default='free',
+        help_text="Plano de assinatura da loja"
+    )
+
+    # Dados de pagamento/assinatura
+    payment_provider = models.CharField(max_length=50, blank=True, null=True)
+    payment_external_id = models.CharField(max_length=100, blank=True, null=True)
+    subscription_started_at = models.DateTimeField(blank=True, null=True)
+    subscription_expires_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = 'Loja'
+        verbose_name_plural = 'Lojas'
+        indexes = [
+            models.Index(fields=['slug']),
+            models.Index(fields=['owner', 'plan']),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            base_slug = slugify(self.name)
+            slug = base_slug
+            counter = 1
+            while Store.objects.filter(slug=slug).exists():
+                slug = f"{base_slug}-{counter}"
+                counter += 1
+            self.slug = slug
+        super().save(*args, **kwargs)
+
+    @property
+    def product_count(self):
+        """Contagem de produtos únicos da loja"""
+        return self.items.values('product').distinct().count()
+    
+    @property
+    def plan_config(self):
+        """Retorna configuração do plano atual"""
+        return PlanConfig.objects.filter(plan_type=self.plan).first()
+    
+    @property
+    def can_add_products(self):
+        """Verifica se a loja pode adicionar mais produtos"""
+        if self.plan == 'pro':
+            return True
+        current_count = self.items.count()
+        plan_config = self.plan_config
+        max_products = plan_config.max_products if plan_config else 20
+        return current_count < max_products
+    
+    def get_plan_limits(self):
+        """Retorna informações completas de limites do plano"""
+        config = self.plan_config
+        current_count = self.product_count
+        
+        if config and config.max_products:
+            return {
+                'current_count': current_count,
+                'limit': config.max_products,
+                'can_add': current_count < config.max_products,
+                'remaining': config.max_products - current_count,
+                'percentage_used': (current_count / config.max_products) * 100
+            }
+        return {
+            'current_count': current_count,
+            'limit': None,
+            'can_add': True,
+            'remaining': None,
+            'percentage_used': 0
+        }
+    
+    @property
+    def products_limit_reached(self):
+        return not self.can_add_products
+    
+    @property
+    def can_use_feature(self):
+        """Retorna dict com recursos disponíveis pelo plano"""
+        config = self.plan_config
+        if not config:
+            return {
+                'scanner': True, 'storefront': False, 'alerts': False,
+                'ai_assistant': False, 'analytics': False
+            }
+        return {
+            'scanner': config.can_use_scanner,
+            'storefront': config.can_use_storefront,
+            'alerts': config.can_use_alerts,
+            'ai_assistant': config.can_use_ai_assistant,
+            'analytics': config.can_use_analytics
+        }
+    
+    @property
+    def subscription_status(self):
+        if not self.subscription_expires_at:
+            return 'active' if self.plan == 'pro' else 'free'
+        if timezone.now() > self.subscription_expires_at:
+            return 'expired'
+        return 'active'
+    
+    @property
+    def days_until_expiry(self):
+        if not self.subscription_expires_at:
+            return None
+        delta = self.subscription_expires_at - timezone.now()
+        return max(0, delta.days)
+    
+    def upgrade_to_pro(self, billing_cycle='monthly'):
+        self.plan = 'pro'
+        self.subscription_started_at = timezone.now()
+        if billing_cycle == 'yearly':
+            self.subscription_expires_at = timezone.now() + timezone.timedelta(days=365)
+        else:
+            self.subscription_expires_at = None
+        self.save()
+    
+    def downgrade_to_free(self):
+        self.plan = 'free'
+        self.subscription_expires_at = None
+        self.payment_provider = None
+        self.payment_external_id = None
+        self.save()
+    
+    def get_active_promotions(self):
+        """Retorna promoções ativas para esta loja"""
+        active_promotions = []
+        now = timezone.now()
+        
+        for promo in Promotion.objects.filter(is_active=True):
+            if now < promo.starts_at or (promo.ends_at and now > promo.ends_at):
+                continue
+            if promo.target_audience == 'free' and self.plan != 'free':
+                continue
+            if promo.target_audience == 'pro' and self.plan != 'pro':
+                continue
+            if promo.target_audience == 'new_stores':
+                if (now - self.created_at).days > 7:
+                    continue
+            
+            active_promotions.append({
+                'id': str(promo.id),
+                'title': promo.title,
+                'message': promo.message,
+                'discount_percent': promo.discount_percent
+            })
+        
+        return active_promotions
+
+    def __str__(self):
+        return f"{self.name} ({self.owner.email if self.owner else 'Sem dono'})"
+
+
+class InventoryItem(models.Model):
+    """Vínculo entre Loja e Produto Global - define preços e estoque da consultora"""
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    
+    # Preços personalizados
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, verbose_name="Custo Médio")
+    sale_price = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, verbose_name="Preço Venda")
+    
+    # Estoque consolidado
+    total_quantity = models.IntegerField(default=0)
+    min_quantity = models.IntegerField(default=5)
+    
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('store', 'product')
+        verbose_name = 'Item de Estoque'
+        verbose_name_plural = 'Itens de Estoque'
+        indexes = [
+            models.Index(fields=['store', 'total_quantity']),
+            models.Index(fields=['product', 'sale_price']),
+        ]
+
+    def __str__(self):
+        return f"{self.product.name} ({self.total_quantity})"
+
+
+class InventoryBatch(models.Model):
+    """Lotes físicos com validade e quantidade específica"""
+    item = models.ForeignKey(InventoryItem, on_delete=models.CASCADE, related_name="batches")
+    quantity = models.IntegerField()
+    batch_code = models.CharField(max_length=50, blank=True, null=True, verbose_name="Lote")
+    expiration_date = models.DateField(null=True, blank=True, verbose_name="Validade")
+    entry_date = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Lote'
+        verbose_name_plural = 'Lotes'
+        indexes = [
+            models.Index(fields=['expiration_date']),
+            models.Index(fields=['item', 'quantity']),
+        ]
+
+    def __str__(self):
+        return f"Lote {self.batch_code} - Val: {self.expiration_date}"
+
+
+# ==========================================
+# 3. CAMADA DE SAÍDA (VENDAS E MOVIMENTAÇÕES)
+# ==========================================
+
+class Sale(models.Model):
+    SALE_TYPES = [
+        ('VENDA', 'Venda'),
+        ('PRESENTE', 'Presente Pessoal'),
+        ('BRINDE', 'Brinde Cliente'),
+        ('PERDA', 'Perda/Avaria'),
+        ('USO_PROPRIO', 'Uso Próprio')
+    ]
+
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name="sales")
+    transaction_type = models.CharField(max_length=20, choices=SALE_TYPES, default='VENDA')
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)
+    client_name = models.CharField(max_length=100, blank=True, null=True)
+    payment_method = models.CharField(max_length=50, default="DINHEIRO", blank=True)
+    notes = models.TextField(blank=True, null=True, verbose_name="Observações")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Venda'
+        verbose_name_plural = 'Vendas'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"#{self.id} - {self.transaction_type} - R$ {self.total_amount}"
+
+
+class SaleItem(models.Model):
+    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, related_name="items")
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    batch = models.ForeignKey(InventoryBatch, on_delete=models.SET_NULL, null=True, blank=True)
+    quantity = models.IntegerField()
+    unit_price_sold = models.DecimalField(max_digits=10, decimal_places=2)
+    unit_cost_at_time = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    class Meta:
+        verbose_name = 'Item de Venda'
+        verbose_name_plural = 'Itens de Venda'
+
 
 class StockTransaction(models.Model):
     TRANSACTION_TYPES = [
@@ -418,24 +427,30 @@ class StockTransaction(models.Model):
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name="transactions")
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     batch = models.ForeignKey(InventoryBatch, on_delete=models.SET_NULL, null=True, blank=True)
-    
     transaction_type = models.CharField(max_length=20, choices=TRANSACTION_TYPES)
-    quantity = models.IntegerField() # Positivo = Entrada, Negativo = Saída
-    
-    # Snapshot dos valores no momento da operação
+    quantity = models.IntegerField()  # Positivo = Entrada, Negativo = Saída
     unit_cost = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     unit_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
-    
     description = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        verbose_name = 'Transação de Estoque'
+        verbose_name_plural = 'Transações de Estoque'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['store', 'transaction_type', 'created_at']),
+            models.Index(fields=['product', 'created_at']),
+        ]
+
     def __str__(self):
         return f"{self.get_transaction_type_display()} - {self.product.name} ({self.quantity})"
-    
 
 
-# inventory/models.py - ADICIONAR apenas isso
-# inventory/models.py - ADICIONAR este modelo
+# ==========================================
+# 4. SESSÕES E CONFIGURAÇÕES
+# ==========================================
+
 class RegistrationSession(models.Model):
     """Sessão de cadastro de produtos"""
     store = models.ForeignKey(Store, on_delete=models.CASCADE)
@@ -447,32 +462,28 @@ class RegistrationSession(models.Model):
     products_count = models.PositiveIntegerField(default=0)
     total_estimated_cost = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     
-    # Dados de pagamento (opcionais)
+    # Dados de pagamento
     payment_method = models.CharField(max_length=50, null=True, blank=True)
     total_paid = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     installments = models.PositiveIntegerField(default=1)
-    
+
     class Meta:
         verbose_name = "Sessão de Cadastro"
         verbose_name_plural = "Sessões de Cadastro"
-    
+        ordering = ['-started_at']
+
     @property
     def duration_minutes(self):
-        if self.finished_at:
-            return (self.finished_at - self.started_at).total_seconds() / 60
-        return (timezone.now() - self.started_at).total_seconds() / 60
-    
+        end = self.finished_at or timezone.now()
+        return (end - self.started_at).total_seconds() / 60
     
     def add_product(self, inventory_item, quantity=1):
-        """Adiciona produto à sessão"""
         self.products_count += quantity
-        # Calcula custo estimado baseado no custo do item
         cost_per_unit = inventory_item.cost_price or inventory_item.product.official_price or 0
         self.total_estimated_cost += cost_per_unit * quantity
         self.save()
     
     def finish_session(self):
-        """Finaliza sessão"""
         self.is_active = False
         self.finished_at = timezone.now()
         self.save()
@@ -480,34 +491,21 @@ class RegistrationSession(models.Model):
     
     def __str__(self):
         return f"Sessão {self.id} - {self.store.name} ({self.products_count} produtos)"
-    
-# inventory/models.py - ADICIONAR no final do arquivo
 
-from django.core.validators import MinValueValidator, MaxValueValidator
-from decimal import Decimal
 
 class PlanConfig(models.Model):
     """Configuração dinâmica de planos"""
-    
-    PLAN_CHOICES = [
-        ('free', 'Free'),
-        ('pro', 'Pro'),
-        ('premium', 'Premium'),
-    ]
+    PLAN_CHOICES = [('free', 'Free'), ('pro', 'Pro'), ('premium', 'Premium')]
     
     plan_type = models.CharField(max_length=20, choices=PLAN_CHOICES, unique=True)
     display_name = models.CharField(max_length=50)
     description = models.TextField(blank=True)
     
-    # Limites configuráveis
-    max_products = models.IntegerField(
-        null=True, 
-        blank=True,
-        help_text="NULL = ilimitado"
-    )
+    # Limites
+    max_products = models.IntegerField(null=True, blank=True, help_text="NULL = ilimitado")
     max_storage_mb = models.IntegerField(default=100)
     
-    # Recursos habilitados
+    # Recursos
     can_use_scanner = models.BooleanField(default=True)
     can_use_storefront = models.BooleanField(default=False)
     can_use_alerts = models.BooleanField(default=False)
@@ -516,24 +514,15 @@ class PlanConfig(models.Model):
     can_export_data = models.BooleanField(default=False)
     can_use_api = models.BooleanField(default=False)
     
-    # Configurações de pagamento
-    monthly_price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        default=Decimal('0.00')
-    )
-    yearly_price = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        default=Decimal('0.00')
-    )
+    # Preços
+    monthly_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    yearly_price = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     yearly_discount_percent = models.IntegerField(
-        default=0,
-        validators=[MinValueValidator(0), MaxValueValidator(100)]
+        default=0, validators=[MinValueValidator(0), MaxValueValidator(100)]
     )
     
-    # Configurações de UI
-    highlight_color = models.CharField(max_length=7, default='#3B82F6')  # hex color
+    # UI
+    highlight_color = models.CharField(max_length=7, default='#3B82F6')
     is_popular = models.BooleanField(default=False)
     is_visible = models.BooleanField(default=True)
     sort_order = models.IntegerField(default=0)
@@ -552,21 +541,17 @@ class PlanConfig(models.Model):
     
     @property
     def yearly_price_monthly(self):
-        """Preço anual dividido por 12"""
-        if self.yearly_price > 0:
-            return self.yearly_price / 12
-        return self.monthly_price
+        return self.yearly_price / 12 if self.yearly_price > 0 else self.monthly_price
     
     @property
     def yearly_savings(self):
-        """Economia anual em reais"""
         if self.yearly_price > 0 and self.monthly_price > 0:
             return (self.monthly_price * 12) - self.yearly_price
         return Decimal('0.00')
 
+
 class Promotion(models.Model):
     """Promoções e banners configuráveis"""
-    
     TARGET_CHOICES = [
         ('all', 'Todos os usuários'),
         ('free', 'Apenas plano Free'),
@@ -574,43 +559,28 @@ class Promotion(models.Model):
         ('new_users', 'Usuários novos (< 7 dias)'),
         ('inactive', 'Usuários inativos (> 30 dias)'),
     ]
-    
     TYPE_CHOICES = [
-        ('banner', 'Banner'),
-        ('modal', 'Modal'),
-        ('notification', 'Notificação'),
-        ('email', 'Email'),
+        ('banner', 'Banner'), ('modal', 'Modal'),
+        ('notification', 'Notificação'), ('email', 'Email'),
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     title = models.CharField(max_length=100)
     message = models.TextField()
     
-    # Configuração de exibição
     promotion_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='banner')
     target_audience = models.CharField(max_length=20, choices=TARGET_CHOICES, default='free')
     
-    # Configuração de desconto
-    discount_percent = models.IntegerField(
-        default=0,
-        validators=[MinValueValidator(0), MaxValueValidator(100)]
-    )
-    discount_amount = models.DecimalField(
-        max_digits=10, 
-        decimal_places=2, 
-        default=Decimal('0.00')
-    )
+    discount_percent = models.IntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
+    discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     
-    # Controle de tempo
     starts_at = models.DateTimeField(default=timezone.now)
     ends_at = models.DateTimeField(null=True, blank=True)
     
-    # Controle de exibição
     is_active = models.BooleanField(default=True)
     max_views = models.IntegerField(null=True, blank=True)
     current_views = models.IntegerField(default=0)
     
-    # Estilo
     background_color = models.CharField(max_length=7, default='#3B82F6')
     text_color = models.CharField(max_length=7, default='#FFFFFF')
     
@@ -627,72 +597,39 @@ class Promotion(models.Model):
         return self.title
         
     def is_valid_for_store(self, store):
-            """Verifica se promoção é válida para uma loja específica"""
-            from django.utils import timezone
-            
-            now = timezone.now()
-            
-            # Verificações básicas
-            if not self.is_active:
-                return False
-            if now < self.starts_at:
-                return False
-            if self.ends_at and now > self.ends_at:
-                return False
-                
-            # Verificação por target_audience
-            if self.target_audience == 'free' and store.plan != 'free':
-                return False
-            if self.target_audience == 'pro' and store.plan != 'pro':
-                return False
-            if self.target_audience == 'new_stores':
-                days_since_creation = (now - store.created_at).days
-                if days_since_creation > 7:
-                    return False
-            if self.target_audience == 'inactive':
-                # Verificar se loja está inativa (sem atividade recente)
-                # Implementar lógica de inatividade se necessário
-                pass
-                    
-            return True
+        now = timezone.now()
+        if not self.is_active or now < self.starts_at or (self.ends_at and now > self.ends_at):
+            return False
+        if self.target_audience == 'free' and store.plan != 'free':
+            return False
+        if self.target_audience == 'pro' and store.plan != 'pro':
+            return False
+        if self.target_audience == 'new_stores' and (now - store.created_at).days > 7:
+            return False
+        return True
         
     @property
     def is_valid(self):
-            """Verifica se a promoção está válida (sem contexto de loja)"""
-            from django.utils import timezone
-            
-            now = timezone.now()
-            if not self.is_active:
-                return False
-            if now < self.starts_at:
-                return False
-            if self.ends_at and now > self.ends_at:
-                return False
-            if hasattr(self, 'max_views') and hasattr(self, 'current_views'):
-                if self.max_views and self.current_views >= self.max_views:
-                    return False
-            return True
-        
+        now = timezone.now()
+        if not self.is_active or now < self.starts_at or (self.ends_at and now > self.ends_at):
+            return False
+        if self.max_views and self.current_views >= self.max_views:
+            return False
+        return True
 
-
-# inventory/models.py - CORRIGIR o modelo UserPlanCache
 
 class UserPlanCache(models.Model):
-    """Cache de limites por usuário (performance)"""
-    
-    # ✅ CORREÇÃO: Usar settings.AUTH_USER_MODEL em vez de string
+    """Cache de limites por usuário para performance"""
     user = models.OneToOneField(
-        settings.AUTH_USER_MODEL,  # Em vez de 'CustomUser'
+        settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE, 
         related_name='plan_cache'
     )
     
-    # Cache dos limites atuais
     current_plan = models.CharField(max_length=20, default='free')
     max_products = models.IntegerField(null=True, blank=True)
     products_used = models.IntegerField(default=0)
     
-    # Recursos
     can_use_scanner = models.BooleanField(default=True)
     can_use_storefront = models.BooleanField(default=False)
     can_use_alerts = models.BooleanField(default=False)
@@ -700,7 +637,7 @@ class UserPlanCache(models.Model):
     can_use_analytics = models.BooleanField(default=False)
     
     last_updated = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'user_plan_cache'
         verbose_name = 'Cache de Plano'
@@ -710,12 +647,9 @@ class UserPlanCache(models.Model):
         return f"{self.user.email} - {self.current_plan}"
     
     def refresh_from_store(self):
-        """Atualiza cache baseado na Store do usuário"""
         try:
             store = self.user.store
             self.current_plan = store.plan
-            
-            # Busca configuração do plano
             plan_config = PlanConfig.objects.filter(plan_type=store.plan).first()
             if plan_config:
                 self.max_products = plan_config.max_products
@@ -724,21 +658,19 @@ class UserPlanCache(models.Model):
                 self.can_use_alerts = plan_config.can_use_alerts
                 self.can_use_ai_assistant = plan_config.can_use_ai_assistant
                 self.can_use_analytics = plan_config.can_use_analytics
-            
-            # Conta produtos atuais
             if hasattr(store, 'items'):
                 self.products_used = store.items.count()
-            
             self.save()
         except:
-            pass  # Se não tem store, mantém defaults
+            pass
 
 
-# inventory/models.py - ADICIONAR
+# ==========================================
+# 5. ANALYTICS E LGPD (DADOS AGREGADOS)
+# ==========================================
 
 class UserBehaviorLog(models.Model):
-    """Log comportamental agregado (LGPD-compliant)"""
-    
+    """Log comportamental agregado - LGPD compliant"""
     ACTION_TYPES = [
         ('product_scan', 'Produto Escaneado'),
         ('product_add', 'Produto Adicionado'),
@@ -750,22 +682,21 @@ class UserBehaviorLog(models.Model):
         ('plan_view', 'Página de Planos Visualizada'),
     ]
     
-    # ✅ LGPD: Não armazena dados pessoais, apenas padrões
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='behavior_logs')
     action_type = models.CharField(max_length=20, choices=ACTION_TYPES)
     
     # Dados contextuais (não pessoais)
-    plan_at_time = models.CharField(max_length=10)  # free/pro no momento da ação
+    plan_at_time = models.CharField(max_length=10)
     products_count_at_time = models.IntegerField()
-    day_of_week = models.IntegerField()  # 0-6 (segunda a domingo)
+    day_of_week = models.IntegerField()  # 0-6
     hour_of_day = models.IntegerField()  # 0-23
     
     # Metadados para ML
     session_duration_minutes = models.IntegerField(null=True, blank=True)
-    feature_used = models.CharField(max_length=50, blank=True)  # scanner, vitrine, etc
+    feature_used = models.CharField(max_length=50, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         db_table = 'user_behavior_logs'
         indexes = [
@@ -773,15 +704,13 @@ class UserBehaviorLog(models.Model):
             models.Index(fields=['created_at']),
             models.Index(fields=['store', 'action_type']),
         ]
-        # ✅ LGPD: Retenção automática de dados
-        # Implementar job para deletar logs > 2 anos
         
     def __str__(self):
         return f"{self.action_type} - {self.plan_at_time} - {self.created_at.date()}"
 
+
 class MLInsight(models.Model):
-    """Insights gerados por Machine Learning (agregados)"""
-    
+    """Insights gerados por Machine Learning - dados agregados"""
     INSIGHT_TYPES = [
         ('conversion_prediction', 'Predição de Conversão'),
         ('churn_risk', 'Risco de Churn'),
@@ -791,22 +720,18 @@ class MLInsight(models.Model):
     ]
     
     insight_type = models.CharField(max_length=30, choices=INSIGHT_TYPES)
+    target_segment = models.CharField(max_length=50)  # Dados agregados, não individuais
     
-    # ✅ LGPD: Dados agregados, não individuais
-    target_segment = models.CharField(max_length=50)  # 'free_users_week_1', 'pro_users_cosmetics'
-    
-    # Dados do insight
     confidence_score = models.FloatField()  # 0.0 - 1.0
-    insight_data = models.JSONField()  # Dados estruturados do insight
+    insight_data = models.JSONField()
     
-    # Metadados
     model_version = models.CharField(max_length=20, default='v1.0')
     training_data_size = models.IntegerField()
     generated_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField()  # Insights têm validade
+    expires_at = models.DateTimeField()
     
     is_active = models.BooleanField(default=True)
-    
+
     class Meta:
         db_table = 'ml_insights'
         indexes = [
@@ -817,10 +742,9 @@ class MLInsight(models.Model):
     def __str__(self):
         return f"{self.get_insight_type_display()} - {self.target_segment} ({self.confidence_score:.2f})"
 
-    
-    # inventory/models.py (adicionar)
-# inventory/models.py (adicionar campos)
+
 class ExternalBarcodeCatalog(models.Model):
+    """Catálogo externo de códigos de barras para enriquecimento"""
     brand = models.CharField(max_length=100, db_index=True)
     gtin = models.CharField(max_length=14, unique=True, db_index=True)
     description = models.CharField(max_length=255)
@@ -828,90 +752,52 @@ class ExternalBarcodeCatalog(models.Model):
     source_url = models.URLField(null=True, blank=True)
     matched = models.BooleanField(default=False, db_index=True)
     
-    # ✅ NOVOS CAMPOS PARA RASTREAMENTO
+    # Rastreamento de busca
     searched_product_sku = models.CharField(max_length=50, null=True, blank=True, db_index=True)
     searched_product_name = models.CharField(max_length=255, null=True, blank=True)
     search_term_used = models.CharField(max_length=255, null=True, blank=True)
-    confidence_level = models.CharField(max_length=20, null=True, blank=True)  # high, medium, low
+    confidence_level = models.CharField(max_length=20, null=True, blank=True)
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'external_barcode_catalog'
         indexes = [
             models.Index(fields=['brand', 'matched']),
             models.Index(fields=['source', 'created_at']),
-            models.Index(fields=['searched_product_sku']),  # ✅ NOVO ÍNDICE
+            models.Index(fields=['searched_product_sku']),
         ]
     
     def __str__(self):
-        return f"{self.brand} - {self.gtin} - {self.description[:50]} (SKU: {self.searched_product_sku})"
+        return f"{self.brand} - {self.gtin} - {self.description[:50]}"
 
 
-# backend/core/inventory/models.py (adicionar ao arquivo existente)
+# ==========================================
+# 6. CONFIGURAÇÕES GLOBAIS E API
+# ==========================================
 
 class ThemeConfig(models.Model):
-    """
-    Singleton — Configuração global de tema/cores do sistema.
-    Apenas 1 registro deve existir.
-    """
+    """Singleton - Configuração global de tema/cores"""
     # Cores principais
-    color_primary = models.CharField(
-        max_length=7, default="#871745",
-        help_text="Cor principal (CTA, botões, destaques). Ex: #871745"
-    )
-    color_primary_light = models.CharField(
-        max_length=7, default="#FDF2F7",
-        help_text="Cor de fundo suave (cards, inputs). Ex: #FDF2F7"
-    )
-    color_success = models.CharField(
-        max_length=7, default="#2E8B57",
-        help_text="Cor de sucesso/lucro (scanner, indicadores positivos). Ex: #2E8B57"
-    )
-    color_text = models.CharField(
-        max_length=7, default="#2D292E",
-        help_text="Cor do texto principal. Ex: #2D292E"
-    )
+    color_primary = models.CharField(max_length=7, default="#871745")
+    color_primary_light = models.CharField(max_length=7, default="#FDF2F7")
+    color_success = models.CharField(max_length=7, default="#2E8B57")
+    color_text = models.CharField(max_length=7, default="#2D292E")
     
-    # Cores secundárias (opcionais, com defaults inteligentes)
-    color_accent = models.CharField(
-        max_length=7, default="#A91B60",
-        help_text="Cor de acento/gradiente. Ex: #A91B60"
-    )
-    color_destructive = models.CharField(
-        max_length=7, default="#DC2626",
-        help_text="Cor de erro/alerta. Ex: #DC2626"
-    )
-    color_warning = models.CharField(
-        max_length=7, default="#F59E0B",
-        help_text="Cor de aviso. Ex: #F59E0B"
-    )
-    color_background = models.CharField(
-        max_length=7, default="#FFFFFF",
-        help_text="Cor de fundo geral. Ex: #FFFFFF"
-    )
-    color_card = models.CharField(
-        max_length=7, default="#FFFFFF",
-        help_text="Cor de fundo dos cards. Ex: #FFFFFF"
-    )
-    color_border = models.CharField(
-        max_length=7, default="#E5E7EB",
-        help_text="Cor das bordas. Ex: #E5E7EB"
-    )
+    # Cores secundárias
+    color_accent = models.CharField(max_length=7, default="#A91B60")
+    color_destructive = models.CharField(max_length=7, default="#DC2626")
+    color_warning = models.CharField(max_length=7, default="#F59E0B")
+    color_background = models.CharField(max_length=7, default="#FFFFFF")
+    color_card = models.CharField(max_length=7, default="#FFFFFF")
+    color_border = models.CharField(max_length=7, default="#E5E7EB")
     
     # Metadados
-    app_name = models.CharField(
-        max_length=100, default="Minha Amora",
-        help_text="Nome exibido no app"
-    )
-    logo_url = models.URLField(
-        blank=True, null=True,
-        help_text="URL do logotipo (opcional)"
-    )
-    
+    app_name = models.CharField(max_length=100, default="Minha Amora")
+    logo_url = models.URLField(blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         verbose_name = "Configuração de Tema"
         verbose_name_plural = "Configuração de Tema"
@@ -920,32 +806,25 @@ class ThemeConfig(models.Model):
         return f"Tema — {self.app_name}"
     
     def save(self, *args, **kwargs):
-        """Garante que só existe 1 registro (Singleton)."""
+        """Garante singleton: apenas 1 registro"""
         self.pk = 1
         super().save(*args, **kwargs)
     
     @classmethod
     def load(cls):
-        """Carrega ou cria a configuração padrão."""
+        """Carrega ou cria a configuração padrão"""
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
 
 
-# inventory/models.py — Adicionar ao final
-
 class ApiKey(models.Model):
     """Chave de API para acesso comercial"""
-    PLAN_CHOICES = [
-        ('starter', 'Starter'),
-        ('pro', 'Pro'),
-        ('enterprise', 'Enterprise'),
-    ]
+    PLAN_CHOICES = [('starter', 'Starter'), ('pro', 'Pro'), ('enterprise', 'Enterprise')]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100, help_text="Nome descritivo da chave")
-    key = models.CharField(max_length=64, unique=True, editable=False)  # pk_live_••••
+    key = models.CharField(max_length=64, unique=True, editable=False)
     
-    # Dono da chave (pode ser Store ou CustomUser externo)
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -964,25 +843,16 @@ class ApiKey(models.Model):
     )
     
     plan = models.CharField(max_length=20, choices=PLAN_CHOICES, default='starter')
+    scopes = models.JSONField(default=list, help_text="Lista de scopes permitidos")
     
-    # Scopes/permissões
-    scopes = models.JSONField(
-        default=list,
-        help_text="Lista de scopes: ['read:products', 'read:analytics', 'write:webhooks']"
-    )
-    
-    # Rate limiting
     rate_limit = models.IntegerField(default=20, help_text="Requisições por minuto")
     monthly_quota = models.IntegerField(default=1000, help_text="Requisições por mês")
     
-    # Status
     is_active = models.BooleanField(default=True)
     last_used = models.DateTimeField(null=True, blank=True)
-    
-    # Metadados
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField(null=True, blank=True, help_text="Expiração da chave")
-    
+
     class Meta:
         db_table = 'api_keys'
         indexes = [
@@ -993,24 +863,15 @@ class ApiKey(models.Model):
     
     def save(self, *args, **kwargs):
         if not self.key:
-            # Gerar chave segura
             import secrets
             prefix = 'pk_live_' if self.plan != 'starter' else 'pk_test_'
             self.key = prefix + secrets.token_urlsafe(32)
         super().save(*args, **kwargs)
     
     def check_quota(self):
-        """Verificar se quota mensal foi excedida"""
-        from django.utils import timezone
-        month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0)
-        
-        # Contar requisições do mês (implementar logging de uso)
-        # usage_count = ApiUsageLog.objects.filter(
-        #     api_key=self,
-        #     created_at__gte=month_start
-        # ).count()
-        # return usage_count < self.monthly_quota
-        return True  # Placeholder
+        """Verifica se quota mensal foi excedida"""
+        # Implementar lógica real com ApiUsageLog
+        return True
     
     def __str__(self):
         return f"{self.name} ({self.key[:16]}•••) - {self.plan}"
@@ -1025,9 +886,8 @@ class ApiUsageLog(models.Model):
     response_time_ms = models.IntegerField()
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
-    
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         db_table = 'api_usage_logs'
         indexes = [
@@ -1037,16 +897,14 @@ class ApiUsageLog(models.Model):
 
 
 # ==========================================
-# MODELO LGPD: REGISTRO DE CONSENTIMENTO
+# 7. MODELO LGPD: CONSENTIMENTO
 # ==========================================
 
 class ConsentRecord(models.Model):
     """
     Registro de consentimento LGPD (Art. 8º)
-    Armazena manifestação de vontade do titular com versionamento, 
-    finalidades específicas e suporte a usuários anônimos.
+    Armazena manifestação de vontade com versionamento e suporte a anônimos.
     """
-    
     PURPOSE_CHOICES = [
         ('essential', 'Funcionamento essencial do sistema'),
         ('authentication', 'Autenticação e gestão de conta'),
@@ -1067,47 +925,18 @@ class ConsentRecord(models.Model):
         related_name='consent_records',
         help_text="Usuário autenticado (nulo para pré-cadastro/anônimos)"
     )
-    email = models.EmailField(
-        db_index=True,
-        blank=True,
-        help_text="Email do titular (obrigatório se user=null)"
-    )
-    session_id = models.CharField(
-        max_length=100,
-        blank=True,
-        help_text="ID da sessão para rastreamento de usuários não logados"
-    )
+    email = models.EmailField(db_index=True, blank=True, help_text="Email do titular")
+    session_id = models.CharField(max_length=100, blank=True, help_text="ID da sessão para anônimos")
 
-    # Dados do consentimento
-    ip_hash = models.CharField(
-        max_length=64,
-        db_index=True,
-        help_text="Hash SHA-256 do IP (anonimização LGPD Art. 12)"
-    )
-    purpose_flags = models.JSONField(
-        default=list,
-        help_text="Finalidades consentidas: ['essential', 'analytics', ...]"
-    )
-    term_version = models.CharField(
-        max_length=20,
-        db_index=True,
-        help_text="Versão do termo: v1.0_2026-05"
-    )
-    accepted_at = models.DateTimeField(
-        db_index=True,
-        help_text="Data/hora da manifestação de vontade"
-    )
-    revoked_at = models.DateTimeField(
-        null=True,
-        blank=True,
-        help_text="Data/hora da revogação (se aplicável)"
-    )
-    user_agent = models.TextField(
-        blank=True,
-        help_text="User-Agent do dispositivo (truncado no serializer)"
-    )
+    # Dados do consentimento (anonimizados quando possível)
+    ip_hash = models.CharField(max_length=64, db_index=True, help_text="Hash SHA-256 do IP")
+    purpose_flags = models.JSONField(default=list, help_text="Finalidades consentidas")
+    term_version = models.CharField(max_length=20, db_index=True, help_text="Versão do termo")
+    accepted_at = models.DateTimeField(db_index=True, help_text="Data da manifestação")
+    revoked_at = models.DateTimeField(null=True, blank=True, help_text="Data da revogação")
+    user_agent = models.TextField(blank=True, help_text="User-Agent (truncado no serializer)")
 
-    # Timestamps automáticos
+    # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1127,26 +956,21 @@ class ConsentRecord(models.Model):
         return f"[{status}] {identifier} • v{self.term_version}"
 
     def is_active(self):
-        """Verifica se o consentimento ainda está válido"""
         return self.revoked_at is None
 
     def revoke(self, purpose: str | None = None):
-        """
-        Revoga consentimento total ou por finalidade específica.
-        Art. 8º, §5º: revogação gratuita e facilitada.
-        """
+        """Revoga consentimento total ou por finalidade específica"""
         if purpose and purpose in self.purpose_flags:
             self.purpose_flags = [p for p in self.purpose_flags if p != purpose]
             if not self.purpose_flags:
                 self.revoked_at = timezone.now()
         else:
             self.revoked_at = timezone.now()
-        
         self.save(update_fields=['purpose_flags', 'revoked_at', 'updated_at'])
 
     @classmethod
     def hash_ip(cls, ip_address: str, salt: str | None = None) -> str:
-        """Gera hash SHA-256 do IP + salt para anonimização."""
+        """Gera hash SHA-256 do IP + salt para anonimização (LGPD Art. 12)"""
         if salt is None:
             salt = getattr(settings, 'LGPD_IP_SALT', '')
         return hashlib.sha256(f"{ip_address}{salt}".encode()).hexdigest()

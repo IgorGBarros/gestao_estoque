@@ -3427,19 +3427,15 @@ def dashboard_stats(request):
 # ENDPOINTS LGPD - GESTÃO DE CONSENTIMENTO
 # ==========================================
 
+
+
 @api_view(['POST'])
-@permission_classes([AllowAny])  # Permite cadastro antes do login
+@permission_classes([AllowAny])  # ✅ Público para cadastro e usuários logados
 def record_consent(request):
     """
     Registra consentimento LGPD (Art. 8º)
-    POST /api/consent/
-    Body: {
-        "email": "user@example.com",
-        "session_id": "abc123",  # Para usuários não logados
-        "version": "v1.0_2026-05",
-        "purposes": ["essential", "analytics"],
-        "accepted_at": "2026-05-18T10:00:00Z"
-    }
+    - Usuários não logados: usa email + session_id
+    - Usuários logados: usa request.user automaticamente
     """
     serializer = ConsentRecordSerializer(data=request.data, context={'request': request})
     
