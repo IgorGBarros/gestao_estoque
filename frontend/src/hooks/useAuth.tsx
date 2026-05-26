@@ -11,7 +11,7 @@ import { useToast } from "./use-toast";
 // ==========================================
 let profileCache: any | null = null;
 let profileCacheTimestamp: number = 0;
-const PROFILE_CACHE_DURATION = 2 * 60 * 1000;
+const PROFILE_CACHE_DURATION = 2 * 60 * 1000; // 2 minutos
 
 function isProfileCacheValid(): boolean {
   return profileCache !== null && (Date.now() - profileCacheTimestamp) < PROFILE_CACHE_DURATION;

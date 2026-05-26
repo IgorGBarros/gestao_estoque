@@ -1,9 +1,12 @@
 // src/hooks/useConsent.ts
 import { useState, useEffect, useCallback } from "react";
-import { consentApi, ConsentRecord } from "../lib/api";
+import { api } from "../services/api";
 import { useAuth } from "./useAuth";
 import { useToast } from "./use-toast";
 
+// ==========================================
+// ✅ CONSTANTES LGPD
+// ==========================================
 export const LGPD_VERSION = "v1.0_2026-05";
 
 export const PURPOSES = {
@@ -18,7 +21,35 @@ export const PURPOSES = {
 
 export type Purpose = (typeof PURPOSES)[keyof typeof PURPOSES];
 
-export function useConsent() {
+// ==========================================
+// ✅ INTERFACES
+// ==========================================
+export interface ConsentRecord {
+  id: number;
+  version: string;
+  purposes: string[];
+  accepted_at: string;
+  revoked_at: string | null;
+  is_active: boolean;
+  purposes_granted?: string[];
+  can_revoke?: string[];
+}
+
+export interface ConsentContextData {
+  consents: ConsentRecord[];
+  loading: boolean;
+  essentialPurposes: string[];
+  revocablePurposes: string[];
+  recordConsent: (purposes: Purpose[], email?: string, sessionId?: string) => Promise<boolean>;
+  revokeConsent: (purpose: Purpose) => Promise<boolean>;
+  hasConsent: (purpose: Purpose) => boolean;
+  refresh: () => Promise<void>;
+}
+
+// ==========================================
+// ✅ HOOK PRINCIPAL
+// ==========================================
+export function useConsent(): ConsentContextData {
   const { user } = useAuth();
   const { toast } = useToast();
   
@@ -27,37 +58,49 @@ export function useConsent() {
   const [essentialPurposes, setEssentialPurposes] = useState<string[]>([]);
   const [revocablePurposes, setRevocablePurposes] = useState<string[]>([]);
 
-  // Carregar consentimentos ao montar ou mudar usuário
+  // ✅ Carregar consentimentos apenas se usuário estiver autenticado
   useEffect(() => {
     if (user?.id) {
       loadConsents();
+    } else {
+      // Se não tem user, limpa estados
+      setConsents([]);
+      setEssentialPurposes([]);
+      setRevocablePurposes([]);
+      setLoading(false);
     }
   }, [user?.id]);
 
+  // ✅ Carregar consentimentos da API
   const loadConsents = useCallback(async () => {
     if (!user?.id) return;
     
     setLoading(true);
     try {
-      const data = await consentApi.getMyConsents();
-      setConsents(data.consents);
-      setEssentialPurposes(data.essential_purposes);
-      setRevocablePurposes(data.revocable_purposes);
-    } catch (error) {
-      console.error("Erro ao carregar consentimentos:", error);
+      const resp = await api.get("/consent/my/");
+      const data = resp.data;
+      
+      setConsents(data.consents || []);
+      setEssentialPurposes(data.essential_purposes || []);
+      setRevocablePurposes(data.revocable_purposes || []);
+    } catch (error: any) {
+      // ✅ Não loga erro 401 (já tratado pelo interceptor)
+      if (error.response?.status !== 401) {
+        console.error("Erro ao carregar consentimentos:", error);
+      }
     } finally {
       setLoading(false);
     }
   }, [user?.id]);
 
-  // Registrar consentimento (para cadastro ou atualização)
+  // ✅ Registrar novo consentimento
   const recordConsent = useCallback(async (
     purposes: Purpose[],
     email?: string,
     sessionId?: string
-  ) => {
+  ): Promise<boolean> => {
     try {
-      const data = await consentApi.record({
+      const resp = await api.post('/consent/', {
         email: email || user?.email,
         session_id: sessionId,
         version: LGPD_VERSION,
@@ -65,38 +108,45 @@ export function useConsent() {
         accepted_at: new Date().toISOString(),
       });
       
+      const data: ConsentRecord = resp.data;
+      
       // Atualizar lista local
       setConsents(prev => [data, ...prev.filter(c => c.id !== data.id)]);
       
-      toast({
+      // Feedback visual
+      toast?.({
         title: "✅ Consentimento registrado",
         description: "Seus dados serão tratados conforme a LGPD.",
       });
       
       return true;
     } catch (error: any) {
-      toast({
+      console.error("Erro ao registrar consentimento:", error);
+      
+      toast?.({
         title: "❌ Erro ao registrar consentimento",
         description: error.message || "Tente novamente",
         variant: "destructive",
       });
+      
       return false;
     }
   }, [user?.email, toast]);
 
-  // Revogar consentimento para finalidade específica
-  const revokeConsent = useCallback(async (purpose: Purpose) => {
+  // ✅ Revogar consentimento para finalidade específica
+  const revokeConsent = useCallback(async (purpose: Purpose): Promise<boolean> => {
+    // ✅ Não permite revogar finalidades essenciais
     if (essentialPurposes.includes(purpose)) {
-      toast({
+      toast?.({
         title: "⚠️ Não é possível revogar",
         description: `A finalidade "${purpose}" é essencial para o funcionamento do sistema.`,
         variant: "destructive",
       });
       return false;
     }
-
+    
     try {
-      await consentApi.revoke(purpose);
+      await api.delete(`/consent/revoke/${purpose}/`);
       
       // Atualizar lista local
       setConsents(prev => 
@@ -107,33 +157,34 @@ export function useConsent() {
         )
       );
       
-      toast({
+      toast?.({
         title: "✅ Consentimento revogado",
         description: `Você não receberá mais tratamentos para "${purpose}".`,
       });
       
       return true;
     } catch (error: any) {
-      toast({
+      console.error("Erro ao revogar consentimento:", error);
+      
+      toast?.({
         title: "❌ Erro ao revogar consentimento",
         description: error.message || "Tente novamente",
         variant: "destructive",
       });
+      
       return false;
     }
   }, [essentialPurposes, toast]);
 
-  // Verificar se tem consentimento ativo para finalidade
+  // ✅ Verificar se usuário tem consentimento ativo para finalidade
   const hasConsent = useCallback((purpose: Purpose): boolean => {
-    return consents.some(
-      c => c.is_active && c.purposes.includes(purpose)
-    );
+    return consents.some(c => c.is_active && c.purposes.includes(purpose));
   }, [consents]);
 
-  // Finalidades que o usuário PODE revogar
-  const getRevocablePurposes = useCallback((): Purpose[] => {
-    return revocablePurposes as Purpose[];
-  }, [revocablePurposes]);
+  // ✅ Refresh manual dos consentimentos
+  const refresh = useCallback(async () => {
+    await loadConsents();
+  }, [loadConsents]);
 
   return {
     consents,
@@ -143,7 +194,6 @@ export function useConsent() {
     recordConsent,
     revokeConsent,
     hasConsent,
-    getRevocablePurposes,
-    refresh: loadConsents,
+    refresh,
   };
 }

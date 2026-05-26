@@ -1,124 +1,123 @@
 // src/hooks/useFeatureGates.ts
-import { useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { api } from "../services/api";
 import { useAuth } from "./useAuth";
 
-export const LGPD_VERSION = "v1.0_2026-05";
-
-export const PURPOSES = {
-  ESSENTIAL: "essential",
-  AUTH: "authentication",
-  SERVICE: "service_delivery",
-  ANALYTICS: "analytics",
-  MARKETING: "marketing",
-  BEHAVIOR: "behavior_tracking",
-  AI: "ai_features",
-} as const;
-
-export type Purpose = (typeof PURPOSES)[keyof typeof PURPOSES];
-
-export interface ConsentRecord {
-  id: number;
-  version: string;
-  purposes: string[];
-  accepted_at: string;
-  revoked_at: string | null;
-  is_active: boolean;
-  purposes_granted?: string[];
-  can_revoke?: string[];
+// ==========================================
+// ✅ INTERFACES
+// ==========================================
+export interface FeatureGate {
+  feature_key: string;
+  label: string;
+  description: string | null;
+  requires_pro: boolean;
+  enabled?: boolean;
 }
 
-export function useConsent() {
+export interface FeatureGatesContextData {
+  gates: FeatureGate[];
+  loading: boolean;
+  isFeatureEnabled: (featureKey: string) => boolean;
+  refresh: () => Promise<void>;
+}
+
+// ==========================================
+// ✅ CONTEXT
+// ==========================================
+const FeatureGatesContext = createContext<FeatureGatesContextData | undefined>(undefined);
+
+// ==========================================
+// ✅ HOOK PRINCIPAL
+// ==========================================
+export function useFeatureGates(): FeatureGatesContextData {
+  const context = useContext(FeatureGatesContext);
+  
+  if (!context) {
+    throw new Error("useFeatureGates deve ser usado dentro de FeatureGatesProvider");
+  }
+  
+  return context;
+}
+
+// ==========================================
+// ✅ PROVIDER COMPONENT
+// ==========================================
+export function FeatureGatesProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [consents, setConsents] = useState<ConsentRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [essentialPurposes, setEssentialPurposes] = useState<string[]>([]);
-  const [revocablePurposes, setRevocablePurposes] = useState<string[]>([]);
+  const [gates, setGates] = useState<FeatureGate[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // ✅ SÓ carregar se usuário estiver autenticado
-  useEffect(() => {
-    if (user?.id) {
-      loadConsents();
-    } else {
-      // Se não tem user, limpa consents
-      setConsents([]);
+  // Gates padrão como fallback
+  const DEFAULT_GATES: FeatureGate[] = [
+    { feature_key: "barcode_scanner", label: "Scanner de Código", description: null, requires_pro: true },
+    { feature_key: "ocr_expiry", label: "Leitor de Validade (IA)", description: null, requires_pro: true },
+    { feature_key: "dashboard_charts", label: "Gráficos Avançados", description: null, requires_pro: true },
+    { feature_key: "storefront", label: "Vitrine Digital", description: null, requires_pro: true },
+    { feature_key: "ai_insights", label: "Insights com IA", description: null, requires_pro: true },
+    { feature_key: "unlimited_products", label: "Produtos Ilimitados", description: null, requires_pro: true },
+  ];
+
+  // ✅ Carregar gates da API
+  const loadGates = useCallback(async () => {
+    // Se não tem usuário, usa gates padrão e para
+    if (!user?.id) {
+      setGates(DEFAULT_GATES);
       setLoading(false);
+      return;
     }
-  }, [user?.id]);
-
-  const loadConsents = useCallback(async () => {
-    if (!user?.id) return;
     
     setLoading(true);
     try {
-      const resp = await api.get("/consent/my/");
-      const data = resp.data;
-      setConsents(data.consents);
-      setEssentialPurposes(data.essential_purposes);
-      setRevocablePurposes(data.revocable_purposes);
+      const resp = await api.get("/admin/feature-gates/");
+      setGates(resp.data);
     } catch (error) {
-      console.error("Erro ao carregar consentimentos:", error);
+      // ✅ Fallback silencioso em produção
+      if (import.meta.env.DEV) {
+        console.warn("⚠️ Feature gates API indisponível, usando padrão local:", error);
+      }
+      setGates(DEFAULT_GATES);
     } finally {
       setLoading(false);
     }
   }, [user?.id]);
 
-  const recordConsent = useCallback(async (
-    purposes: Purpose[],
-    email?: string,
-    sessionId?: string
-  ) => {
-    try {
-      const resp = await api.post('/consent/', {
-        email: email || user?.email,
-        session_id: sessionId,
-        version: LGPD_VERSION,
-        purposes,
-        accepted_at: new Date().toISOString(),
-      });
-      const data = resp.data as ConsentRecord;
+  // ✅ Carregar ao montar ou mudar usuário
+  useEffect(() => {
+    loadGates();
+  }, [loadGates]);
 
-      setConsents(prev => [data, ...prev.filter(c => c.id !== data.id)]);
-      return true;
-    } catch (error: any) {
-      console.error("Erro ao registrar consentimento:", error);
-      return false;
-    }
-  }, [user?.email]);
-
-  const revokeConsent = useCallback(async (purpose: Purpose) => {
-    if (essentialPurposes.includes(purpose)) {
+  // ✅ Verificar se feature está habilitada
+  const isFeatureEnabled = useCallback((featureKey: string): boolean => {
+    const gate = gates.find(g => g.feature_key === featureKey);
+    
+    // Se não encontrou a gate, retorna false (seguro por padrão)
+    if (!gate) return false;
+    
+    // Se requer PRO, verifica plano do usuário
+    if (gate.requires_pro && user?.plan !== "pro") {
       return false;
     }
     
-    try {
-      await api.delete(`/consent/revoke/${purpose}/`);
-      setConsents(prev => 
-        prev.map(c => 
-          c.purposes.includes(purpose) && c.is_active
-            ? { ...c, is_active: false, revoked_at: new Date().toISOString() }
-            : c
-        )
-      );
-      return true;
-    } catch (error) {
-      console.error("Erro ao revogar consentimento:", error);
-      return false;
-    }
-  }, [essentialPurposes]);
+    // Se tem flag enabled explícita, usa ela; senão, assume true
+    return gate.enabled ?? true;
+  }, [gates, user?.plan]);
 
-  const hasConsent = useCallback((purpose: Purpose): boolean => {
-    return consents.some(c => c.is_active && c.purposes.includes(purpose));
-  }, [consents]);
+  // ✅ Refresh manual
+  const refresh = useCallback(async () => {
+    await loadGates();
+  }, [loadGates]);
 
-  return {
-    consents,
+  // ✅ Valor do contexto
+  const value: FeatureGatesContextData = {
+    gates,
     loading,
-    essentialPurposes,
-    revocablePurposes,
-    recordConsent,
-    revokeConsent,
-    hasConsent,
-    refresh: loadConsents,
+    isFeatureEnabled,
+    refresh,
   };
+
+  return (
+    <FeatureGatesContext.Provider value={value}>
+      {children}
+    </FeatureGatesContext.Provider>
+  );
 }

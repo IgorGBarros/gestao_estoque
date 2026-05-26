@@ -1,4 +1,4 @@
-// lib/api.ts - VERSÃO FINAL CORRIGIDA
+// src/lib/api.ts - VERSÃO FINAL CORRIGIDA
 import {
   isDemoMode, DEMO_INVENTORY, DEMO_MOVEMENTS,
   DEMO_PROFILE, DEMO_BATCHES
