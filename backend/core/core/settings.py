@@ -163,6 +163,10 @@ CORS_ALLOWED_ORIGINS = [
     "https://gestao-estoque-k5vy.onrender.com",
     "https://dev-brih.onrender.com",
     "https://gestao-estoque-dev-one.vercel.app",
+    "https://*.firebaseapp.com",
+    "https://*.googleapis.com",
+    "https://*.google.com",
+    "https://*.gstatic.com",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
