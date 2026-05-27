@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from backend.core.ai import views
+
 
 from .admin_views import get_store_behavior_analytics, get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription,get_product_analytics,monitor_api_usage 
 from .views import (
