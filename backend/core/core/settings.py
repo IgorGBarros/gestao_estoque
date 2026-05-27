@@ -167,6 +167,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://*.googleapis.com",
     "https://*.google.com",
     "https://*.gstatic.com",
+    "https://plataforma-financeira-29a27.firebaseapp.com"
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
