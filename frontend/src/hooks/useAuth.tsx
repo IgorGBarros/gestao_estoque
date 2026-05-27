@@ -249,9 +249,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, password: string) => {
     try {
       const response = await api.post("/auth/login/", { email, password });
-      const { access, refresh } = response.data;
+      const { access, refresh, consent_required }  = response.data;
       if (!access) throw new Error("Token não recebido");
-
+      if (consent_required) {
+            // O PostAuthConsentModal já vai detectar e mostrar automaticamente
+            console.log("✅ Consentimento completo pendente");
+          }
       localStorage.setItem("auth_token", access);
       if (refresh) localStorage.setItem("refresh_token", refresh);
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;

@@ -18,12 +18,18 @@ from .models import (
 
 User = get_user_model()
 
-# ==========================================
-# 1. SERIALIZERS DE AUTENTICAÇÃO (melhorados)
-# ==========================================
 
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+# ==========================================
+# 1. SERIALIZER DE LOGIN COM DADOS DA STORE
+# ==========================================
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Token JWT com dados da Store"""
+    """Token JWT com dados da Store e perfil do usuário"""
     username_field = User.USERNAME_FIELD
     
     def validate(self, attrs):
@@ -32,7 +38,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             "password": attrs.get("password"),
         }
         # Autentica usando email e senha
-        user = authenticate(email=credentials["email"], password=credentials["password"])
+        user = authenticate(**credentials)
         
         if not user:
             raise serializers.ValidationError("Credenciais inválidas.")
@@ -40,7 +46,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Validação padrão do JWT (gera access e refresh tokens)
         data = super().validate(attrs)
         
-        # ✅ NOVO: Adicionar dados da Store na resposta do login
+        # ✅ Adicionar dados da Store e perfil na resposta do login
         store = getattr(user, 'store', None)
         data.update({
             "email": user.email,
@@ -56,10 +62,11 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
+        # Claims padrão
         token["email"] = user.email
         token["name"] = getattr(user, 'name', user.email)
         
-        # ✅ NOVO: Dados da Store no payload do token
+        # ✅ Dados da Store no payload do JWT (acessível via decode_token)
         store = getattr(user, 'store', None)
         if store:
             token["store_slug"] = store.slug
@@ -68,6 +75,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
 
 
+# ==========================================
+# 2. SERIALIZER DE CADASTRO COM CRIAÇÃO DE LOJA
+# ==========================================
 class CustomUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
     
@@ -90,9 +100,13 @@ class CustomUserSerializer(serializers.ModelSerializer):
         )
         
         # ✅ NOVO: Criar Store automaticamente
-        from .utils import ensure_user_has_store
-        ensure_user_has_store(user)
-        
+        try:
+            from .utils import ensure_user_has_store
+            ensure_user_has_store(user)
+        except Exception as e:
+            # Fallback: loga o erro mas não falha o cadastro (melhor UX)
+            logger.error(f"Erro ao criar loja para usuário {user.id}: {e}")
+            
         return user
 
 
