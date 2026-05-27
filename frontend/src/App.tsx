@@ -46,6 +46,7 @@ import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
+import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
 
 // ✅ QueryClient FORA do componente (evita recriação a cada render)
 const queryClient = new QueryClient({
@@ -233,7 +234,11 @@ const App = () => {
                       {/* Catch-all para 404 */}
                       <Route path="*" element={<NotFound />} />
                     </Routes>
-                    <CookieConsentBanner />
+                                 {/* ✅ Banner leve (pré-auth) */}
+                  <CookieConsentBanner />
+                  
+                  {/* ✅ Modal completo (pós-auth) */}
+                  <PostAuthConsentModal />
                   </FeatureGatesProvider>
                 </PlanProvider>
               </AuthProvider>
