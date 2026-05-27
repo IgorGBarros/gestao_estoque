@@ -3429,20 +3429,27 @@ def dashboard_stats(request):
 # ==========================================
 
 
+# backend/core/inventory/views.py - NO TOPO, APÓS OS IMPORTS
 
+# ✅ GARANTIR QUE ESTA FUNÇÃO EXISTE E ESTÁ CORRETA
 @api_view(['POST'])
-@permission_classes([AllowAny])  # ✅ Público para cadastro e usuários logados
+@permission_classes([AllowAny])
 def record_consent(request):
     """
     Registra consentimento LGPD (Art. 8º)
-    - Usuários não logados: usa email + session_id
-    - Usuários logados: usa request.user automaticamente
+    POST /api/consent/
     """
+    from .serializers import ConsentRecordSerializer
+    from django.conf import settings
+    
     serializer = ConsentRecordSerializer(data=request.data, context={'request': request})
     
     if serializer.is_valid():
         consent = serializer.save()
-        log_safe("Consentimento registrado", email=request.data.get('email'), purposes=consent.purpose_flags)
+        
+        # Log seguro (anonimizado)
+        if settings.DEBUG:
+            print(f"[LGPD] Consentimento registrado: {consent.id}")
         
         return Response({
             "status": "consent_recorded",

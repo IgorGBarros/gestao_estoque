@@ -62,58 +62,58 @@ urlpatterns = [
     # ==========================================
     # 👤 PROFILE & CONFIGURAÇÕES
     # ==========================================
-    path('api/profile/', profile_view, name='profile'),
-    path('api/admin/feature-gates/', feature_gates_view, name='feature_gates'),
-    path('api/check-plan-limits/', check_plan_limits_complete, name='check_plan_limits'),
+    path('profile/', profile_view, name='profile'),
+    path('admin/feature-gates/', feature_gates_view, name='feature_gates'),
+    path('check-plan-limits/', check_plan_limits_complete, name='check_plan_limits'),
     
     # ==========================================
     # 📊 DASHBOARD & ANALYTICS
     # ==========================================
-    path('api/dashboard/overview/', dashboard_overview, name='dashboard_overview'),
-    path('api/stats/dashboard/', dashboard_stats, name='dashboard_stats'),
-    path('api/dashboard/financial/', dashboard_financial_summary, name='dashboard_financial'),
-    path('api/dashboard/inventory/', dashboard_inventory_analysis, name='dashboard_inventory'),
-    path('api/cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
-    path('api/cash-flow/detailed/', cash_flow_detailed, name='cash_flow_detailed'),
+    path('dashboard/overview/', dashboard_overview, name='dashboard_overview'),
+    path('stats/dashboard/', dashboard_stats, name='dashboard_stats'),
+    path('dashboard/financial/', dashboard_financial_summary, name='dashboard_financial'),
+    path('dashboard/inventory/', dashboard_inventory_analysis, name='dashboard_inventory'),
+    path('cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
+    path('cash-flow/detailed/', cash_flow_detailed, name='cash_flow_detailed'),
     
     # ==========================================
     # 🔐 LGPD - CONSENTIMENTO (Rotas principais)
     # ==========================================
-    path('api/consent/', record_consent, name='record_consent'),
-    path('api/consent/revoke/<str:purpose>/', revoke_consent, name='revoke_consent'),
-    path('api/consent/my/', get_my_consents, name='get_my_consents'),
-    path('api/consent/export/', export_my_data, name='export_my_data'),
+    path('consent/', record_consent, name='record_consent'),
+    path('consent/revoke/<str:purpose>/', revoke_consent, name='revoke_consent'),
+    path('consent/my/', get_my_consents, name='get_my_consents'),
+    path('consent/export/', export_my_data, name='export_my_data'),
     
     # ==========================================
     # 🎨 TEMA (Público e Admin)
     # ==========================================
-    path('api/public/theme/', ThemeConfigPublicView.as_view(), name='theme_public'),
-    path('api/admin/theme/', ThemeConfigAdminView.as_view(), name='theme_admin'),
+    path('public/theme/', ThemeConfigPublicView.as_view(), name='theme_public'),
+    path('admin/theme/', ThemeConfigAdminView.as_view(), name='theme_admin'),
     
     # ==========================================
     # 📦 SESSÃO DE CADASTRO
     # ==========================================
-    path('api/session-control/', SessionControlView.as_view(), name='session_control'),
-    path('api/session-summary/', SessionSummaryView.as_view(), name='session_summary'),
+    path('session-control/', SessionControlView.as_view(), name='session_control'),
+    path('session-summary/', SessionSummaryView.as_view(), name='session_summary'),
     
     # ==========================================
     # 🌐 ROTAS PÚBLICAS
     # ==========================================
-    path('api/products/lookup/', lookup_product, name='lookup_product'),
-    path('api/public/storefront/<slug:slug>/', public_storefront, name='public_storefront_slug'),
-    path('api/public/storefront/', public_storefront, name='public_storefront_list'),
+    path('products/lookup/', lookup_product, name='lookup_product'),
+    path('public/storefront/<slug:slug>/', public_storefront, name='public_storefront_slug'),
+    path('public/storefront/', public_storefront, name='public_storefront_list'),
     
     # ==========================================
     # 📚 DOCUMENTAÇÃO API (Swagger)
     # ==========================================
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    path('schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
     
     # ==========================================
     # 📦 INVENTORY (Inclusão do app inventory)
     # ==========================================
-    path('api/', include('inventory.urls')),
+    path('', include('inventory.urls')),
     
     # ==========================================
     # 🤖 AI & PAYMENTS (Outros apps)
