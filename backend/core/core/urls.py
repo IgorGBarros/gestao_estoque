@@ -54,10 +54,10 @@ urlpatterns = [
     # ==========================================
     # 🔐 AUTHENTICATION (Rotas principais)
     # ==========================================
-    path('api/auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('api/auth/register/', CustomUserCreateView.as_view(), name='register'),
-    path('api/auth/firebase/', FirebaseLoginView.as_view(), name='firebase_login'),
+    path('auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('auth/register/', CustomUserCreateView.as_view(), name='register'),
+    path('auth/firebase/', FirebaseLoginView.as_view(), name='firebase_login'),
     
     # ==========================================
     # 👤 PROFILE & CONFIGURAÇÕES
@@ -113,7 +113,7 @@ urlpatterns = [
     # ==========================================
     # 📦 INVENTORY (Inclusão do app inventory)
     # ==========================================
-    path('', include('inventory.urls')),
+    path('api/', include('inventory.urls')),
     
     # ==========================================
     # 🤖 AI & PAYMENTS (Outros apps)
