@@ -1,6 +1,8 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
+from backend.core.ai import views
+
 from .admin_views import get_store_behavior_analytics, get_system_stats, list_plan_configs, list_promotions, list_users, update_plan, update_subscription,get_product_analytics,monitor_api_usage 
 from .views import (
     CustomUserCreateView,
@@ -15,7 +17,9 @@ from .views import (
     cash_flow_summary,
     check_plan_limits_complete,
     debug_user_store,
+    export_my_data,
     feature_gates_view,
+    get_my_consents,
     inventory_item_batches_view, 
     lookup_product, 
     StockEntryView, 
@@ -30,7 +34,9 @@ from .views import (
     dashboard_overview,
     dashboard_financial_summary,       
     dashboard_inventory_analysis,
-    dashboard_stats
+    dashboard_stats,
+    record_consent,
+    revoke_consent
     # FirebaseLoginView e CustomUserCreateView foram removidos daqui pois estão comentados na view
 )
 from rest_framework_simplejwt.views import TokenRefreshView
@@ -119,7 +125,10 @@ urlpatterns = [
     # Endpoint admin (com auth)
     path('admin/theme/', ThemeConfigAdminView.as_view(), name='theme-admin'),
         
-
+    path('consent/', record_consent, name='record_consent'),
+    path('consent/revoke/<str:purpose>/',revoke_consent, name='revoke_consent'),
+    path('consent/my/', get_my_consents, name='get_my_consents'),
+    path('consent/export/', export_my_data, name='export_my_data'),
     # --- Rotas Automáticas (Router) ---
     path('', include(router.urls)),
 ]

@@ -98,42 +98,40 @@ export function useConsent(): ConsentContextData {
     purposes: Purpose[],
     email?: string,
     sessionId?: string
-  ): Promise<boolean> => {
+  ) => {
     try {
       const data = await consentApi.record({
-        // Usa email do usuário logado OU email fornecido
         email: email || user?.email,
-        // Session ID para rastrear usuários não logados (opcional)
         session_id: sessionId,
         version: LGPD_VERSION,
         purposes,
         accepted_at: new Date().toISOString(),
       });
       
-      // Atualizar estado local
       setConsents(prev => [data, ...prev.filter(c => c.id !== data.id)]);
       
-      // Feedback visual
+      // ✅ VERIFICAR SE toast É FUNÇÃO ANTES DE CHAMAR
       if (typeof toast === 'function') {
         toast({
-          title: "✅ Preferências salvas",
+          title: "✅ Consentimento registrado",
           description: "Seus dados serão tratados conforme a LGPD.",
         });
       }
       
       return true;
     } catch (error: any) {
-      // ✅ Não mostra toast se erro for 401 (usuário não autenticado ainda)
-      if (error.response?.status !== 401 && typeof toast === 'function') {
+      // ✅ NÃO chamar toast se erro for 404 (endpoint não encontrado)
+      if (error.response?.status !== 404 && typeof toast === 'function') {
         toast({
-          title: "⚠️ Não foi possível salvar",
-          description: "Tente novamente ou recarregue a página.",
+          title: "❌ Erro ao registrar consentimento",
+          description: error.message || "Tente novamente",
           variant: "destructive",
         });
       }
       return false;
     }
   }, [user?.email, toast]);
+
 
   // ✅ Revogar consentimento para finalidade específica
   const revokeConsent = useCallback(async (purpose: Purpose): Promise<boolean> => {

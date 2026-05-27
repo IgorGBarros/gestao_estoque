@@ -2074,37 +2074,38 @@ def feature_gates_view(request):
     return Response(visible_gates)
 
 # inventory/views.py
-
+# backend/core/inventory/views.py - profile_view CORRIGIDA
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def profile_view(request):
-    """
-    ✅ VERSÃO CORRIGIDA: Retorna ou atualiza as informações da loja
-    """
+    """Retorna ou atualiza as informações da loja"""
     try:
-        # ✅ CORREÇÃO: Usar ensure_user_has_store em vez de get_or_create
         store = ensure_user_has_store(request.user)
-        
+        if not store:
+            return Response({'error': 'Loja não encontrada'}, status=400)
+            
         if request.method == "GET":
             serializer = ProfileSerializer(store)
-            return Response(serializer.data)
+            # ✅ GARANTIR que retorna Response válido
+            return Response(serializer.data, status=200)
             
         if request.method == "PATCH":
             serializer = ProfileSerializer(store, data=request.data, partial=True)
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                return Response(serializer.data, status=200)
+            # ✅ Retornar erros de validação corretamente
+            return Response(serializer.errors, status=400)
             
     except Exception as e:
-        print(f"❌ Erro no profile_view: {e}")
         import traceback
+        print(f"❌ Erro no profile_view: {e}")
         traceback.print_exc()
+        # ✅ Retornar erro JSON válido, não HTML
         return Response({
             'error': 'Erro interno ao carregar perfil',
-            'message': str(e)
+            'message': str(e) if settings.DEBUG else 'Tente novamente'
         }, status=500)
-
 # ==========================================
 # 5. PAINEL ADMIN (Gestão de Assinaturas)
 # ==========================================
