@@ -2157,39 +2157,57 @@ def feature_gates_view(request):
     
     return Response(visible_gates)
 
-# inventory/views.py
-# backend/core/inventory/views.py - profile_view CORRIGIDA
+
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def profile_view(request):
-    """Retorna ou atualiza as informações da loja"""
+    """Retorna ou atualiza as informações da loja do usuário"""
     try:
+        # Garante que o usuário tem uma loja associada
         store = ensure_user_has_store(request.user)
+        
         if not store:
-            return Response({'error': 'Loja não encontrada'}, status=400)
-            
+            # ✅ Retorna Response válido, não raise
+            return Response(
+                {"error": "Loja não encontrada para este usuário"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
         if request.method == "GET":
-            serializer = ProfileSerializer(store)
-            # ✅ GARANTIR que retorna Response válido
-            return Response(serializer.data, status=200)
-            
-        if request.method == "PATCH":
-            serializer = ProfileSerializer(store, data=request.data, partial=True)
+            serializer = ProfileSerializer(store, context={"request": request})
+            # ✅ Retorna Response já serializado (DRF cuida do render)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        elif request.method == "PATCH":
+            serializer = ProfileSerializer(
+                store, 
+                data=request.data, 
+                partial=True,
+                context={"request": request}
+            )
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data, status=200)
-            # ✅ Retornar erros de validação corretamente
-            return Response(serializer.errors, status=400)
+                return Response(serializer.data, status=status.HTTP_200_OK)
             
+            # ✅ Retorna erros de validação como Response válido
+            return Response(
+                {"errors": serializer.errors}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
     except Exception as e:
-        import traceback
-        print(f"❌ Erro no profile_view: {e}")
-        traceback.print_exc()
-        # ✅ Retornar erro JSON válido, não HTML
-        return Response({
-            'error': 'Erro interno ao carregar perfil',
-            'message': str(e) if settings.DEBUG else 'Tente novamente'
-        }, status=500)
+        # ✅ Log seguro em produção
+        if settings.DEBUG:
+            print(f"❌ Erro no profile_view: {e}")
+        
+        # ✅ Sempre retorna Response, nunca raise em views @api_view
+        return Response(
+            {
+                "error": "Erro interno ao processar perfil",
+                "details": str(e) if settings.DEBUG else "Tente novamente"
+            }, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 # ==========================================
 # 5. PAINEL ADMIN (Gestão de Assinaturas)
 # ==========================================

@@ -670,17 +670,32 @@ class ConsentRecordSerializer(serializers.Serializer):
                 "Versão deve seguir formato: vMAJOR.MINOR_YYYY-MM (ex: v1.0_2026-05)"
             )
         return value
-    
+    # backend/core/inventory/serializers.py - ConsentRecordSerializer.validate_purposes
+
     def validate_purposes(self, purposes):
-        if not purposes:
-            raise serializers.ValidationError("Pelo menos uma finalidade é obrigatória")
+        """Valida finalidades de consentimento"""
+        request = self.context.get("request")
         
-        request = self.context.get('request')
-        if request and request.parser_context.get('view').action == 'register':
-            if 'essential' not in purposes:
-                raise serializers.ValidationError(
-                    "Consentimento para funcionamento essencial é obrigatório para criar conta"
-                )
+        # ✅ VERIFICAÇÃO SEGURA: Só acessa .action se for ViewSet
+        view = request.parser_context.get("view") if request else None
+        is_register_action = (
+            view 
+            and hasattr(view, "action")  # ← VERIFICA SE TEM O ATRIBUTO
+            and view.action == "register"
+        )
+        
+        # Permite todas as finalidades no cadastro inicial
+        if is_register_action:
+            return purposes
+        
+        # Em outros contextos, valida contra finalidades permitidas
+        valid_purposes = [choice[0] for choice in ConsentRecord.PURPOSE_CHOICES]
+        invalid = set(purposes) - set(valid_purposes)
+        
+        if invalid:
+            raise serializers.ValidationError(
+                f"Finalidades inválidas: {', '.join(invalid)}"
+            )
         
         return purposes
     
