@@ -890,3 +890,4 @@ class ConsentExportSerializer(serializers.Serializer):
             'data_retention_days': getattr(settings, 'LGPD_CONSENT_RETENTION_DAYS', 730),
             'contact_dpo': 'privacidade@minhaamora.com.br',  # Configurar em settings
         }
+    

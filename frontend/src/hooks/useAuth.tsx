@@ -331,69 +331,86 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ==========================================
   // ✅ LOGIN GOOGLE
   // ==========================================
+ // src/hooks/useAuth.tsx - signInWithGoogle CORRIGIDO
+
   const signInWithGoogle = async () => {
-    setAuthLoading(true); // ✅ Mostrar loading durante login Google
-    const startTime = Date.now();
+    setAuthLoading(true);
     
     try {
       console.log("🔐 Iniciando login com Google...");
       
-      // ✅ Login Firebase com popup
+      // Login Firebase
       const result = await signInWithPopup(auth, googleProvider);
       const idToken = await result.user.getIdToken();
-      const fallbackEmail = result.user.email || "";
-      const fallbackName = result.user.displayName || fallbackEmail.split("@")[0] || "Usuário";
-
+      
       console.log("🔐 Enviando token para backend...", { 
         tokenLength: idToken?.length,
         timestamp: Date.now()
       });
 
-      // ✅ Chamada ao backend com timeout explícito
-      const response = await api.post("/auth/firebase/", { token: idToken });
-      const { access, refresh } = response.data;
-
+      // ✅ Chamada ao backend - NÃO usar api.post aqui se api tem interceptor de API Key
+      // Usar fetch direto para evitar conflito com ApiKeyMiddleware
+      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/auth/firebase/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // ✅ NÃO enviar Authorization aqui - é auth de usuário, não API Key
+        },
+        body: JSON.stringify({ token: idToken }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Erro ${response.status}`);
+      }
+      
+      const data = await response.json();
+      const { access, refresh } = data;
+      
       if (!access) throw new Error("Token Django ausente");
 
-      // Salvar tokens
+      // ✅ SALVAR TOKEN JWT no localStorage E no axios
       localStorage.setItem("auth_token", access);
       if (refresh) localStorage.setItem("refresh_token", refresh);
+      
+      // ✅ Atualizar headers do axios para próximas requisições
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
+      
+      console.log("✅ Token JWT salvo:", { 
+        accessStart: access.substring(0, 20) + "...",
+        hasRefresh: !!refresh 
+      });
 
-      // Buscar perfil
+      // Buscar perfil com o token JWT agora configurado
       try {
         const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
           id: profileData.id || 0,
-          email: profileData.email || fallbackEmail,
-          name: profileData.display_name || profileData.name || fallbackName,
+          email: profileData.email || result.user.email || "",
+          name: profileData.display_name || result.user.displayName || "",
           ...profileData,
           is_staff: profileData.is_staff ?? false
         };
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
-
-        console.log("✅ Login Google completo:", {
-          email: userData.email,
-          duration: Date.now() - startTime
-        });
+        console.log("✅ Login completo:", userData.email);
       } catch (e) {
         console.warn("⚠️ Perfil não carregado, usando dados básicos");
         setUser({
           id: 0,
-          email: fallbackEmail,
-          name: fallbackName,
+          email: result.user.email || "",
+          name: result.user.displayName || "",
           is_staff: false
         });
       }
       
     } catch (error: any) {
-      const duration = Date.now() - startTime;
       console.error("❌ Erro Google Sign-In:", {
         message: error.message,
         code: error.code,
-        duration: `${duration}ms`
       });
+
+
 
       // ✅ Tratamento específico para erros comuns
       if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {

@@ -1,51 +1,79 @@
-# inventory/middleware.py
-from django.utils.deprecation import MiddlewareMixin
-from django.conf import settings
+# backend/core/inventory/middleware.py
+
 import re
-# inventory/middleware.py (trecho relevante)
+from django.utils.deprecation import MiddlewareMixin
+from rest_framework.response import Response
+from rest_framework import status
+
 class ApiKeyMiddleware(MiddlewareMixin):
     """
-    Valida API Key em endpoints comerciais.
-    Rotas em /api/v1/ exigem header: Authorization: Bearer pk_live_••••
+    Valida API Key comercial APENAS em endpoints específicos.
+    Rotas de autenticação de usuário (JWT) são excluídas.
     """
     
-    # Rotas que NÃO exigem API Key (públicas ou auth JWT)
+    # ✅ Rotas que NÃO exigem API Key comercial
     EXCLUDED_PATHS = [
+        # Auth de usuário (JWT)
         r'^/api/auth/',
+        
+        # Consentimento LGPD (pode ser anônimo)
         r'^/api/consent/',
+        
+        # Público
         r'^/api/public/',
+        r'^/api/vitrine/',
         r'^/api/health/',
         r'^/api/theme/',
+        
+        # Profile (usa JWT, não API Key)
+        r'^/api/profile/',
+        
+        # Feature gates (usa JWT)
+        r'^/api/admin/feature-gates/',
     ]
     
     def process_request(self, request):
-        # Pula validação para rotas excluídas
-        for excluded in self.EXCLUDED_PATHS:
-            if re.match(excluded, request.path_info):
-                return None
+        path = request.path_info
         
-        # Valida API Key para demais rotas (incluindo /api/v1/*)
-        api_key = request.headers.get('Authorization', '')
-        if api_key.startswith('Bearer '):
-            api_key = api_key[7:]
+        # ✅ Pular validação para rotas excluídas
+        for excluded in self.EXCLUDED_PATHS:
+            if re.match(excluded, path):
+                return None  # Continua sem validar API Key
+        
+        # ✅ Validar API Key comercial apenas para endpoints protegidos
+        auth_header = request.headers.get('Authorization', '')
+        
+        # Extrair token (pode ser JWT ou API Key)
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
         else:
             return self._error_response('API Key ausente. Use: Authorization: Bearer pk_live_••••')
         
-        # Valida no banco (implementar conforme sua lógica)
-        from .models import ApiKey
+        # ✅ Diferenciar JWT de API Key comercial pelo prefixo
+        if token.startswith('eyJ'):  # JWT começa com "eyJ..."
+            # ✅ É um token JWT de usuário - permitir passar
+            # O JWT será validado depois por SimpleJWT authentication
+            return None
+        
+        # ✅ É uma API Key comercial - validar no banco
+        if not token.startswith('pk_live_') and not token.startswith('pk_test_'):
+            return self._error_response('Formato de API Key inválido')
+        
+        # Validar no banco de dados
         try:
-            key_obj = ApiKey.objects.select_related('owner').get(
-                key=api_key,
+            from .models import ApiKey
+            key_obj = ApiKey.objects.select_related('owner', 'store').get(
+                key=token,
                 is_active=True
             )
+            # Anexar ao request para uso nas views
             request.api_key = key_obj
             request.api_plan = key_obj.plan
+            request.api_scopes = key_obj.scopes
         except ApiKey.DoesNotExist:
             return self._error_response('API Key inválida ou inativa')
         
         return None
     
     def _error_response(self, message):
-        from rest_framework.response import Response
-        from rest_framework import status
         return Response({'error': message}, status=status.HTTP_401_UNAUTHORIZED)
