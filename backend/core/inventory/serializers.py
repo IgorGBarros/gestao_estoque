@@ -607,8 +607,11 @@ class ThemeConfigSerializer(serializers.ModelSerializer):
         read_only_fields = ['updated_at']
 
 
+
+
+
 # ==========================================
-# 9. SERIALIZERS LGPD - CONSENTIMENTO (NOVOS)
+# CONSENTIMENTO LGPD - SERIALIZERS
 # ==========================================
 
 class ConsentRecordSerializer(serializers.Serializer):
@@ -652,11 +655,11 @@ class ConsentRecordSerializer(serializers.Serializer):
     
     accepted_at = serializers.DateTimeField(required=True)
     
-    # === Metadados técnicos ===
+    # === Metadados técnicos (write-only) ===
     ip_address = serializers.CharField(required=False, write_only=True)
     user_agent = serializers.CharField(required=False, allow_blank=True, write_only=True)
     
-    # === Campos de leitura ===
+    # === Campos de leitura (output) ===
     id = serializers.IntegerField(read_only=True)
     ip_hash = serializers.CharField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
@@ -665,13 +668,13 @@ class ConsentRecordSerializer(serializers.Serializer):
     # === VALIDAÇÕES ===
     
     def validate_version(self, value):
+        """Valida formato da versão do termo"""
         if not re.match(r'^v\d+\.\d+_\d{4}-\d{2}$', value):
             raise serializers.ValidationError(
                 "Versão deve seguir formato: vMAJOR.MINOR_YYYY-MM (ex: v1.0_2026-05)"
             )
         return value
-    # backend/core/inventory/serializers.py - ConsentRecordSerializer.validate_purposes
-
+    
     def validate_purposes(self, purposes):
         """Valida finalidades de consentimento"""
         request = self.context.get("request")
@@ -700,10 +703,12 @@ class ConsentRecordSerializer(serializers.Serializer):
         return purposes
     
     def validate(self, attrs):
+        """Validação geral do consentimento"""
         user_id = attrs.get('user_id')
         email = attrs.get('email')
         session_id = attrs.get('session_id')
         
+        # ✅ Validação: Usuário autenticado deve corresponder ao user_id
         if user_id:
             try:
                 user = User.objects.get(id=user_id)
@@ -716,14 +721,16 @@ class ConsentRecordSerializer(serializers.Serializer):
             except User.DoesNotExist:
                 raise serializers.ValidationError("Usuário não encontrado")
         
-        elif not email or not session_id:
+        # ✅ Validação: Anônimos precisam de email OU session_id
+        elif not email and not session_id:
             raise serializers.ValidationError(
-                "Para usuários não autenticados, email e session_id são obrigatórios"
+                "Para usuários não autenticados, email ou session_id são obrigatórios"
             )
         
+        # ✅ Validação: Evitar duplicidade de consentimento para mesma versão
         if email and not user_id:
             existing = ConsentRecord.objects.filter(
-                email=email.lower(),
+                email__iexact=email,  # Case-insensitive
                 revoked_at__isnull=True,
                 term_version=attrs['version']
             ).exists()
@@ -732,62 +739,89 @@ class ConsentRecordSerializer(serializers.Serializer):
                     "Consentimento para esta versão já registrado para este email"
                 )
         
+        # ✅ Validação: accepted_at não pode ser futuro
+        from django.utils import timezone
+        if attrs.get('accepted_at') and attrs['accepted_at'] > timezone.now():
+            raise serializers.ValidationError(
+                "accepted_at não pode ser uma data futura"
+            )
+        
         return attrs
 
     # === MÉTODOS AUXILIARES ===
     
     def _hash_ip(self, ip_address: str) -> str:
         """Gera hash SHA-256 do IP + salt para anonimização (Art. 12, LGPD)"""
+        if not ip_address:
+            return ''
         salt = getattr(settings, 'LGPD_IP_SALT', get_random_string(32))
-        return hashlib.sha256(f"{ip_address}{salt}".encode()).hexdigest()
+        return hashlib.sha256(f"{ip_address}{salt}".encode('utf-8')).hexdigest()
     
     def create(self, validated_data):
         """Cria novo registro de consentimento"""
+        # Extrair metadados técnicos (não salvos diretamente)
         ip_address = validated_data.pop('ip_address', None)
-        user_agent = validated_data.pop('user_agent', '')
+        user_agent = validated_data.pop('user_agent', '')[:500]  # Truncar para segurança
         
+        # Gerar hash do IP para anonimização
         ip_hash = self._hash_ip(ip_address) if ip_address else ''
         
+        # Determinar usuário e email
         user = None
         request = self.context.get('request')
+        
         if request and request.user.is_authenticated:
+            # Usuário logado: usar dados da sessão
             user = request.user
             validated_data['user'] = user
             validated_data['email'] = user.email.lower()
         elif validated_data.get('email'):
+            # Anônimo com email: normalizar para lowercase
             validated_data['email'] = validated_data['email'].lower()
         
+        # Converter purposes para JSONField (lista de strings)
+        purpose_flags = validated_data.pop('purposes', [])
+        
+        # Criar registro no banco
         consent = ConsentRecord.objects.create(
             ip_hash=ip_hash,
-            user_agent=user_agent[:500],
+            user_agent=user_agent,
+            purpose_flags=purpose_flags,  # JSONField
             **validated_data
         )
         
         return consent
     
     def update(self, instance, validated_data):
+        """Atualização direta não é permitida - usar endpoint de revogação"""
         raise serializers.ValidationError(
-            "Atualização direta não permitida. Use o endpoint de revogação."
+            "Atualização direta não permitida. Use o endpoint de revogação para modificar consentimentos."
         )
     
     def to_representation(self, instance):
+        """Personaliza a saída para esconder dados sensíveis"""
         representation = super().to_representation(instance)
         
+        # Remover campos sensíveis da resposta
         representation.pop('ip_hash', None)
         representation.pop('user_agent', None)
         representation.pop('session_id', None)
         
+        # Adicionar campos úteis para o frontend
         representation['purposes_granted'] = instance.purpose_flags
         representation['can_revoke'] = [
             p for p in instance.purpose_flags 
-            if p not in ['essential', 'authentication', 'legal_compliance']
+            if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', ['essential', 'authentication', 'legal_compliance'])
         ]
         
         return representation
 
 
 class ConsentRevocationSerializer(serializers.Serializer):
-    """Serializer para revogação de consentimento (Art. 8º, §5º)"""
+    """
+    Serializer para revogação de consentimento (Art. 8º, §5º)
+    Permite revogar finalidades não-essenciais
+    """
     purpose = serializers.ChoiceField(
         choices=[
             'analytics',
@@ -802,10 +836,11 @@ class ConsentRevocationSerializer(serializers.Serializer):
         required=False,
         allow_blank=True,
         max_length=500,
-        help_text="Motivo opcional para a revogação"
+        help_text="Motivo opcional para a revogação (para analytics interno)"
     )
     
     def validate(self, attrs):
+        """Valida que o usuário está autenticado para revogar"""
         request = self.context.get('request')
         if not request or not request.user.is_authenticated:
             raise serializers.ValidationError("Autenticação necessária para revogar consentimento")
@@ -813,7 +848,10 @@ class ConsentRevocationSerializer(serializers.Serializer):
 
 
 class ConsentSummarySerializer(serializers.Serializer):
-    """Serializer para listar consentimentos do usuário (Art. 18, II)"""
+    """
+    Serializer para listar consentimentos do usuário (Art. 18, II - Direito de acesso)
+    Retorna apenas campos seguros para o titular dos dados
+    """
     id = serializers.IntegerField(read_only=True)
     version = serializers.CharField(read_only=True)
     purposes = serializers.ListField(child=serializers.CharField(), read_only=True)
@@ -821,8 +859,34 @@ class ConsentSummarySerializer(serializers.Serializer):
     revoked_at = serializers.DateTimeField(read_only=True, allow_null=True)
     is_active = serializers.SerializerMethodField()
     
-    def get_is_active(self, obj):
+    def get_is_active(self, obj) -> bool:
+        """Verifica se o consentimento ainda está ativo (não revogado)"""
         return obj.revoked_at is None
     
     class Meta:
-        ref_name = "ConsentSummary"
+        ref_name = "ConsentSummary"  # Nome único para documentação OpenAPI
+
+
+class ConsentExportSerializer(serializers.Serializer):
+    """
+    Serializer para exportação de dados pessoais (Art. 18, III - Portabilidade)
+    Retorna todos os dados do titular em formato estruturado
+    """
+    email = serializers.EmailField(read_only=True)
+    consents = ConsentSummarySerializer(many=True, read_only=True)
+    export_generated_at = serializers.DateTimeField(read_only=True)
+    
+    def to_representation(self, instance):
+        """Gera exportação completa dos dados do usuário"""
+        from django.utils import timezone
+        
+        user = instance.get('user')
+        consents = instance.get('consents', [])
+        
+        return {
+            'email': user.email if user else instance.get('email'),
+            'consents': ConsentSummarySerializer(consents, many=True).data,
+            'export_generated_at': timezone.now().isoformat(),
+            'data_retention_days': getattr(settings, 'LGPD_CONSENT_RETENTION_DAYS', 730),
+            'contact_dpo': 'privacidade@minhaamora.com.br',  # Configurar em settings
+        }

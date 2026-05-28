@@ -2156,21 +2156,27 @@ def feature_gates_view(request):
     visible_gates = [g for g in gates if not g['requires_pro'] or is_pro]
     
     return Response(visible_gates)
-# backend/core/inventory/views.py - profile_view CORRIGIDA
 
 
-from .utils import  validate_store_ownership
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def profile_view(request):
-    """Retorna ou atualiza as informações da loja do usuário"""
+    """
+    Retorna ou atualiza as informações da loja do usuário.
+    ✅ GARANTIDO: Retorna Response DRF "pronto" para evitar ContentNotRenderedError
+    """
     try:
         # ✅ Obter ou criar loja do usuário
+        from .utils import get_current_store, validate_store_ownership
         store = get_current_store(request.user)
         
         if not store:
-            # ✅ Retorna Response DRF válido (não raise)
+            # ✅ Retorna Response DRF válido (não TemplateResponse)
             return Response(
                 {"error": "Loja não encontrada para este usuário"}, 
                 status=status.HTTP_400_BAD_REQUEST
@@ -2180,12 +2186,19 @@ def profile_view(request):
         validate_store_ownership(request.user, store)
         
         if request.method == "GET":
-            # ✅ Context é importante para campos relativos (ex: image URLs)
+            # ✅ Serializar dados
+            from .serializers import ProfileSerializer
             serializer = ProfileSerializer(store, context={"request": request})
-            # ✅ Retorna Response DRF já serializado
-            return Response(serializer.data, status=status.HTTP_200_OK)
+            
+            # ✅ CRÍTICO: Acessar .data força a serialização IMEDIATA
+            # Isso evita que o middleware acesse .content antes do render
+            serialized_data = serializer.data
+            
+            # ✅ Retorna Response com dados já serializados (dict puro)
+            return Response(serialized_data, status=status.HTTP_200_OK)
         
         elif request.method == "PATCH":
+            from .serializers import ProfileSerializer
             serializer = ProfileSerializer(
                 store, 
                 data=request.data, 
@@ -2193,8 +2206,10 @@ def profile_view(request):
                 context={"request": request}
             )
             if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data, status=status.HTTP_200_OK)
+                instance = serializer.save()
+                # ✅ Forçar serialização imediata
+                serialized_data = ProfileSerializer(instance, context={"request": request}).data
+                return Response(serialized_data, status=status.HTTP_200_OK)
             
             # ✅ Retorna erros de validação como Response válido
             return Response(
@@ -2202,6 +2217,21 @@ def profile_view(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+    except Exception as e:
+        # ✅ Log seguro em produção
+        if settings.DEBUG:
+            logger.error(f"❌ Erro no profile_view: {e}", exc_info=True)
+        else:
+            logger.error(f"❌ Erro no profile_view para user {request.user.id if request.user.is_authenticated else 'anon'}")
+        
+        # ✅ Sempre retorna Response DRF, nunca raise
+        return Response(
+            {
+                "error": "Erro interno ao processar perfil",
+                "details": str(e) if settings.DEBUG else "Tente novamente"
+            }, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
     except Exception as e:
         # ✅ Log seguro em produção
         if settings.DEBUG:
@@ -3550,92 +3580,94 @@ def dashboard_stats(request):
 # ENDPOINTS LGPD - GESTÃO DE CONSENTIMENTO
 # ==========================================
 # backend/core/inventory/views.py - record_consent CORRIGIDA
-
+# inventory/views.py
 @api_view(['POST'])
-@permission_classes([AllowAny])  # ✅ Permite usuários anônimos
+@permission_classes([AllowAny])
 def record_consent(request):
-    """
-    Registra consentimento LGPD (Art. 8º)
-    Suporta usuários autenticados e anônimos (via session_id)
-    """
+    """Registra novo consentimento LGPD"""
     from .serializers import ConsentRecordSerializer
     
-    serializer = ConsentRecordSerializer(data=request.data, context={'request': request})
+    # Adicionar metadados da requisição ao contexto
+    serializer = ConsentRecordSerializer(
+        data=request.data, 
+        context={
+            'request': request,
+            'ip_address': request.META.get('REMOTE_ADDR'),
+            'user_agent': request.META.get('HTTP_USER_AGENT', '')[:500],
+        }
+    )
     
     if serializer.is_valid():
         consent = serializer.save()
-        
-        # Log seguro (anonimizado)
-        if settings.DEBUG:
-            print(f"[LGPD] Consentimento registrado: {consent.id}")
         
         return Response({
             "status": "consent_recorded",
             "consent_id": consent.id,
             "version": consent.term_version,
             "purposes_granted": consent.purpose_flags,
-            "can_revoke": [p for p in consent.purpose_flags if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', [])]
+            "can_revoke": [
+                p for p in consent.purpose_flags 
+                if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', [])
+            ]
         }, status=status.HTTP_201_CREATED)
     
     return Response({
         "status": "error",
         "errors": serializer.errors
     }, status=status.HTTP_400_BAD_REQUEST)
-
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def revoke_consent(request, purpose: str):
-    """
-    Revoga consentimento para finalidade específica (Art. 8º, §5º)
-    DELETE /api/consent/revoke/analytics/
-    """
-    essential = getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', ['essential', 'authentication', 'legal_compliance'])
+    """Revoga consentimento para finalidade específica"""
+    from .serializers import ConsentRevocationSerializer
     
-    if purpose in essential:
+    # Validar que a finalidade é revogável
+    if purpose in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', []):
         return Response({
             "error": f"A finalidade '{purpose}' é essencial e não pode ser revogada"
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    updated = ConsentRecord.objects.filter(
+    # Buscar consentimento ativo do usuário
+    consent = ConsentRecord.objects.filter(
         user=request.user,
         purpose_flags__contains=[purpose],
         revoked_at__isnull=True
-    ).update(revoked_at=timezone.now())
+    ).first()
     
-    if updated == 0:
+    if not consent:
         return Response({
-            "status": "no_consent_found",
-            "message": "Nenhum consentimento ativo encontrado para esta finalidade"
+            "error": "Consentimento não encontrado para esta finalidade"
         }, status=status.HTTP_404_NOT_FOUND)
     
-    log_safe("Consentimento revogado", user_id=request.user.id, purpose=purpose)
+    # Revogar
+    consent.revoke(purpose=purpose)
     
     return Response({
-        "status": "consent_revoked",
+        "status": "revoked",
         "purpose": purpose,
-        "revoked_count": updated
-    })
-
-
+        "revoked_at": consent.revoked_at.isoformat()
+    }, status=status.HTTP_200_OK)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_my_consents(request):
-    """
-    Lista consentimentos do usuário (Art. 18, II - Direito de acesso)
-    GET /api/consent/my/
-    """
-    consents = ConsentRecord.objects.filter(user=request.user).order_by('-accepted_at')
+    """Lista todos os consentimentos do usuário logado"""
+    from .serializers import ConsentSummarySerializer
+    
+    consents = ConsentRecord.objects.filter(
+        user=request.user
+    ).order_by('-accepted_at')
+    
     serializer = ConsentSummarySerializer(consents, many=True)
     
     return Response({
         "consents": serializer.data,
+        "current_version": getattr(settings, 'LGPD_CONSENT_VERSION', 'v1.0_2026-05'),
         "essential_purposes": getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', []),
-        "revocable_purposes": [p for p in ['analytics', 'marketing', 'behavior_tracking', 'ai_features'] 
-                              if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', [])],
-        "current_version": getattr(settings, 'LGPD_CONSENT_VERSION', 'v1.0_2026-05')
-    })
-
-
+        "revocable_purposes": [
+            p for p, _ in ConsentRecord.PURPOSE_CHOICES 
+            if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', [])
+        ]
+    }, status=status.HTTP_200_OK)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def export_my_data(request):
