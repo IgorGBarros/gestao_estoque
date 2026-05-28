@@ -251,6 +251,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await api.post("/auth/login/", { email, password });
       const { access, refresh, consent_required }  = response.data;
       if (!access) throw new Error("Token não recebido");
+      const hasBasicConsent = localStorage.getItem("cookie_consent_accepted") === "true";
+      if (!hasBasicConsent) {
+        // Redireciona para página de consentimento ou mostra modal
+        navigate("/consent", { state: { from: location } });
+        return;
+      }
       if (consent_required) {
             // O PostAuthConsentModal já vai detectar e mostrar automaticamente
             console.log("✅ Consentimento completo pendente");

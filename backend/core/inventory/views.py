@@ -2156,26 +2156,33 @@ def feature_gates_view(request):
     visible_gates = [g for g in gates if not g['requires_pro'] or is_pro]
     
     return Response(visible_gates)
+# backend/core/inventory/views.py - profile_view CORRIGIDA
 
+
+from .utils import  validate_store_ownership
 
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def profile_view(request):
     """Retorna ou atualiza as informações da loja do usuário"""
     try:
-        # Garante que o usuário tem uma loja associada
-        store = ensure_user_has_store(request.user)
+        # ✅ Obter ou criar loja do usuário
+        store = get_current_store(request.user)
         
         if not store:
-            # ✅ Retorna Response válido, não raise
+            # ✅ Retorna Response DRF válido (não raise)
             return Response(
                 {"error": "Loja não encontrada para este usuário"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # ✅ Validar ownership (segurança tenant)
+        validate_store_ownership(request.user, store)
+        
         if request.method == "GET":
+            # ✅ Context é importante para campos relativos (ex: image URLs)
             serializer = ProfileSerializer(store, context={"request": request})
-            # ✅ Retorna Response já serializado (DRF cuida do render)
+            # ✅ Retorna Response DRF já serializado
             return Response(serializer.data, status=status.HTTP_200_OK)
         
         elif request.method == "PATCH":
@@ -2195,6 +2202,19 @@ def profile_view(request):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+    except Exception as e:
+        # ✅ Log seguro em produção
+        if settings.DEBUG:
+            print(f"❌ Erro no profile_view: {e}")
+        
+        # ✅ Sempre retorna Response DRF, nunca raise
+        return Response(
+            {
+                "error": "Erro interno ao processar perfil",
+                "details": str(e) if settings.DEBUG else "Tente novamente"
+            }, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
     except Exception as e:
         # ✅ Log seguro em produção
         if settings.DEBUG:
@@ -3529,20 +3549,16 @@ def dashboard_stats(request):
 # ==========================================
 # ENDPOINTS LGPD - GESTÃO DE CONSENTIMENTO
 # ==========================================
+# backend/core/inventory/views.py - record_consent CORRIGIDA
 
-
-# backend/core/inventory/views.py - NO TOPO, APÓS OS IMPORTS
-
-# ✅ GARANTIR QUE ESTA FUNÇÃO EXISTE E ESTÁ CORRETA
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([AllowAny])  # ✅ Permite usuários anônimos
 def record_consent(request):
     """
     Registra consentimento LGPD (Art. 8º)
-    POST /api/consent/
+    Suporta usuários autenticados e anônimos (via session_id)
     """
     from .serializers import ConsentRecordSerializer
-    from django.conf import settings
     
     serializer = ConsentRecordSerializer(data=request.data, context={'request': request})
     
@@ -3565,7 +3581,6 @@ def record_consent(request):
         "status": "error",
         "errors": serializer.errors
     }, status=status.HTTP_400_BAD_REQUEST)
-
 
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
