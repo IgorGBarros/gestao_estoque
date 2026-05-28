@@ -120,101 +120,107 @@ class CustomUserCreateView(generics.CreateAPIView):
         except Exception as e:
             log_safe("Erro ao criar loja no cadastro", user_id=user.id, error=str(e))
 
+# backend/core/inventory/views.py - FirebaseLoginView COMPLETA
 
-from firebase_admin import auth as firebase_auth
-
-# backend/core/inventory/views.py
-# ✅ IMPORTS NO TOPO DO ARQUIVO (garanta que estão presentes)
 import os
 import json
+import re
 import logging
-import traceback
+from django.conf import settings
+from rest_framework import status, permissions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
-
-# Firebase imports - SEM try/except para falhar claro se não instalado
+# Firebase imports
 import firebase_admin
 from firebase_admin import auth as firebase_auth, credentials
 
+from .models import CustomUser
 from .utils import ensure_user_has_store
 
 logger = logging.getLogger(__name__)
 
 
 class FirebaseLoginView(APIView):
-    """
-    Login via Firebase Authentication com inicialização lazy.
-    
-    ✅ Funciona no Render/Gunicorn: inicializa Firebase na request, não no startup
-    ✅ Fallback para DEBUG: mock user sem Firebase real
-    ✅ Logs seguros: sem vazamento de tokens ou credenciais
-    """
     permission_classes = [permissions.AllowAny]
     
-    def _ensure_firebase_initialized(self) -> bool:
+    def _init_firebase_robust(self) -> bool:
         """
-        Garante que o Firebase Admin SDK está inicializado.
-        Chama isto ANTES de qualquer operação com firebase_auth.
+        Inicializa Firebase com correção agressiva de caracteres de controle.
         Retorna True se sucesso, False se falhou.
         """
-        # ✅ Se já inicializado, retorna True
+        # Se já inicializado, retorna
         if firebase_admin._apps:
             return True
         
-        # ✅ Pegar credenciais do ambiente
         creds_json = os.environ.get("FIREBASE_CREDENTIALS")
         if not creds_json:
-            logger.error("❌ FIREBASE_CREDENTIALS não configurada no ambiente")
+            logger.error("❌ FIREBASE_CREDENTIALS não configurada")
             return False
         
         try:
-            # ✅ Corrigir newlines escapados que o Render/VS Code adicionam
-            creds_json = creds_json.replace('\\n', '\n')
+            # 🔧 CORREÇÃO AGRESSIVA: Escapar TODOS caracteres de controle
+            # Primeiro, substituir \\ por um placeholder temporário
+            creds_json = creds_json.replace('\\\\', '\x00PLACEHOLDER\x00')
             
-            # ✅ Parse JSON
+            # Escapar caracteres de controle reais
+            creds_json = (creds_json
+                .replace('\n', '\\n')
+                .replace('\r', '\\r')
+                .replace('\t', '\\t')
+                .replace('\b', '\\b')
+                .replace('\f', '\\f')
+            )
+            
+            # Restaurar \\
+            creds_json = creds_json.replace('\x00PLACEHOLDER\x00', '\\\\')
+            
+            # Parse JSON
             creds_dict = json.loads(creds_json)
             
-            # ✅ Validar campos obrigatórios
+            # Validar campos
             required = ['type', 'project_id', 'private_key', 'client_email']
-            missing = [k for k in required if k not in creds_dict]
-            if missing:
-                logger.error(f"❌ Firebase JSON missing campos: {missing}")
+            if not all(k in creds_dict for k in required):
+                logger.error(f"❌ Firebase JSON missing: {set(required) - set(creds_dict.keys())}")
                 return False
             
-            # ✅ Inicializar SDK
+            # Inicializar
             cred = credentials.Certificate(creds_dict)
-            firebase_admin.initialize_app(cred, {
-                'projectId': creds_dict.get('project_id'),
-            })
-            
-            logger.info("✅ Firebase Admin inicializado nesta request")
+            firebase_admin.initialize_app(cred, {'projectId': creds_dict.get('project_id')})
+            logger.info("✅ Firebase inicializado com correção agressiva")
             return True
             
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Firebase JSON inválido: {e}")
+            # Log detalhado do erro para diagnóstico
+            pos = getattr(e, 'pos', 'unknown')
+            lineno = getattr(e, 'lineno', 'unknown')
+            colno = getattr(e, 'colno', 'unknown')
+            logger.error(f"❌ JSON decode error: {e} at line {lineno}, col {colno}, pos {pos}")
+            
+            # Mostrar contexto do erro (apenas primeiros 300 chars para segurança)
+            if creds_json and len(creds_json) > int(pos) if isinstance(pos, int) else False:
+                start = max(0, int(pos) - 50) if isinstance(pos, int) else 0
+                end = int(pos) + 50 if isinstance(pos, int) else 100
+                logger.error(f"🔍 Contexto do erro: ...{creds_json[start:end]}...")
+            
             return False
         except Exception as e:
-            logger.error(f"❌ Falha ao inicializar Firebase: {type(e).__name__}: {str(e)[:100]}")
+            logger.error(f"❌ Firebase init error: {type(e).__name__}: {str(e)[:200]}")
             return False
     
     def post(self, request):
-        # ✅ 0. Validar entrada
-        firebase_token = request.data.get("token")
-        if not firebase_token:
-            return Response({
-                "error": "Token Firebase ausente",
-                "details": "O campo 'token' é obrigatório no body da requisição"
-            }, status=status.HTTP_400_BAD_REQUEST)
+        token = request.data.get("token")
+        if not token:
+            return Response({"error": "Token ausente"}, status=400)
         
-        # ✅ 1. Garantir Firebase inicializado (CORREÇÃO CRÍTICA PARA RENDER)
-        if not self._ensure_firebase_initialized():
-            # Fallback para DEBUG: mock user para testes locais sem Firebase
-            if settings.DEBUG and not os.environ.get("FIREBASE_CREDENTIALS"):
-                logger.warning("⚠️ DEBUG mode: Firebase mock ativado")
-                email = "mock@example.com"
-                name = "Mock User"
+        # Inicializar Firebase AGORA
+        if not self._init_firebase_robust():
+            if settings.DEBUG:
+                # Mock para desenvolvimento
                 user, _ = CustomUser.objects.get_or_create(
-                    email=email,
-                    defaults={"name": name, "is_active": True}
+                    email="mock@example.com",
+                    defaults={"name": "Mock", "is_active": True}
                 )
                 user.set_unusable_password()
                 user.save()
@@ -223,165 +229,49 @@ class FirebaseLoginView(APIView):
                 return Response({
                     "access": str(refresh.access_token),
                     "refresh": str(refresh),
-                    "token_type": "Bearer",
-                    "user": {"id": user.id, "email": user.email, "name": user.name, "is_authenticated": True},
-                    "store": {
-                        "id": store.id if store else None,
-                        "slug": store.slug if store else None,
-                        "plan": store.plan if store else "free",
-                        "can_add_products": store.can_add_products if store else True,
-                    } if store else None,
-                    "message": "Login mock (DEBUG mode - Firebase não configurado)",
-                    "_debug": "Firebase não inicializado - usando usuário mock"
-                }, status=status.HTTP_200_OK)
-            
-            # Produção sem Firebase configurado = erro 503
-            return Response({
-                "error": "Firebase não configurado no servidor",
-                "details": "Contate o administrador para configurar FIREBASE_CREDENTIALS"
-            }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                    "user": {"email": user.email},
+                    "store": {"plan": "free"} if store else None,
+                    "_debug": "Firebase mock"
+                })
+            return Response({"error": "Firebase não configurado"}, status=503)
         
-        # ✅ 2. Verificar token Firebase com tratamento específico de erros
+        # Verificar token
         try:
-            # Log seguro: apenas primeiros 20 chars do token
-            logger.info(f"🔐 Verificando token Firebase: {firebase_token[:20]}...")
-            
-            decoded_token = firebase_auth.verify_id_token(firebase_token)
-            email = decoded_token.get("email")
-            logger.info(f"✅ Token verificado para: {email}")
-            
-        except firebase_auth.ExpiredIdTokenError:
-            logger.warning("⚠️ Token Firebase expirado")
-            return Response({
-                "error": "Token expirado",
-                "details": "Obtenha um novo token fazendo login novamente no Firebase"
-            }, status=status.HTTP_401_UNAUTHORIZED)
-            
-        except firebase_auth.InvalidIdTokenError as e:
-            logger.warning(f"⚠️ Token Firebase inválido: {str(e)[:100]}")
-            return Response({
-                "error": "Token inválido",
-                "details": "O token fornecido não é válido ou foi emitido para outro projeto"
-            }, status=status.HTTP_401_UNAUTHORIZED)
-            
-        except firebase_auth.RevokedIdTokenError:
-            logger.warning("⚠️ Token Firebase revogado pelo usuário")
-            return Response({
-                "error": "Token revogado",
-                "details": "O usuário revogou esta sessão. Faça login novamente."
-            }, status=status.HTTP_401_UNAUTHORIZED)
-            
+            decoded = firebase_auth.verify_id_token(token)
         except Exception as e:
-            # Log seguro: truncar mensagem para evitar vazamento
-            error_msg = str(e)[:200]
-            logger.error(f"❌ Erro ao verificar token: {type(e).__name__}: {error_msg}")
-            if settings.DEBUG:
-                logger.debug("🔍 Full traceback:", exc_info=True)
-            
-            return Response({
-                "error": "Erro ao autenticar com Firebase",
-                "details": error_msg if settings.DEBUG else "Tente novamente em alguns instantes"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.error(f"❌ Token error: {type(e).__name__}: {str(e)[:100]}")
+            return Response({"error": "Token inválido"}, status=401)
         
-        # ✅ 3. Extrair dados do token e validar
-        email = decoded_token.get("email")
+        # Criar usuário
+        email = decoded.get("email")
         if not email:
-            logger.warning("⚠️ Token sem email")
-            return Response({
-                "error": "Email não encontrado",
-                "details": "O token Firebase não contém um email válido"
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "Email não encontrado"}, status=400)
         
-        name = decoded_token.get("name", decoded_token.get("nickname", email.split("@")[0]))
+        name = decoded.get("name", email.split("@")[0])
+        user, created = CustomUser.objects.get_or_create(
+            email=email,
+            defaults={"name": name, "is_active": True}
+        )
+        if created:
+            user.set_unusable_password()
+            user.save()
         
-        # ✅ 4. Buscar ou criar usuário Django
-        try:
-            user, created = CustomUser.objects.get_or_create(
-                email=email,
-                defaults={
-                    "name": name,
-                    "is_active": True
-                }
-            )
-            
-            if created:
-                user.set_unusable_password()  # Login apenas via Firebase
-                user.save(update_fields=["password"])
-                logger.info(f"✨ Novo usuário criado: {email}")
-            else:
-                # Atualizar nome se mudou no Firebase
-                if user.name != name:
-                    user.name = name
-                    user.save(update_fields=["name"])
-                logger.info(f"👤 Usuário existente: {email}")
-                
-        except Exception as e:
-            logger.error(f"❌ Erro ao criar/atualizar usuário: {e}")
-            return Response({
-                "error": "Erro ao processar usuário",
-                "details": "Tente novamente" if not settings.DEBUG else str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Loja
+        store = ensure_user_has_store(user)
         
-        # ✅ 5. Garantir loja associada
-        store = None
-        try:
-            store = ensure_user_has_store(user)
-            if store:
-                logger.debug(f"🏪 Loja associada: {store.slug}")
-        except Exception as e:
-            logger.warning(f"⚠️ Não foi possível criar loja para {email}: {e}")
-            # Não falhar o login se a loja falhar
+        # JWT
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+        access["email"] = user.email
+        if store:
+            access["plan"] = store.plan
         
-        # ✅ 6. Gerar tokens JWT do Django
-        try:
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
-            
-            # Claims customizados para o frontend
-            access_token.update({
-                "email": user.email,
-                "name": user.name,
-                "store_slug": store.slug if store else None,
-                "plan": store.plan if store else "free",
-            })
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao gerar JWT: {e}")
-            return Response({
-                "error": "Erro ao gerar tokens de sessão",
-                "details": "Tente novamente"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        # ✅ 7. Response final (sem dados sensíveis)
-        logger.info(f"✅ Login Firebase sucesso: {email}")
-        
-        response_data = {
-            "access": str(access_token),
+        return Response({
+            "access": str(access),
             "refresh": str(refresh),
-            "token_type": "Bearer",
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "name": user.name,
-                "is_authenticated": True,
-            },
-            "store": {
-                "id": store.id if store else None,
-                "slug": store.slug if store else None,
-                "plan": store.plan if store else "free",
-                "can_add_products": store.can_add_products if store else True,
-            } if store else None,
-            "message": "Login realizado com sucesso",
-        }
-        
-        # Em DEBUG, adicionar info de diagnóstico (nunca em produção)
-        if settings.DEBUG:
-            response_data["_debug"] = {
-                "firebase_initialized": bool(firebase_admin._apps),
-                "store_created": store is not None,
-            }
-        
-        return Response(response_data, status=status.HTTP_200_OK)
+            "user": {"email": user.email, "name": user.name},
+            "store": {"plan": store.plan} if store else None,
+        })
 # ==========================================
 # UTILITÁRIOS LGPD - ANONIMIZAÇÃO E SEGURANÇA
 # ==========================================
