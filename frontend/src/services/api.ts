@@ -28,7 +28,7 @@ export const api = axios.create({
     "Content-Type": "application/json",
     "Accept": "application/json"
   },
-  timeout: 60000, // ✅ 60 segundos para evitar timeout em cold starts do Render
+  timeout: 120000, // ✅ 120 segundos para evitar timeout em cold starts do Render
 });
 
 // 🔁 Interceptador REQUEST

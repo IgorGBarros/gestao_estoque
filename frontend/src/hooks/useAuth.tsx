@@ -1,6 +1,6 @@
-// src/hooks/useAuth.tsx - VERSÃO COM RACE CONDITION FIX
+// src/hooks/useAuth.tsx - VERSÃO COM RACE CONDITION FIX + TIMEOUT HANDLING
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom"; // ✅ ADICIONAR useLocation
 import axios from "axios";
 import { api } from "../services/api";
 import { auth, googleProvider, signInWithPopup } from "../firebaseConfig";
@@ -70,6 +70,7 @@ export interface User {
 interface AuthContextData {
   user: User | null;
   loading: boolean;
+  authLoading?: boolean; // ✅ Estado de loading para login específico
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
@@ -86,10 +87,12 @@ const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 // ==========================================
 export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const location = useLocation(); // ✅ ADICIONAR para usar em signIn
   const { toast } = useToast();
   
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false); // ✅ Loading específico para ações de auth
   const [isInitialized, setIsInitialized] = useState(false);
   
   // ✅ Ref para prevenir múltiplas inicializações simultâneas
@@ -244,27 +247,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isInitialized, initializeAuth]);
 
   // ==========================================
-  // ✅ LOGIN
+  // ✅ LOGIN (Email/Senha)
   // ==========================================
   const signIn = async (email: string, password: string) => {
+    setAuthLoading(true); // ✅ Mostrar loading durante login
+    
     try {
       const response = await api.post("/auth/login/", { email, password });
-      const { access, refresh, consent_required }  = response.data;
+      const { access, refresh, consent_required } = response.data;
+      
       if (!access) throw new Error("Token não recebido");
+      
+      // ✅ Verificar consentimento básico
       const hasBasicConsent = localStorage.getItem("cookie_consent_accepted") === "true";
       if (!hasBasicConsent) {
-        // Redireciona para página de consentimento ou mostra modal
+        // Redireciona para página de consentimento
         navigate("/consent", { state: { from: location } });
         return;
       }
+      
+      // ✅ Verificar se precisa de consentimento completo
       if (consent_required) {
-            // O PostAuthConsentModal já vai detectar e mostrar automaticamente
-            console.log("✅ Consentimento completo pendente");
-          }
+        console.log("✅ Consentimento completo pendente");
+        // O PostAuthConsentModal vai detectar e mostrar automaticamente
+      }
+      
+      // Salvar tokens
       localStorage.setItem("auth_token", access);
       if (refresh) localStorage.setItem("refresh_token", refresh);
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
       
+      // Buscar perfil
       try {
         const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
@@ -277,39 +290,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
       } catch (e) {
+        // Fallback básico se profile falhar
         setUser({ id: 0, email, name: email.split('@')[0], is_staff: false });
       }
+      
     } catch (error: any) {
+      console.error("❌ Erro no login:", error);
+      
+      // ✅ Mensagem amigável para timeout
+      if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
+        toast({
+          title: "⏳ Servidor respondendo lentamente",
+          description: "Tente novamente em alguns instantes.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "❌ Erro no login",
+          description: error.message || "Credenciais inválidas",
+          variant: "destructive",
+        });
+      }
+      
       handleLogout(false);
       throw error;
+    } finally {
+      setAuthLoading(false); // ✅ Esconder loading
     }
   };
 
   const signUp = async (email: string, password: string, name: string) => {
-    await api.post("/auth/register/", { email, password, name });
+    setAuthLoading(true);
+    try {
+      await api.post("/auth/register/", { email, password, name });
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   // ==========================================
   // ✅ LOGIN GOOGLE
   // ==========================================
   const signInWithGoogle = async () => {
+    setAuthLoading(true); // ✅ Mostrar loading durante login Google
+    const startTime = Date.now();
+    
     try {
+      console.log("🔐 Iniciando login com Google...");
+      
+      // ✅ Login Firebase com popup
       const result = await signInWithPopup(auth, googleProvider);
       const idToken = await result.user.getIdToken();
       const fallbackEmail = result.user.email || "";
       const fallbackName = result.user.displayName || fallbackEmail.split("@")[0] || "Usuário";
 
-      console.log("🔐 Enviando token para backend...");
+      console.log("🔐 Enviando token para backend...", { 
+        tokenLength: idToken?.length,
+        timestamp: Date.now()
+      });
 
+      // ✅ Chamada ao backend com timeout explícito
       const response = await api.post("/auth/firebase/", { token: idToken });
       const { access, refresh } = response.data;
 
       if (!access) throw new Error("Token Django ausente");
 
+      // Salvar tokens
       localStorage.setItem("auth_token", access);
       if (refresh) localStorage.setItem("refresh_token", refresh);
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
 
+      // Buscar perfil
       try {
         const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
@@ -322,7 +373,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
 
-        console.log("✅ Login Google completo:", userData.email);
+        console.log("✅ Login Google completo:", {
+          email: userData.email,
+          duration: Date.now() - startTime
+        });
       } catch (e) {
         console.warn("⚠️ Perfil não carregado, usando dados básicos");
         setUser({
@@ -332,20 +386,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           is_staff: false
         });
       }
+      
     } catch (error: any) {
+      const duration = Date.now() - startTime;
       console.error("❌ Erro Google Sign-In:", {
         message: error.message,
         code: error.code,
+        duration: `${duration}ms`
       });
 
-      if (error.message?.includes("popup-blocked")) {
+      // ✅ Tratamento específico para erros comuns
+      if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
+        toast({
+          title: "⏳ Conexão lenta",
+          description: "O servidor está respondendo lentamente. Tente novamente.",
+          variant: "destructive",
+        });
+      } else if (error.message?.includes("popup-blocked")) {
         toast({
           title: "Popup bloqueado",
           description: "Permita popups para este site e tente novamente",
           variant: "destructive",
         });
-      } else if (error.message?.includes("cancelado")) {
+      } else if (error.message?.includes("cancelado") || error.code === "auth/popup-closed-by-user") {
+        // Não mostrar toast para cancelamento pelo usuário
         return;
+      } else if (error.code === "auth/account-exists-with-different-credential") {
+        toast({
+          title: "Conta já existe",
+          description: "Este email já está vinculado a outro método de login",
+          variant: "destructive",
+        });
       } else {
         toast({
           title: "Erro no login",
@@ -355,11 +426,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       throw error;
+    } finally {
+      setAuthLoading(false); // ✅ Esconder loading
     }
-    
+  };
 
-  
-};
   const signInDemo = () => {
     const demoUser: User = { 
       id: 999, 
@@ -392,8 +463,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, loading, signIn, signUp, signInWithGoogle, signInDemo, signOut,
-      isAuthenticated: !!user, refreshProfile
+      user, 
+      loading, 
+      authLoading, // ✅ Expor estado de loading para componentes
+      signIn, 
+      signUp, 
+      signInWithGoogle, 
+      signInDemo, 
+      signOut,
+      isAuthenticated: !!user, 
+      refreshProfile
     }}>
       {children}
     </AuthContext.Provider>
