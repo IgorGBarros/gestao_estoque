@@ -347,35 +347,59 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-# ==========================================
-# 🔥 FIREBASE ADMIN
-# ==========================================
 
+# ✅ Firebase Admin - Inicialização robusta para Render
 try:
     import firebase_admin
     from firebase_admin import credentials
     
     firebase_json_str = os.environ.get("FIREBASE_CREDENTIALS")
+    
     if firebase_json_str:
         try:
-            # ✅ Corrigir escaped newlines que o Render pode adicionar
+            # ✅ Corrigir escaped newlines que o Render/VS Code pode adicionar
             firebase_json_str = firebase_json_str.replace('\\n', '\n')
+            
+            # ✅ Tentar parse como JSON
             firebase_creds_dict = json.loads(firebase_json_str)
+            
+            # ✅ Verificar campos obrigatórios
+            required_fields = ['type', 'project_id', 'private_key', 'client_email']
+            missing = [f for f in required_fields if f not in firebase_creds_dict]
+            if missing:
+                raise ValueError(f"Firebase JSON missing fields: {missing}")
+            
+            # ✅ Criar credenciais
             cred = credentials.Certificate(firebase_creds_dict)
             
+            # ✅ Inicializar apenas se não houver app já inicializado
+            # (importante para múltiplos workers do Gunicorn)
             if not firebase_admin._apps:
-                firebase_admin.initialize_app(cred)
+                firebase_admin.initialize_app(cred, {
+                    'projectId': firebase_creds_dict.get('project_id'),
+                })
                 print("✅ Firebase Admin inicializado com sucesso.", file=sys.stderr)
+            else:
+                print(f"ℹ️ Firebase Admin já inicializado ({len(firebase_admin._apps)} app(s)).", file=sys.stderr)
+                
         except json.JSONDecodeError as e:
             print(f"❌ Firebase JSON inválido: {e}", file=sys.stderr)
             if DEBUG:
+                # Log seguro: apenas comprimento, não o conteúdo
                 print(f"🔍 Raw credentials length: {len(firebase_json_str)}", file=sys.stderr)
+                print(f"🔍 First 100 chars: {firebase_json_str[:100]}", file=sys.stderr)
+        except ValueError as e:
+            print(f"❌ Firebase config error: {e}", file=sys.stderr)
         except Exception as e:
-            print(f"❌ Falha ao inicializar Firebase Admin: {e}", file=sys.stderr)
+            print(f"❌ Falha ao inicializar Firebase Admin: {type(e).__name__}: {e}", file=sys.stderr)
+            if DEBUG:
+                import traceback
+                traceback.print_exc(file=sys.stderr)
     else:
-        print("⚠️ Variável FIREBASE_CREDENTIALS não encontrada.", file=sys.stderr)
+        print("⚠️ Variável FIREBASE_CREDENTIALS não encontrada. Login Firebase não funcionará.", file=sys.stderr)
+        
 except ImportError:
-    print("⚠️ Firebase Admin SDK não instalado.", file=sys.stderr)
+    print("⚠️ Firebase Admin SDK não instalado. Adicione firebase-admin ao requirements.txt", file=sys.stderr)
 
 # ==========================================
 # 💳 ASAAS CONFIGURATION
