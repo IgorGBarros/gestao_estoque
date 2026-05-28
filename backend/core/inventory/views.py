@@ -120,28 +120,158 @@ class CustomUserCreateView(generics.CreateAPIView):
         except Exception as e:
             log_safe("Erro ao criar loja no cadastro", user_id=user.id, error=str(e))
 
+# backend/core/inventory/views.py - FirebaseLoginView COMPLETA
+
+import os
+import json
+import re
+import logging
+from django.conf import settings
+from rest_framework import status, permissions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+# Firebase imports
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
+
+from .models import CustomUser
+from .utils import ensure_user_has_store
+
+logger = logging.getLogger(__name__)
+
+
 class FirebaseLoginView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [permissions.AllowAny]
     
-    def post(self, request):
-        firebase_token = request.data.get('token')
-        if not firebase_token:
-            return Response({'error': 'Token ausente'}, status=status.HTTP_400_BAD_REQUEST)
+    def _init_firebase_robust(self) -> bool:
+        """
+        Inicializa Firebase com correção agressiva de caracteres de controle.
+        Retorna True se sucesso, False se falhou.
+        """
+        # Se já inicializado, retorna
+        if firebase_admin._apps:
+            return True
+        
+        creds_json = os.environ.get("FIREBASE_CREDENTIALS")
+        if not creds_json:
+            logger.error("❌ FIREBASE_CREDENTIALS não configurada")
+            return False
         
         try:
-            user = CustomUser.objects.create_user_with_firebase(firebase_token)
-            login(request, user)  
-            refresh = RefreshToken.for_user(user)
+            # 🔧 CORREÇÃO AGRESSIVA: Escapar TODOS caracteres de controle
+            # Primeiro, substituir \\ por um placeholder temporário
+            creds_json = creds_json.replace('\\\\', '\x00PLACEHOLDER\x00')
             
-            return Response({
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'email': user.email,
-                'name': getattr(user, 'name', user.email),
-                'is_authenticated': True
-            }, status=status.HTTP_200_OK)
+            # Escapar caracteres de controle reais
+            creds_json = (creds_json
+                .replace('\n', '\\n')
+                .replace('\r', '\\r')
+                .replace('\t', '\\t')
+                .replace('\b', '\\b')
+                .replace('\f', '\\f')
+            )
+            
+            # Restaurar \\
+            creds_json = creds_json.replace('\x00PLACEHOLDER\x00', '\\\\')
+            
+            # Parse JSON
+            creds_dict = json.loads(creds_json)
+            
+            # Validar campos
+            required = ['type', 'project_id', 'private_key', 'client_email']
+            if not all(k in creds_dict for k in required):
+                logger.error(f"❌ Firebase JSON missing: {set(required) - set(creds_dict.keys())}")
+                return False
+            
+            # Inicializar
+            cred = credentials.Certificate(creds_dict)
+            firebase_admin.initialize_app(cred, {'projectId': creds_dict.get('project_id')})
+            logger.info("✅ Firebase inicializado com correção agressiva")
+            return True
+            
+        except json.JSONDecodeError as e:
+            # Log detalhado do erro para diagnóstico
+            pos = getattr(e, 'pos', 'unknown')
+            lineno = getattr(e, 'lineno', 'unknown')
+            colno = getattr(e, 'colno', 'unknown')
+            logger.error(f"❌ JSON decode error: {e} at line {lineno}, col {colno}, pos {pos}")
+            
+            # Mostrar contexto do erro (apenas primeiros 300 chars para segurança)
+            if creds_json and len(creds_json) > int(pos) if isinstance(pos, int) else False:
+                start = max(0, int(pos) - 50) if isinstance(pos, int) else 0
+                end = int(pos) + 50 if isinstance(pos, int) else 100
+                logger.error(f"🔍 Contexto do erro: ...{creds_json[start:end]}...")
+            
+            return False
         except Exception as e:
-            print(f"🔥 ERRO FIREBASE VIEW: {str(e)}")
+            logger.error(f"❌ Firebase init error: {type(e).__name__}: {str(e)[:200]}")
+            return False
+    
+    def post(self, request):
+        token = request.data.get("token")
+        if not token:
+            return Response({"error": "Token ausente"}, status=400)
+        
+        # Inicializar Firebase AGORA
+        if not self._init_firebase_robust():
+            if settings.DEBUG:
+                # Mock para desenvolvimento
+                user, _ = CustomUser.objects.get_or_create(
+                    email="mock@example.com",
+                    defaults={"name": "Mock", "is_active": True}
+                )
+                user.set_unusable_password()
+                user.save()
+                store = ensure_user_has_store(user)
+                refresh = RefreshToken.for_user(user)
+                return Response({
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
+                    "user": {"email": user.email},
+                    "store": {"plan": "free"} if store else None,
+                    "_debug": "Firebase mock"
+                })
+            return Response({"error": "Firebase não configurado"}, status=503)
+        
+        # Verificar token
+        try:
+            decoded = firebase_auth.verify_id_token(token)
+        except Exception as e:
+            logger.error(f"❌ Token error: {type(e).__name__}: {str(e)[:100]}")
+            return Response({"error": "Token inválido"}, status=401)
+        
+        # Criar usuário
+        email = decoded.get("email")
+        if not email:
+            return Response({"error": "Email não encontrado"}, status=400)
+        
+        name = decoded.get("name", email.split("@")[0])
+        user, created = CustomUser.objects.get_or_create(
+            email=email,
+            defaults={"name": name, "is_active": True}
+        )
+        if created:
+            user.set_unusable_password()
+            user.save()
+        
+        # Loja
+        store = ensure_user_has_store(user)
+        
+        # JWT
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+        access["email"] = user.email
+        if store:
+            access["plan"] = store.plan
+        
+        return Response({
+            "access": str(access),
+            "refresh": str(refresh),
+            "user": {"email": user.email, "name": user.name},
+            "store": {"plan": store.plan} if store else None,
+        })
 # ==========================================
 # UTILITÁRIOS LGPD - ANONIMIZAÇÃO E SEGURANÇA
 # ==========================================

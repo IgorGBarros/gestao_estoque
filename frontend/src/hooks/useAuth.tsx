@@ -1,8 +1,9 @@
-// src/hooks/useAuth.tsx - VERSÃO COM RACE CONDITION FIX + TIMEOUT HANDLING
+// src/hooks/useAuth.tsx - VERSÃO FINAL CORRIGIDA
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from "react";
-import { useNavigate, useLocation } from "react-router-dom"; // ✅ ADICIONAR useLocation
+import { useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { api } from "../services/api";
+// ✅ Imports do Firebase vêm do arquivo separado
 import { auth, googleProvider, signInWithPopup } from "../firebaseConfig";
 import { useToast } from "./use-toast";
 
@@ -70,7 +71,7 @@ export interface User {
 interface AuthContextData {
   user: User | null;
   loading: boolean;
-  authLoading?: boolean; // ✅ Estado de loading para login específico
+  authLoading?: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
@@ -87,15 +88,14 @@ const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 // ==========================================
 export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  const location = useLocation(); // ✅ ADICIONAR para usar em signIn
+  const location = useLocation();
   const { toast } = useToast();
   
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [authLoading, setAuthLoading] = useState(false); // ✅ Loading específico para ações de auth
+  const [authLoading, setAuthLoading] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
   
-  // ✅ Ref para prevenir múltiplas inicializações simultâneas
   const initRef = useRef(false);
 
   // ==========================================
@@ -143,13 +143,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ✅ INICIALIZAÇÃO COM PREVENÇÃO DE RACE CONDITION
   // ==========================================
   const initializeAuth = useCallback(async () => {
-    // ✅ GUARD: Previne execuções concorrentes
     if (initRef.current) {
       if (import.meta.env.DEV) console.log("⏳ initializeAuth já está rodando, ignorando...");
       return;
     }
     
-    // Marca como em execução
     initRef.current = true;
     
     if (import.meta.env.DEV) console.log("[DEBUG] initializeAuth iniciado");
@@ -157,19 +155,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const storedToken = localStorage.getItem("auth_token");
     const storedUser = localStorage.getItem("auth_user");
     
-    // Se não tem token, define como não logado imediatamente
     if (!storedToken) {
       setUser(null);
       setLoading(false);
       setIsInitialized(true);
-      initRef.current = false; // Libera para futuras inicializações
+      initRef.current = false;
       return;
     }
 
-    // Define token inicial no Axios
     api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
     
-    // Parse seguro do usuário salvo
     if (storedUser) {
       try {
         setUser(JSON.parse(storedUser));
@@ -181,20 +176,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       let profileData = null;
       
-      // Tenta buscar perfil com tratamento específico para 401
       try {
         profileData = await optimizedProfileApi.get();
       } catch (err: any) {
-        // Se for 401, tenta renovar UMA VEZ
         if (err.response?.status === 401) {
           if (import.meta.env.DEV) console.log("🔄 Token expirado. Tentando renovar...");
           const newToken = await refreshToken();
           
           if (newToken) {
-            // Renovou com sucesso, busca perfil forçando refresh
             profileData = await optimizedProfileApi.get(true);
           } else {
-            // Falha na renovação = sessão inválida
             if (import.meta.env.DEV) console.warn("🔒 Renovação falhou. Limpando sessão...");
             handleLogout(false);
             setLoading(false);
@@ -203,12 +194,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         } else {
-          // Outro erro (500, timeout, rede): mantém dados locais
           if (import.meta.env.DEV) console.warn("⚠️ Erro de rede ao carregar perfil, usando dados locais");
         }
       }
 
-      // Se conseguiu dados do perfil, atualiza tudo
       if (profileData) {
         const userData: User = {
           ...(storedUser ? JSON.parse(storedUser) : {}),
@@ -229,18 +218,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
       handleLogout(false);
     } finally {
-      // ✅ SEMPRE libera o ref e atualiza estado no finally
       setLoading(false);
       setIsInitialized(true);
       initRef.current = false;
     }
-  }, [handleLogout]); // ← handleLogout é a ÚNICA dependência
+  }, [handleLogout]);
 
-  // ==========================================
-  // ✅ EFEITO DE INICIALIZAÇÃO (COM GUARD EXTRA)
-  // ==========================================
   useEffect(() => {
-    // ✅ Verifica isInitialized E initRef para prevenir chamadas duplicadas
     if (!isInitialized && !initRef.current) {
       initializeAuth();
     }
@@ -250,7 +234,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ✅ LOGIN (Email/Senha)
   // ==========================================
   const signIn = async (email: string, password: string) => {
-    setAuthLoading(true); // ✅ Mostrar loading durante login
+    setAuthLoading(true);
     
     try {
       const response = await api.post("/auth/login/", { email, password });
@@ -258,26 +242,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (!access) throw new Error("Token não recebido");
       
-      // ✅ Verificar consentimento básico
       const hasBasicConsent = localStorage.getItem("cookie_consent_accepted") === "true";
       if (!hasBasicConsent) {
-        // Redireciona para página de consentimento
         navigate("/consent", { state: { from: location } });
         return;
       }
       
-      // ✅ Verificar se precisa de consentimento completo
       if (consent_required) {
         console.log("✅ Consentimento completo pendente");
-        // O PostAuthConsentModal vai detectar e mostrar automaticamente
       }
       
-      // Salvar tokens
       localStorage.setItem("auth_token", access);
       if (refresh) localStorage.setItem("refresh_token", refresh);
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
       
-      // Buscar perfil
       try {
         const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
@@ -290,14 +268,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
       } catch (e) {
-        // Fallback básico se profile falhar
         setUser({ id: 0, email, name: email.split('@')[0], is_staff: false });
       }
       
     } catch (error: any) {
       console.error("❌ Erro no login:", error);
       
-      // ✅ Mensagem amigável para timeout
       if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
         toast({
           title: "⏳ Servidor respondendo lentamente",
@@ -315,7 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       handleLogout(false);
       throw error;
     } finally {
-      setAuthLoading(false); // ✅ Esconder loading
+      setAuthLoading(false);
     }
   };
 
@@ -331,15 +307,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ==========================================
   // ✅ LOGIN GOOGLE
   // ==========================================
- // src/hooks/useAuth.tsx - signInWithGoogle CORRIGIDO
-
   const signInWithGoogle = async () => {
     setAuthLoading(true);
     
     try {
       console.log("🔐 Iniciando login com Google...");
       
-      // Login Firebase
       const result = await signInWithPopup(auth, googleProvider);
       const idToken = await result.user.getIdToken();
       
@@ -348,13 +321,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         timestamp: Date.now()
       });
 
-      // ✅ Chamada ao backend - NÃO usar api.post aqui se api tem interceptor de API Key
-      // Usar fetch direto para evitar conflito com ApiKeyMiddleware
+      // ✅ Usar fetch direto para evitar conflito com ApiKeyMiddleware
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/auth/firebase/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // ✅ NÃO enviar Authorization aqui - é auth de usuário, não API Key
+          // ✅ NÃO enviar Authorization - é auth de usuário, não API Key
         },
         body: JSON.stringify({ token: idToken }),
       });
@@ -369,11 +341,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (!access) throw new Error("Token Django ausente");
 
-      // ✅ SALVAR TOKEN JWT no localStorage E no axios
       localStorage.setItem("auth_token", access);
       if (refresh) localStorage.setItem("refresh_token", refresh);
-      
-      // ✅ Atualizar headers do axios para próximas requisições
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
       
       console.log("✅ Token JWT salvo:", { 
@@ -381,7 +350,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasRefresh: !!refresh 
       });
 
-      // Buscar perfil com o token JWT agora configurado
       try {
         const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
@@ -410,9 +378,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         code: error.code,
       });
 
-
-
-      // ✅ Tratamento específico para erros comuns
       if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
         toast({
           title: "⏳ Conexão lenta",
@@ -426,7 +391,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           variant: "destructive",
         });
       } else if (error.message?.includes("cancelado") || error.code === "auth/popup-closed-by-user") {
-        // Não mostrar toast para cancelamento pelo usuário
         return;
       } else if (error.code === "auth/account-exists-with-different-credential") {
         toast({
@@ -444,7 +408,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       throw error;
     } finally {
-      setAuthLoading(false); // ✅ Esconder loading
+      setAuthLoading(false);
     }
   };
 
@@ -482,7 +446,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
       user, 
       loading, 
-      authLoading, // ✅ Expor estado de loading para componentes
+      authLoading,
       signIn, 
       signUp, 
       signInWithGoogle, 
@@ -503,3 +467,4 @@ export const useAuth = () => {
   }
   return context;
 };
+// ✅ FIM DO ARQUIVO - Não adicionar nada após esta linha
