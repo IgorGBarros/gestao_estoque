@@ -289,40 +289,71 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = async () => {
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const idToken = await result.user.getIdToken(true);
-      if (!idToken) throw new Error("Falha ao gerar credencial do Google");
-      
+      const idToken = await result.user.getIdToken();
+      const fallbackEmail = result.user.email || "";
+      const fallbackName = result.user.displayName || fallbackEmail.split("@")[0] || "Usuário";
+
+      console.log("🔐 Enviando token para backend...");
+
       const response = await api.post("/auth/firebase/", { token: idToken });
       const { access, refresh } = response.data;
+
       if (!access) throw new Error("Token Django ausente");
 
       localStorage.setItem("auth_token", access);
       if (refresh) localStorage.setItem("refresh_token", refresh);
       api.defaults.headers.common["Authorization"] = `Bearer ${access}`;
-      
+
       try {
         const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
           id: profileData.id || 0,
-          email: profileData.email || response.data.email,
-          name: profileData.display_name || response.data.name || "Consultora",
+          email: profileData.email || fallbackEmail,
+          name: profileData.display_name || profileData.name || fallbackName,
           ...profileData,
           is_staff: profileData.is_staff ?? false
         };
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
+
+        console.log("✅ Login Google completo:", userData.email);
       } catch (e) {
-        setUser({ id: 0, email: response.data.email, name: response.data.name || "Consultora", is_staff: false });
+        console.warn("⚠️ Perfil não carregado, usando dados básicos");
+        setUser({
+          id: 0,
+          email: fallbackEmail,
+          name: fallbackName,
+          is_staff: false
+        });
       }
     } catch (error: any) {
-      handleLogout(false);
-      if (error.response?.data?.error) {
-        throw new Error(error.response.data.error);
+      console.error("❌ Erro Google Sign-In:", {
+        message: error.message,
+        code: error.code,
+      });
+
+      if (error.message?.includes("popup-blocked")) {
+        toast({
+          title: "Popup bloqueado",
+          description: "Permita popups para este site e tente novamente",
+          variant: "destructive",
+        });
+      } else if (error.message?.includes("cancelado")) {
+        return;
+      } else {
+        toast({
+          title: "Erro no login",
+          description: error.message || "Tente novamente",
+          variant: "destructive",
+        });
       }
+
       throw error;
     }
-  };
+    
 
+  
+};
   const signInDemo = () => {
     const demoUser: User = { 
       id: 999, 

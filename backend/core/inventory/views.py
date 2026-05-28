@@ -120,42 +120,134 @@ class CustomUserCreateView(generics.CreateAPIView):
         except Exception as e:
             log_safe("Erro ao criar loja no cadastro", user_id=user.id, error=str(e))
 
-# backend/core/inventory/views.py
 
-# inventory/views.py
+from firebase_admin import auth as firebase_auth
+
 
 class FirebaseLoginView(APIView):
-    permission_classes = [AllowAny]
-
+    """
+    ✅ VERSÃO CORRIGIDA: Login Firebase com tratamento robusto de erros
+    """
+    permission_classes = [permissions.AllowAny]
+    
     def post(self, request):
-        firebase_token = request.data.get('token')
+        firebase_token = request.data.get("token")
+        
         if not firebase_token:
-            return Response({'error': 'Token ausente'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                "error": "Token Firebase ausente",
+                "details": "O campo 'token' é obrigatório no body da requisição"
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            # Cria ou atualiza usuário no Django baseado no Firebase
-            user = CustomUser.objects.create_user_with_firebase(firebase_token)
+            print(f"🔐 Firebase Login - Token recebido: {firebase_token[:20]}...")
             
-            # Gera tokens JWT usando SimpleJWT
+            # ✅ 1. Verificar token Firebase
+            try:
+                decoded_token = firebase_auth.verify_id_token(firebase_token)
+                print(f"✅ Token Firebase verificado: {decoded_token.get('email')}")
+            except firebase_auth.ExpiredIdTokenError:
+                return Response({
+                    "error": "Token Firebase expirado",
+                    "details": "Obtenha um novo token e tente novamente"
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            except firebase_auth.InvalidIdTokenError as e:
+                print(f"❌ Token Firebase inválido: {str(e)}")
+                return Response({
+                    "error": "Token Firebase inválido",
+                    "details": str(e)
+                }, status=status.HTTP_401_UNAUTHORIZED)
+            except Exception as e:
+                print(f"❌ Erro ao verificar token Firebase: {str(e)}")
+                traceback.print_exc()
+                return Response({
+                    "error": "Erro ao verificar token Firebase",
+                    "details": str(e)
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # ✅ 2. Criar/atualizar usuário Django
+            email = decoded_token.get("email")
+            name = decoded_token.get("name", email.split("@")[0] if email else "User")
+            firebase_uid = decoded_token.get("uid")
+            
+            if not email:
+                return Response({
+                    "error": "Email não encontrado no token Firebase",
+                    "details": "O token Firebase não contém um email válido"
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Buscar ou criar usuário
+            from .models import CustomUser
+            user, created = CustomUser.objects.get_or_create(
+                email=email,
+                defaults={
+                    "name": name,
+                    "is_active": True
+                }
+            )
+            
+            if not created:
+                # Atualizar nome se mudou
+                if user.name != name:
+                    user.name = name
+                    user.save()
+                print(f"👤 Usuário existente: {user.email}")
+            else:
+                user.set_unusable_password()
+                user.save()
+                print(f"✨ Novo usuário criado: {user.email}")
+            
+            # ✅ 3. Garantir que usuário tem loja
+            from .utils import ensure_user_has_store
+            try:
+                store = ensure_user_has_store(user)
+                if not store:
+                    print(f"⚠️ Não foi possível criar loja para {user.email}")
+            except Exception as e:
+                print(f"⚠️ Erro ao criar loja: {str(e)}")
+                store = None
+            
+            # ✅ 4. Gerar tokens JWT
             refresh = RefreshToken.for_user(user)
+            access_token = refresh.access_token
             
-            # Obtém dados da loja para incluir na resposta
-            store = getattr(user, 'store', None)
+            # Adicionar claims customizados
+            access_token["email"] = user.email
+            access_token["name"] = user.name
+            if store:
+                access_token["store_slug"] = store.slug
+                access_token["plan"] = store.plan
             
+            print(f"✅ Login Firebase sucesso: {user.email}")
+            
+            # ✅ 5. Response com dados completos
             return Response({
-                'access': str(refresh.access_token), # Token de acesso (curta duração)
-                'refresh': str(refresh),             # Token de refresh (longa duração)
-                'email': user.email,
-                'name': getattr(user, 'name', user.email),
-                'plan': store.plan if store else 'free',
-                'is_pro': store.plan == 'pro' if store else False,
-                'is_authenticated': True
+                "access": str(access_token),
+                "refresh": str(refresh),
+                "token_type": "Bearer",
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "name": user.name,
+                    "is_authenticated": True,
+                },
+                "store": {
+                    "id": store.id if store else None,
+                    "slug": store.slug if store else None,
+                    "plan": store.plan if store else "free",
+                    "can_add_products": store.can_add_products if store else True,
+                } if store else None,
+                "message": "Login realizado com sucesso"
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
-            print(f"🔥 ERRO FIREBASE VIEW: {str(e)}")
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
+            print(f"🔥 ERRO CRÍTICO FIREBASE VIEW: {str(e)}")
+            traceback.print_exc()
+            
+            return Response({
+                "error": "Erro interno ao processar login Firebase",
+                "details": str(e) if settings.DEBUG else "Tente novamente em alguns instantes"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 # ==========================================
 # UTILITÁRIOS LGPD - ANONIMIZAÇÃO E SEGURANÇA
 # ==========================================
@@ -218,14 +310,6 @@ from .scraper import search_google_shopping
 # ==========================================
 # 0. HELPERS & MIXINS MULTI-TENANT
 # ==========================================
-
-
-# inventory/views.py - VERSÃO FINAL da função get_current_store
-
-# inventory/views.py - VERSÃO FINAL da função get_current_store
-
-# inventory/views.py - VERSÃO FINAL da função get_current_store
-
 
 def get_current_store(user):
     """

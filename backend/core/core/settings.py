@@ -119,20 +119,24 @@ INSTALLED_APPS = [
     'ai',
     'apps.payments',
 ]
-
-# ✅ CORREÇÃO: CORS primeiro no middleware
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # Primeiro
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',  # JWT usa este
-    'inventory.middleware.ApiKeyMiddleware',  # ✅ DEPOIS de AuthenticationMiddleware
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # CORS deve ser o PRIMEIRO middleware após segurança básica
+    "corsheaders.middleware.CorsMiddleware",
+    
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    
+    # Autenticação ANTES do middleware customizado
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    
+    # Seu middleware de API Key DEPOIS da autenticação Django
+    "inventory.middleware.ApiKeyMiddleware",
+    
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
-
 ROOT_URLCONF = 'core.urls'
 
 TEMPLATES = [
@@ -151,42 +155,105 @@ TEMPLATES = [
     },
 ]
 
-# ✅ CORS corrigido para Firebase
+# ==========================================
+# 🔐 CORS CONFIGURATION - CORRIGIDO E SEGURO
+# ==========================================
+
+# ✅ Lista de origens permitidas (frontend + Firebase + serviços)
 CORS_ALLOWED_ORIGINS = [
-    "https://api.minhaamora.com.br",
-    "https://minhaamora.com.br",
+    # Desenvolvimento local
     "http://localhost:3000",
-    "http://127.0.0.1:3000",
     "http://localhost:5173",
+    "http://127.0.0.1:3000",
     "http://127.0.0.1:5173",
+    
+    # Produção - Domínios principais
+    "https://minhaamora.com.br",
+    "https://www.minhaamora.com.br",
+    "https://api.minhaamora.com.br",
+    
+    # Produção - Vercel
     "https://gestao-estoque-one.vercel.app",
+    "https://gestao-estoque-dev-one.vercel.app",
+    "https://*.vercel.app",  # Para previews de deploy
+    
+    # Produção - Render
     "https://gestao-estoque-k5vy.onrender.com",
     "https://dev-brih.onrender.com",
-    "https://gestao-estoque-dev-one.vercel.app",
+    "https://*.onrender.com",
+    
+    # Firebase Auth (necessário para popup de login)
     "https://*.firebaseapp.com",
     "https://*.googleapis.com",
     "https://*.google.com",
     "https://*.gstatic.com",
-    "https://plataforma-financeira-29a27.firebaseapp.com"
+    
+    # Projeto específico do Firebase (opcional - se usar emulador local)
+    # "https://plataforma-financeira-29a27.firebaseapp.com",
 ]
 
+# ✅ Regex para origens dinâmicas (fallback para CORS_ALLOWED_ORIGINS)
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.vercel\.app$",
+    r"^https://.*\.onrender\.com$",
     r"^http://localhost:\d+$",
     r"^http://127\.0\.0\.1:\d+$",
 ]
 
+# ✅ Permitir envio de cookies e headers de autenticação
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = False
 
-# ✅ CORREÇÃO CRÍTICA: Configuração para Firebase popup
-SECURE_CROSS_ORIGIN_OPENER_POLICY = None  # ✅ Permite popups do Firebase
-
-CSRF_TRUSTED_ORIGINS = [
-    "https://gestao-estoque-one.vercel.app",
-    "https://gestao-estoque-k5vy.onrender.com",
-    "https://gestao-estoque-dev-one.vercel.app",
+# ✅ Headers permitidos nas requisições CORS
+CORS_ALLOW_HEADERS = [
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
+    # Headers específicos do Firebase
+    "x-firebase-locale",
+    "x-firebase-gmpid",
+    "x-client-data",
+    "x-goog-authuser",
+    "x-firebase-app-check",
 ]
+
+# ✅ Métodos HTTP permitidos via CORS
+CORS_ALLOW_METHODS = [
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+]
+
+# ⚠️ IMPORTANTE: NÃO use CORS_ALLOW_ALL_ORIGINS = True em produção
+# Isso anula CORS_ALLOWED_ORIGINS e expõe sua API a qualquer domínio
+# Use apenas em desenvolvimento local se necessário:
+if DEBUG:
+    # Em desenvolvimento, permitir localhost e Firebase
+    CORS_ALLOW_ALL_ORIGINS = False  # ← Mantém segurança mesmo em DEBUG
+    # Se precisar testar com origem arbitrária em DEV, use:
+    # CORS_ALLOWED_ORIGINS += ["http://192.168.1.100:3000"]  # Exemplo
+
+# ✅ CSRF para origens confiáveis (necessário para cookies)
+CSRF_TRUSTED_ORIGINS = [
+    "https://minhaamora.com.br",
+    "https://www.minhaamora.com.br",
+    "https://gestao-estoque-one.vercel.app",
+    "https://gestao-estoque-dev-one.vercel.app",
+    "https://gestao-estoque-k5vy.onrender.com",
+    "https://dev-brih.onrender.com",
+]
+
+# ✅ Configuração para popups do Firebase Auth
+# Permite que o popup de login do Firebase feche e retorne dados ao opener
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin-allow-popups"
 
 WSGI_APPLICATION = 'core.wsgi.application'
 
