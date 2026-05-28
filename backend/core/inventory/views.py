@@ -26,6 +26,7 @@ import re
 import hashlib  # ✅ Para hash de dados sensíveis
 import traceback
 
+from django.http import HttpResponse
 # Imports do Django Auth
 from django.contrib.auth import authenticate, get_user_model, login
 
@@ -3615,6 +3616,7 @@ def record_consent(request):
         "status": "error",
         "errors": serializer.errors
     }, status=status.HTTP_400_BAD_REQUEST)
+
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def revoke_consent(request, purpose: str):
@@ -3702,3 +3704,8 @@ def export_my_data(request):
         "transactions": StockTransactionSerializer(transactions, many=True).data,
         "note": "Dados exportados conforme Art. 18, V da LGPD"
     })
+
+
+def health_check_raw(request):
+    """Health check raw HTTP - retorna em <10ms sem acessar nada"""
+    return HttpResponse("OK", content_type="text/plain", status=200)
