@@ -49,7 +49,7 @@ from inventory.views import public_storefront, public_storefront_view, lookup_pr
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 urlpatterns = [
-    path('health/raw/', health_check_raw, name='health_check_raw'),
+    
     # Admin Django
     path('admin/', admin.site.urls),
     
