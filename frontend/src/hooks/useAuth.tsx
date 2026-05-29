@@ -320,7 +320,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         tokenLength: idToken?.length,
         timestamp: Date.now()
       });
+        // src/hooks/useAuth.tsx - dentro de signInWithGoogle, ANTES do fetch
 
+        console.log("🔍 [CP1] Preparando requisição Firebase login");
+        console.log("🔍 [CP1] VITE_API_BASE_URL:", import.meta.env.VITE_API_BASE_URL);
+        console.log("🔍 [CP1] URL completa:", `${import.meta.env.VITE_API_BASE_URL}/api/auth/firebase/`);
+        console.log("🔍 [CP1] idToken length:", idToken?.length);
+        console.log("🔍 [CP1] idToken starts with:", idToken?.substring(0, 20) + "...");
+
+        // Verificar se há token JWT antigo no localStorage (pode causar conflito)
+        const oldToken = localStorage.getItem("auth_token");
+        console.log("🔍 [CP1] auth_token no localStorage:", oldToken ? "✅ Existe" : "❌ Não existe");
+        if (oldToken) {
+          console.log("⚠️ [CP1] ATENÇÃO: Token antigo pode interferir. Limpando...");
+          localStorage.removeItem("auth_token");
+          localStorage.removeItem("refresh_token");
+          delete api.defaults.headers.common["Authorization"];
+        }
       // ✅ Usar fetch direto para evitar conflito com ApiKeyMiddleware
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/auth/firebase/`, {
         method: 'POST',

@@ -1,5 +1,6 @@
 # backend/core/inventory/middleware.py
 
+from asyncio.log import logger
 import re
 from django.utils.deprecation import MiddlewareMixin
 from rest_framework.response import Response
@@ -32,13 +33,21 @@ class ApiKeyMiddleware(MiddlewareMixin):
         r'^/api/admin/feature-gates/',
     ]
     
+    # backend/core/inventory/middleware.py - dentro de process_request
+
     def process_request(self, request):
         path = request.path_info
+        logger.info(f"🔍 [CP3] ApiKeyMiddleware: {request.method} {path}")
         
-        # ✅ Pular validação para rotas excluídas
+        # ✅ Verificar se é rota excluída
         for excluded in self.EXCLUDED_PATHS:
             if re.match(excluded, path):
+                logger.info(f"✅ [CP3] Rota excluída: {path} ~ {excluded}")
                 return None  # Continua sem validar API Key
+        
+        logger.info(f"⚠️ [CP3] Rota NÃO excluída, validando API Key...")
+        
+    # ... resto da validação ...
         
         # ✅ Validar API Key comercial apenas para endpoints protegidos
         auth_header = request.headers.get('Authorization', '')

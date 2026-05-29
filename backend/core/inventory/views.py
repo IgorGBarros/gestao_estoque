@@ -2,6 +2,7 @@
 # IMPORTS GERAIS - CORRIGIDOS
 # ==========================================
 from time import time
+from aiohttp import request
 from django.db import models, transaction
 from django.db.models import Q, Count, Sum, F, Prefetch
 from django.utils import timezone
@@ -210,6 +211,9 @@ class FirebaseLoginView(APIView):
             return False
     
     def post(self, request):
+        logger.info(f"🔍 [CP4] FirebaseLoginView entry: method={request.method}, path={request.path}")
+        logger.info(f"🔍 [CP4] Request headers: {dict(request.headers)}")
+        logger.info(f"🔍 [CP4] Request data keys: {list(request.data.keys()) if request.data else 'empty'}")
         token = request.data.get("token")
         if not token:
             return Response({"error": "Token ausente"}, status=400)
