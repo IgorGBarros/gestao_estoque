@@ -30,7 +30,7 @@ export const api = axios.create({
     "Content-Type": "application/json",
     "Accept": "application/json"
   },
-  timeout: 120000, // ✅ 120 segundos para evitar timeout em cold starts do Render
+  timeout: 150000, // ✅ 150 segundos para evitar timeout em cold starts do Render
 });
 
 // ✅ Lista de rotas públicas que NÃO devem receber token JWT

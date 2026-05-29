@@ -2199,13 +2199,19 @@ def feature_gates_view(request):
     return Response(visible_gates)
 
 
+# backend/core/inventory/views.py
 
 import logging
+from django.conf import settings
+from rest_framework import status, permissions
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
 
 logger = logging.getLogger(__name__)
 
+
 @api_view(["GET", "PATCH"])
-@permission_classes([IsAuthenticated])
+@permission_classes([permissions.IsAuthenticated])
 def profile_view(request):
     """
     Retorna ou atualiza as informações da loja do usuário.
@@ -2214,10 +2220,10 @@ def profile_view(request):
     try:
         # ✅ Obter ou criar loja do usuário
         from .utils import get_current_store, validate_store_ownership
+        
         store = get_current_store(request.user)
         
         if not store:
-            # ✅ Retorna Response DRF válido (não TemplateResponse)
             return Response(
                 {"error": "Loja não encontrada para este usuário"}, 
                 status=status.HTTP_400_BAD_REQUEST
@@ -2227,8 +2233,9 @@ def profile_view(request):
         validate_store_ownership(request.user, store)
         
         if request.method == "GET":
-            # ✅ Serializar dados
             from .serializers import ProfileSerializer
+            
+            # ✅ Serializar dados
             serializer = ProfileSerializer(store, context={"request": request})
             
             # ✅ CRÍTICO: Acessar .data força a serialização IMEDIATA
@@ -2240,6 +2247,7 @@ def profile_view(request):
         
         elif request.method == "PATCH":
             from .serializers import ProfileSerializer
+            
             serializer = ProfileSerializer(
                 store, 
                 data=request.data, 
@@ -2263,7 +2271,8 @@ def profile_view(request):
         if settings.DEBUG:
             logger.error(f"❌ Erro no profile_view: {e}", exc_info=True)
         else:
-            logger.error(f"❌ Erro no profile_view para user {request.user.id if request.user.is_authenticated else 'anon'}")
+            user_id = request.user.id if request.user.is_authenticated else 'anon'
+            logger.error(f"❌ Erro no profile_view para user {user_id}")
         
         # ✅ Sempre retorna Response DRF, nunca raise
         return Response(
@@ -2273,32 +2282,7 @@ def profile_view(request):
             }, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-    except Exception as e:
-        # ✅ Log seguro em produção
-        if settings.DEBUG:
-            print(f"❌ Erro no profile_view: {e}")
-        
-        # ✅ Sempre retorna Response DRF, nunca raise
-        return Response(
-            {
-                "error": "Erro interno ao processar perfil",
-                "details": str(e) if settings.DEBUG else "Tente novamente"
-            }, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-    except Exception as e:
-        # ✅ Log seguro em produção
-        if settings.DEBUG:
-            print(f"❌ Erro no profile_view: {e}")
-        
-        # ✅ Sempre retorna Response, nunca raise em views @api_view
-        return Response(
-            {
-                "error": "Erro interno ao processar perfil",
-                "details": str(e) if settings.DEBUG else "Tente novamente"
-            }, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+    # ✅ FIM DA FUNÇÃO - Apenas UM bloco except Exception
 # ==========================================
 # 5. PAINEL ADMIN (Gestão de Assinaturas)
 # ==========================================
