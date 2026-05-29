@@ -347,7 +347,7 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-
+"""
 # ✅ Firebase Admin - Inicialização robusta para Render
 try:
     import firebase_admin
@@ -400,7 +400,7 @@ try:
         
 except ImportError:
     print("⚠️ Firebase Admin SDK não instalado. Adicione firebase-admin ao requirements.txt", file=sys.stderr)
-
+"""
 # ==========================================
 # 💳 ASAAS CONFIGURATION
 # ==========================================
