@@ -614,6 +614,7 @@ class ThemeConfigSerializer(serializers.ModelSerializer):
 # CONSENTIMENTO LGPD - SERIALIZERS
 # ==========================================
 # backend/core/inventory/serializers.py - ConsentRecordSerializer CORRIGIDO
+# backend/core/inventory/serializers.py
 
 class ConsentRecordSerializer(serializers.Serializer):
     """
@@ -626,7 +627,13 @@ class ConsentRecordSerializer(serializers.Serializer):
     session_id = serializers.CharField(required=False, allow_blank=True, max_length=100)
     
     # === Dados do consentimento ===
-    version = serializers.CharField(required=True, max_length=20)
+    # ✅ MAPEAMENTO CRÍTICO: 'version' no input → 'term_version' no modelo
+    version = serializers.CharField(
+        source='term_version',  # ← Isso converte automaticamente!
+        required=True, 
+        max_length=20,
+        help_text="Versão do termo aceito (ex: 'v1.0_2026-05')"
+    )
     
     purposes = serializers.ListField(
         child=serializers.ChoiceField(choices=[
@@ -648,23 +655,19 @@ class ConsentRecordSerializer(serializers.Serializer):
     created_at = serializers.DateTimeField(read_only=True)
     revoked_at = serializers.DateTimeField(read_only=True, allow_null=True)
     
-    # === VALIDAÇÕES CORRIGIDAS ===
+    # === VALIDAÇÕES ===
     
     def validate_version(self, value):
         """Valida formato da versão"""
-        # ✅ Aceitar formato flexível
         if not re.match(r'^v?\d+\.?\d*_?\d{4}-?\d{2}$', value):
-            # Se não bater, apenas log e aceita (fallback)
-            logger.warning(f"⚠️ Versão de consentimento em formato não padrão: {value}")
+            logger.warning(f"⚠️ Versão em formato não padrão: {value}")
         return value
     
     def validate_purposes(self, purposes):
-        """Valida finalidades - mais flexível"""
-        # ✅ Permitir qualquer propósito não-vazio
+        """Valida finalidades - filtra apenas válidos"""
         if not purposes:
             raise serializers.ValidationError("Purposes cannot be empty")
         
-        # Filtrar apenas propósitos válidos (silenciosamente ignorar inválidos)
         valid = [p for p in purposes if p in [
             'essential', 'authentication', 'service_delivery', 'legal_compliance',
             'analytics', 'marketing', 'behavior_tracking', 'ai_features',
@@ -676,9 +679,10 @@ class ConsentRecordSerializer(serializers.Serializer):
         return valid
     
     def validate(self, attrs):
-        """Validação geral simplificada"""
-        # ✅ Para usuários autenticados, usar dados da request
+        """Validação geral"""
         request = self.context.get('request')
+        
+        # ✅ Para usuários autenticados, usar dados da request
         if request and request.user.is_authenticated:
             attrs['user'] = request.user
             attrs['email'] = request.user.email.lower()
@@ -707,6 +711,7 @@ class ConsentRecordSerializer(serializers.Serializer):
         """Cria registro de consentimento"""
         from .models import ConsentRecord
         
+        # Extrair metadados
         ip_address = validated_data.pop('ip_address', None)
         user_agent = validated_data.pop('user_agent', '')[:500]
         
@@ -717,19 +722,20 @@ class ConsentRecordSerializer(serializers.Serializer):
             salt = getattr(settings, 'LGPD_IP_SALT', 'default-salt')
             ip_hash = hashlib.sha256(f"{ip_address}{salt}".encode()).hexdigest()
         
-        # Garantir email em lowercase
+        # Email em lowercase
         if validated_data.get('email'):
             validated_data['email'] = validated_data['email'].lower()
         
         # Extrair purposes
         purpose_flags = validated_data.pop('purposes', [])
         
+        # ✅ validated_data já tem 'term_version' graças ao source='term_version'
         # Criar registro
         consent = ConsentRecord.objects.create(
             ip_hash=ip_hash,
             user_agent=user_agent,
             purpose_flags=purpose_flags,
-            **validated_data
+            **validated_data  # ← Contém 'term_version', não 'version'
         )
         
         return consent
@@ -739,6 +745,11 @@ class ConsentRecordSerializer(serializers.Serializer):
         rep = super().to_representation(instance)
         rep.pop('ip_hash', None)
         rep.pop('user_agent', None)
+        
+        # ✅ Mapear 'term_version' → 'version' na resposta
+        if hasattr(instance, 'term_version'):
+            rep['version'] = instance.term_version
+        
         rep['purposes_granted'] = instance.purpose_flags
         rep['can_revoke'] = [
             p for p in instance.purpose_flags 
