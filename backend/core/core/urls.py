@@ -11,7 +11,7 @@ from inventory.views import (
     CustomTokenObtainPairView,
     CustomUserCreateView,
     FirebaseLoginView,
-    health_check_raw,
+  
     profile_view,
 )
 
