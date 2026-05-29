@@ -141,31 +141,51 @@ from .models import CustomUser
 from .utils import ensure_user_has_store
 
 logger = logging.getLogger(__name__)
+# backend/core/inventory/views.py - FirebaseLoginView COMPLETA E ROBUSTA
+
+import os
+import json
+import re
+import logging
+from django.conf import settings
+from rest_framework import status, permissions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+# Firebase imports
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
+
+from .models import CustomUser
+from .utils import ensure_user_has_store
+
+logger = logging.getLogger(__name__)
 
 
 class FirebaseLoginView(APIView):
     permission_classes = [permissions.AllowAny]
     
-    def _init_firebase_robust(self) -> bool:
+    def _init_firebase_safe(self) -> bool:
         """
-        Inicializa Firebase com correção agressiva de caracteres de controle.
-        Retorna True se sucesso, False se falhou.
+        Inicializa Firebase com correção agressiva de caracteres.
+        Retorna True se sucesso, False se falhou (NUNCA lança exceção).
         """
-        # Se já inicializado, retorna
-        if firebase_admin._apps:
-            return True
-        
-        creds_json = os.environ.get("FIREBASE_CREDENTIALS")
-        if not creds_json:
-            logger.error("❌ FIREBASE_CREDENTIALS não configurada")
-            return False
-        
         try:
-            # 🔧 CORREÇÃO AGRESSIVA: Escapar TODOS caracteres de controle
-            # Primeiro, substituir \\ por um placeholder temporário
-            creds_json = creds_json.replace('\\\\', '\x00PLACEHOLDER\x00')
+            # Se já inicializado, retorna
+            if firebase_admin._apps:
+                return True
             
-            # Escapar caracteres de controle reais
+            creds_json = os.environ.get("FIREBASE_CREDENTIALS")
+            if not creds_json:
+                logger.error("❌ FIREBASE_CREDENTIALS não configurada")
+                return False
+            
+            # 🔧 CORREÇÃO AGRESSIVA DE CARACTERES
+            # 1. Placeholder para \\ (para não duplicar escapes)
+            creds_json = creds_json.replace('\\\\', '\x00BSLASH\x00')
+            
+            # 2. Escapar caracteres de controle REAIS
             creds_json = (creds_json
                 .replace('\n', '\\n')
                 .replace('\r', '\\r')
@@ -174,54 +194,47 @@ class FirebaseLoginView(APIView):
                 .replace('\f', '\\f')
             )
             
-            # Restaurar \\
-            creds_json = creds_json.replace('\x00PLACEHOLDER\x00', '\\\\')
+            # 3. Restaurar \\
+            creds_json = creds_json.replace('\x00BSLASH\x00', '\\\\')
             
-            # Parse JSON
+            # 4. Parse JSON
             creds_dict = json.loads(creds_json)
             
-            # Validar campos
+            # 5. Validar campos obrigatórios
             required = ['type', 'project_id', 'private_key', 'client_email']
-            if not all(k in creds_dict for k in required):
-                logger.error(f"❌ Firebase JSON missing: {set(required) - set(creds_dict.keys())}")
+            missing = [k for k in required if k not in creds_dict]
+            if missing:
+                logger.error(f"❌ Firebase JSON missing: {missing}")
                 return False
             
-            # Inicializar
+            # 6. Inicializar SDK
             cred = credentials.Certificate(creds_dict)
             firebase_admin.initialize_app(cred, {'projectId': creds_dict.get('project_id')})
-            logger.info("✅ Firebase inicializado com correção agressiva")
+            logger.info("✅ Firebase inicializado com sucesso")
             return True
             
         except json.JSONDecodeError as e:
-            # Log detalhado do erro para diagnóstico
-            pos = getattr(e, 'pos', 'unknown')
-            lineno = getattr(e, 'lineno', 'unknown')
-            colno = getattr(e, 'colno', 'unknown')
-            logger.error(f"❌ JSON decode error: {e} at line {lineno}, col {colno}, pos {pos}")
-            
-            # Mostrar contexto do erro (apenas primeiros 300 chars para segurança)
-            if creds_json and len(creds_json) > int(pos) if isinstance(pos, int) else False:
-                start = max(0, int(pos) - 50) if isinstance(pos, int) else 0
-                end = int(pos) + 50 if isinstance(pos, int) else 100
-                logger.error(f"🔍 Contexto do erro: ...{creds_json[start:end]}...")
-            
+            pos = getattr(e, 'pos', '?')
+            logger.error(f"❌ JSON decode error at pos {pos}: {str(e)[:150]}")
+            # Log de diagnóstico seguro (primeiros 200 chars)
+            if creds_json and isinstance(pos, int) and pos < len(creds_json):
+                start = max(0, pos - 30)
+                end = min(len(creds_json), pos + 30)
+                logger.error(f"🔍 Context: ...{creds_json[start:end]}...")
             return False
         except Exception as e:
-            logger.error(f"❌ Firebase init error: {type(e).__name__}: {str(e)[:200]}")
+            logger.error(f"❌ Firebase init error: {type(e).__name__}: {str(e)[:150]}")
             return False
     
     def post(self, request):
-        logger.info(f"🔍 [CP4] FirebaseLoginView entry: method={request.method}, path={request.path}")
-        logger.info(f"🔍 [CP4] Request headers: {dict(request.headers)}")
-        logger.info(f"🔍 [CP4] Request data keys: {list(request.data.keys()) if request.data else 'empty'}")
         token = request.data.get("token")
         if not token:
             return Response({"error": "Token ausente"}, status=400)
         
-        # Inicializar Firebase AGORA
-        if not self._init_firebase_robust():
+        # Inicializar Firebase AGORA (na request, não no startup)
+        if not self._init_firebase_safe():
+            # Fallback para DEBUG: mock user
             if settings.DEBUG:
-                # Mock para desenvolvimento
                 user, _ = CustomUser.objects.get_or_create(
                     email="mock@example.com",
                     defaults={"name": "Mock", "is_active": True}
@@ -233,9 +246,9 @@ class FirebaseLoginView(APIView):
                 return Response({
                     "access": str(refresh.access_token),
                     "refresh": str(refresh),
-                    "user": {"email": user.email},
+                    "user": {"email": user.email, "name": user.name},
                     "store": {"plan": "free"} if store else None,
-                    "_debug": "Firebase mock"
+                    "_debug": "Firebase mock (DEBUG mode)"
                 })
             return Response({"error": "Firebase não configurado"}, status=503)
         
@@ -243,7 +256,7 @@ class FirebaseLoginView(APIView):
         try:
             decoded = firebase_auth.verify_id_token(token)
         except Exception as e:
-            logger.error(f"❌ Token error: {type(e).__name__}: {str(e)[:100]}")
+            logger.error(f"❌ Token verify error: {type(e).__name__}: {str(e)[:100]}")
             return Response({"error": "Token inválido"}, status=401)
         
         # Criar usuário
