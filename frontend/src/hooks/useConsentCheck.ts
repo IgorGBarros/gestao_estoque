@@ -26,13 +26,10 @@ export function useConsentCheck(): ConsentCheckData {
   const [showModal, setShowModal] = useState(false);
   const [hasChecked, setHasChecked] = useState(false);
   
-  // ✅ Refs para controle de estado
   const hasCheckedRef = useRef(false);
   const consentRegisteredRef = useRef(false);
 
-  // ✅ Verificar consentimento válido
   const hasValidConsent = useCallback((): boolean => {
-    // ✅ Só verificar se usuário está autenticado E temos dados
     if (!isAuthenticated || !user?.id) return false;
     
     const essentials = contextEssentials.length > 0 
@@ -48,42 +45,32 @@ export function useConsentCheck(): ConsentCheckData {
 
   // ✅ Efeito: Verificar consentimento APENAS após login COMPLETO
   useEffect(() => {
-    // ✅ Guard 1: Não executar se já verificou
+    // Guard 1: Já verificou?
     if (hasCheckedRef.current) return;
     
-    // ✅ Guard 2: NÃO executar se auth ainda está carregando
+    // Guard 2: Auth ainda carregando?
     if (authLoading) return;
     
-    // ✅ Guard 3: NÃO executar se usuário não está autenticado
+    // Guard 3: Não autenticado?
     if (!isAuthenticated || !user?.id) return;
     
-    // ✅ Guard 4: NÃO executar se consentimentos ainda estão carregando
+    // Guard 4: Consentimentos ainda carregando?
     if (consentLoading) return;
     
-    // ✅ Todas as condições atendidas: pode verificar
+    // ✅ Tudo OK: pode verificar
     hasCheckedRef.current = true;
     setHasChecked(true);
     
-    // ✅ Verificar após próximo tick (garante estado consistente)
     setTimeout(() => {
       const valid = hasValidConsent();
-      console.log("🔍 LGPD Consent Check (post-auth):", { 
-        valid, 
-        consentsCount: consents.length,
-        isAuthenticated,
-        userId: user?.id,
-      });
+      console.log("🔍 LGPD Check:", { valid, consentsCount: consents.length });
       
-      // ✅ Só mostrar modal se NÃO tem consentimento válido
       if (!valid && !consentRegisteredRef.current) {
-        console.log("🔐 LGPD: Showing consent modal (blocking access)");
+        console.log("🔐 Showing consent modal");
         setShowModal(true);
-      } else if (valid) {
-        console.log("✅ LGPD: Consent already valid, access granted");
       }
-    }, 100);
+    }, 50);
     
-    // ✅ Cleanup: resetar se deslogar
     return () => {
       if (!isAuthenticated) {
         setShowModal(false);
@@ -92,19 +79,10 @@ export function useConsentCheck(): ConsentCheckData {
         consentRegisteredRef.current = false;
       }
     };
-  }, [
-    isAuthenticated, 
-    user?.id, 
-    authLoading,      // ✅ ADICIONADO: esperar auth terminar
-    consentLoading,   // ✅ ADICIONADO: esperar consentimentos carregarem
-    hasValidConsent
-  ]);
+  }, [isAuthenticated, user?.id, authLoading, consentLoading]); // ✅ SEM hasValidConsent nas deps!
 
-  // ✅ Handler: Registrar consentimento
   const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
-    const purposesToRecord = [
-      ...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES])
-    ];
+    const purposesToRecord = [...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES])];
     
     const success = await recordConsent(purposesToRecord);
     
@@ -112,14 +90,13 @@ export function useConsentCheck(): ConsentCheckData {
       consentRegisteredRef.current = true;
       await refresh();
       setShowModal(false);
-      console.log("✅ LGPD: Consent recorded, access granted");
+      console.log("✅ Consent recorded");
       return true;
     }
     
     return false;
   }, [recordConsent, refresh]);
 
-  // ✅ Bloquear acesso se modal ativo e consentimento não registrado
   const shouldBlockAccess = showModal && !consentRegisteredRef.current;
 
   return {

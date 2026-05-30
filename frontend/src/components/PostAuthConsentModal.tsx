@@ -1,22 +1,20 @@
-// src/components/PostAuthConsentModal.tsx - GUARD adicional
+// src/components/PostAuthConsentModal.tsx
 import { useAuth } from "@/hooks/useAuth";
 import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { ConsentManager } from "./ConsentManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 
 export function PostAuthConsentModal() {
-  const { isAuthenticated } = useAuth(); // ✅ Verificar auth
+  const { isAuthenticated } = useAuth();
   const { showModal, setShowModal, loading, handleConsentComplete } = useConsentCheck();
 
-  // ✅ Guard: Não renderizar se não autenticado OU não deve mostrar
+  // ✅ Guard duplo: não renderizar se não autenticado OU não deve mostrar
   if (!isAuthenticated || !showModal) return null;
 
   return (
     <Dialog 
       open={true} 
-      onOpenChange={(open) => {
-        if (!open) setShowModal(true); // Não permitir fechar
-      }}
+      onOpenChange={(open) => { if (!open) setShowModal(true); }}
       modal
     >
       <DialogContent 
@@ -29,6 +27,7 @@ export function PostAuthConsentModal() {
           <DialogTitle>🔒 Preferências de Privacidade (LGPD)</DialogTitle>
           <DialogDescription>
             Para usar o sistema, precisamos do seu consentimento conforme a Lei Geral de Proteção de Dados.
+            Você pode alterar estas preferências a qualquer momento em Configurações.
           </DialogDescription>
         </DialogHeader>
         
@@ -39,7 +38,6 @@ export function PostAuthConsentModal() {
             return success;
           }}
           loading={loading}
-        
         />
       </DialogContent>
     </Dialog>

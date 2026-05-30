@@ -1,14 +1,13 @@
-// src/components/ConsentBlockingOverlay.tsx - Guards adicionais
+// src/components/ConsentBlockingOverlay.tsx
 import { useAuth } from "@/hooks/useAuth";
 import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { useEffect } from "react";
 
 export function ConsentBlockingOverlay() {
-  const { isAuthenticated } = useAuth(); // ✅ Verificar auth
+  const { isAuthenticated } = useAuth();
   const { shouldBlockAccess, hasChecked } = useConsentCheck();
   
   useEffect(() => {
-    // ✅ Só bloquear se: auth + deve bloquear + já verificou
     if (isAuthenticated && shouldBlockAccess && hasChecked) {
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
@@ -29,7 +28,6 @@ export function ConsentBlockingOverlay() {
     }
   }, [isAuthenticated, shouldBlockAccess, hasChecked]);
   
-  // ✅ Só renderizar overlay se todas as condições forem verdadeiras
   if (!isAuthenticated || !shouldBlockAccess || !hasChecked) return null;
   
   return (
