@@ -51,6 +51,7 @@ import MovementHistory from "./pages/MovementHistory";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
+import { useEffect, useState } from "react";
 
 // ✅ QueryClient FORA do componente (evita recriação a cada render)
 const queryClient = new QueryClient({
@@ -70,48 +71,44 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
     <main className="flex-1">{children}</main>
   </div>
 );
-// src/App.tsx - AuthConsentWrapper com verificação ESTRITA
+// src/App.tsx - AuthConsentWrapper com delay para não bloquear
+
 function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading: authLoading } = useAuth();
   const location = useLocation();
+  const [systemLoaded, setSystemLoaded] = useState(false);
   
-  // ✅ Rotas ONDE O MODAL NUNCA APARECE (públicas + auth + raiz)
-  const neverShowModalRoutes = [
-    '/auth',
-    '/lp',
-    '/',
-    '/admin-panel',
-  ];
-  
-  // ✅ Rotas do sistema ONDE o modal PODE aparecer (após login)
-  const systemRoutes = [
-    '/dashboard',
-    '/products',
-    '/stock',
-    '/settings',
-    '/profile',
-    '/plans',
-    '/history',
-  ];
-  
+  // ✅ Rotas onde modal NUNCA aparece
+  const neverShowModalRoutes = ['/auth', '/lp', '/', '/admin-panel'];
   const isNeverShowRoute = neverShowModalRoutes.includes(location.pathname) || 
                           location.pathname.startsWith('/vitrine') ||
                           location.pathname.startsWith('/api');
   
-  const isSystemRoute = systemRoutes.some(route => location.pathname.startsWith(route));
+  // ✅ Sistema carregou - agora pode mostrar modal se necessário
+  useEffect(() => {
+    if (isAuthenticated && !authLoading && !isNeverShowRoute) {
+      // ✅ Delay para sistema carregar primeiro
+      const timer = setTimeout(() => {
+        console.log("✅ System loaded, consent modal can appear if needed");
+        setSystemLoaded(true);
+      }, 500); // 500ms delay
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, authLoading, isNeverShowRoute]);
   
-  // ✅ NÃO renderizar modal se:
+  // ✅ NÃO renderizar nada se:
   if (
     authLoading ||                    // 1. Auth carregando
     !isAuthenticated ||               // 2. Não autenticado
-    isNeverShowRoute ||               // 3. Rota onde NUNCA mostra (/lp, /auth, /, etc.)
-    !isSystemRoute                    // 4. NÃO é rota do sistema
+    isNeverShowRoute ||               // 3. Rota proibida
+    !systemLoaded                     // 4. Sistema ainda não carregou ← NOVO!
   ) {
     return <>{children}</>;
   }
   
-  // ✅ Usuário autenticado em rota do sistema: renderizar modal discreto
-  console.log("✅ AuthConsentWrapper: Rendering modal for", location.pathname);
+  // ✅ Sistema carregado: renderizar modal discreto
+  console.log("✅ AuthConsentWrapper: Rendering modal (system loaded)");
   return (
     <>
       <PostAuthConsentModal />

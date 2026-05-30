@@ -89,14 +89,20 @@ export function useConsent(): ConsentContextData {
       setLoading(false);
     }
   }, [user?.id]);
-// src/hooks/useConsent.ts - loadConsent com log de debug
-const loadConsents = useCallback(async () => {
+// src/hooks/useConsent.ts - loadConsents com forçar atualização
+
+const loadConsents = useCallback(async (forceRefresh = false) => {
   if (!user?.id) return;
+  
+  if (!forceRefresh && setLoading) return; // Evitar chamadas duplicadas
   
   setLoading(true);
   try {
-    console.log("🔄 Fetching consents from API...");
-    const resp = await api.get("/consent/my/");
+    console.log("🔄 Fetching consents from API...", { forceRefresh });
+    
+    const resp = await api.get("/consent/my/", {
+      params: { t: forceRefresh ? Date.now() : null } // Cache buster
+    });
     const data = resp.data;
     
     console.log("✅ Consents API response:", {
@@ -105,6 +111,8 @@ const loadConsents = useCallback(async () => {
         id: data.consents[0].id,
         version: data.consents[0].version,
         purposes: data.consents[0].purposes,
+        purposesType: typeof data.consents[0].purposes,
+        isArray: Array.isArray(data.consents[0].purposes),
       } : null,
     });
     
@@ -122,7 +130,9 @@ const loadConsents = useCallback(async () => {
   } finally {
     setLoading(false);
   }
-}, [user?.id]);
+}, [user?.id, setLoading]);
+
+
 
   // ✅ Registrar consentimento - Suporta usuários autenticados e anônimos
   const recordConsent = useCallback(async (
@@ -246,10 +256,11 @@ const loadConsents = useCallback(async () => {
     );
   }, [consents, essentialPurposes]);
 
-  // ✅ Refresh manual dos consentimentos
-  const refresh = useCallback(async () => {
-    await loadConsents();
-  }, [loadConsents]);
+// ✅ Expor refresh forçado
+const refresh = useCallback(async () => {
+  console.log("🔄 Manual refresh called");
+  await loadConsents(true); // Forçar atualização
+}, [loadConsents]);
 
   return {
     consents,

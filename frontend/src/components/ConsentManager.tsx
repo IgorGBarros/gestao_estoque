@@ -1,8 +1,8 @@
-// src/components/ConsentManager.tsx - Toast seguro
+// src/components/ConsentManager.tsx - CORREÇÃO DO TOAST
 import { useState } from "react";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
-// ✅ Importar do wrapper seguro
+// ✅ Importar wrapper seguro
 import { useSafeToast } from "@/lib/toast-safe";
 import { useConsent, PURPOSES, type Purpose, ESSENTIAL_PURPOSES } from "@/hooks/useConsent";
 
@@ -49,7 +49,7 @@ export function ConsentManager({ onComplete, loading }: ConsentManagerProps) {
         await recordConsent(selectedPurposes);
       }
       
-      // ✅ Chamar toast.toast() (não toast())
+      // ✅ CORREÇÃO: chamar toast.toast() (não toast())
       toast.toast({
         title: "✅ Consentimento registrado",
         description: "Suas preferências foram salvas.",
