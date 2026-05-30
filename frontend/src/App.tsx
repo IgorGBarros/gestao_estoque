@@ -70,35 +70,48 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
     <main className="flex-1">{children}</main>
   </div>
 );
-
-
+// src/App.tsx - AuthConsentWrapper com verificação ESTRITA
 function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading: authLoading } = useAuth();
   const location = useLocation();
   
-  // ✅ Lista COMPLETA de rotas onde o modal NÃO deve aparecer
-  const publicRoutes = [
+  // ✅ Rotas ONDE O MODAL NUNCA APARECE (públicas + auth + raiz)
+  const neverShowModalRoutes = [
     '/auth',
     '/lp',
     '/',
-    '/admin-panel',  // ← ADICIONAR: Rota pública
+    '/admin-panel',
   ];
   
-  const isPublicRoute = 
-    publicRoutes.includes(location.pathname) || 
-    location.pathname.startsWith('/vitrine') ||
-    location.pathname.startsWith('/api');
+  // ✅ Rotas do sistema ONDE o modal PODE aparecer (após login)
+  const systemRoutes = [
+    '/dashboard',
+    '/products',
+    '/stock',
+    '/settings',
+    '/profile',
+    '/plans',
+    '/history',
+  ];
+  
+  const isNeverShowRoute = neverShowModalRoutes.includes(location.pathname) || 
+                          location.pathname.startsWith('/vitrine') ||
+                          location.pathname.startsWith('/api');
+  
+  const isSystemRoute = systemRoutes.some(route => location.pathname.startsWith(route));
   
   // ✅ NÃO renderizar modal se:
   if (
-    authLoading ||           // 1. Auth carregando
-    !isAuthenticated ||      // 2. Não autenticado
-    isPublicRoute            // 3. Está em rota pública ← CRÍTICO!
+    authLoading ||                    // 1. Auth carregando
+    !isAuthenticated ||               // 2. Não autenticado
+    isNeverShowRoute ||               // 3. Rota onde NUNCA mostra (/lp, /auth, /, etc.)
+    !isSystemRoute                    // 4. NÃO é rota do sistema
   ) {
     return <>{children}</>;
   }
   
-  // ✅ Usuário autenticado em rota protegida do sistema
+  // ✅ Usuário autenticado em rota do sistema: renderizar modal discreto
+  console.log("✅ AuthConsentWrapper: Rendering modal for", location.pathname);
   return (
     <>
       <PostAuthConsentModal />

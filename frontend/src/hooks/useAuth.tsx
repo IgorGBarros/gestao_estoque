@@ -5,7 +5,8 @@ import axios from "axios";
 import { api } from "../services/api";
 // ✅ Imports do Firebase vêm do arquivo separado
 import { auth, googleProvider, signInWithPopup } from "../firebaseConfig";
-import { useToast } from "./use-toast";
+// ✅ Import do useToast original para evitar conflito com wrapper
+import { useToast as useOriginalToast } from "./use-toast-original";
 
 // ==========================================
 // ✅ CACHE DE PROFILE (FORA DO COMPONENTE)
@@ -27,7 +28,7 @@ const optimizedProfileApi = {
     
     activeProfileRequest = (async () => {
       try {
-        const response = await api.get('/profile/', { timeout: 15000 });
+        const response = await api.get('/profile/', { timeout: 30000 }); // ✅ Aumentado para 30s
         const data = response.data;
         profileCache = data;
         profileCacheTimestamp = Date.now();
@@ -89,7 +90,8 @@ const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const { toast } = useToast();
+  // ✅ Usar toast original para evitar conflito com wrapper
+  const { toast: originalToast } = useOriginalToast();
   
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -209,6 +211,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         setUser(userData);
         localStorage.setItem("auth_user", JSON.stringify(userData));
+        
+        // ✅ Log para debug: profile carregado (gatilho para consentimento)
+        console.log("✅ Profile loaded:", userData.email);
       }
 
     } catch (error: any) {
@@ -267,6 +272,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
+        console.log("✅ Login completo:", userData.email);
       } catch (e) {
         setUser({ id: 0, email, name: email.split('@')[0], is_staff: false });
       }
@@ -275,13 +281,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("❌ Erro no login:", error);
       
       if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        toast({
+        originalToast({
           title: "⏳ Servidor respondendo lentamente",
           description: "Tente novamente em alguns instantes.",
           variant: "destructive",
         });
       } else {
-        toast({
+        originalToast({
           title: "❌ Erro no login",
           description: error.message || "Credenciais inválidas",
           variant: "destructive",
@@ -320,23 +326,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         tokenLength: idToken?.length,
         timestamp: Date.now()
       });
-        // src/hooks/useAuth.tsx - dentro de signInWithGoogle, ANTES do fetch
 
-        console.log("🔍 [CP1] Preparando requisição Firebase login");
-        console.log("🔍 [CP1] VITE_API_BASE_URL:", import.meta.env.VITE_API_BASE_URL);
-        console.log("🔍 [CP1] URL completa:", `${import.meta.env.VITE_API_BASE_URL}/api/auth/firebase/`);
-        console.log("🔍 [CP1] idToken length:", idToken?.length);
-        console.log("🔍 [CP1] idToken starts with:", idToken?.substring(0, 20) + "...");
+      // ✅ Debug logs (remover em produção se desejar)
+      console.log("🔍 [CP1] Preparando requisição Firebase login");
+      console.log("🔍 [CP1] VITE_API_BASE_URL:", import.meta.env.VITE_API_BASE_URL);
+      console.log("🔍 [CP1] URL completa:", `${import.meta.env.VITE_API_BASE_URL}/api/auth/firebase/`);
+      console.log("🔍 [CP1] idToken length:", idToken?.length);
+      console.log("🔍 [CP1] idToken starts with:", idToken?.substring(0, 20) + "...");
 
-        // Verificar se há token JWT antigo no localStorage (pode causar conflito)
-        const oldToken = localStorage.getItem("auth_token");
-        console.log("🔍 [CP1] auth_token no localStorage:", oldToken ? "✅ Existe" : "❌ Não existe");
-        if (oldToken) {
-          console.log("⚠️ [CP1] ATENÇÃO: Token antigo pode interferir. Limpando...");
-          localStorage.removeItem("auth_token");
-          localStorage.removeItem("refresh_token");
-          delete api.defaults.headers.common["Authorization"];
-        }
+      // Verificar se há token JWT antigo no localStorage (pode causar conflito)
+      const oldToken = localStorage.getItem("auth_token");
+      console.log("🔍 [CP1] auth_token no localStorage:", oldToken ? "✅ Existe" : "❌ Não existe");
+      if (oldToken) {
+        console.log("⚠️ [CP1] ATENÇÃO: Token antigo pode interferir. Limpando...");
+        localStorage.removeItem("auth_token");
+        localStorage.removeItem("refresh_token");
+        delete api.defaults.headers.common["Authorization"];
+      }
+
       // ✅ Usar fetch direto para evitar conflito com ApiKeyMiddleware
       const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/api/auth/firebase/`, {
         method: 'POST',
@@ -366,6 +373,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         hasRefresh: !!refresh 
       });
 
+      // ✅ Carregar profile APÓS salvar token (gatilho para consentimento)
       try {
         const profileData = await optimizedProfileApi.get(true);
         const userData: User = {
@@ -377,7 +385,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
         localStorage.setItem("auth_user", JSON.stringify(userData));
         setUser(userData);
-        console.log("✅ Login completo:", userData.email);
+        console.log("✅ Login completo, profile carregado:", userData.email);
       } catch (e) {
         console.warn("⚠️ Perfil não carregado, usando dados básicos");
         setUser({
@@ -395,13 +403,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       });
 
       if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        toast({
+        originalToast({
           title: "⏳ Conexão lenta",
           description: "O servidor está respondendo lentamente. Tente novamente.",
           variant: "destructive",
         });
       } else if (error.message?.includes("popup-blocked")) {
-        toast({
+        originalToast({
           title: "Popup bloqueado",
           description: "Permita popups para este site e tente novamente",
           variant: "destructive",
@@ -409,13 +417,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else if (error.message?.includes("cancelado") || error.code === "auth/popup-closed-by-user") {
         return;
       } else if (error.code === "auth/account-exists-with-different-credential") {
-        toast({
+        originalToast({
           title: "Conta já existe",
           description: "Este email já está vinculado a outro método de login",
           variant: "destructive",
         });
       } else {
-        toast({
+        originalToast({
           title: "Erro no login",
           description: error.message || "Tente novamente",
           variant: "destructive",

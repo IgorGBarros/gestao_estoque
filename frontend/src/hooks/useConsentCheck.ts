@@ -1,4 +1,4 @@
-// src/hooks/useConsentCheck.ts - VERSÃO FINAL NÃO BLOQUEANTE
+// src/hooks/useConsentCheck.ts - VERSÃO FINAL COM GATILHO CORRETO
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./useAuth";
 import { useConsent, LGPD_VERSION, PURPOSES, type Purpose, ESSENTIAL_PURPOSES } from "./useConsent";
@@ -10,7 +10,6 @@ export interface ConsentCheckData {
   hasChecked: boolean;
   handleConsentComplete: (purposes: Purpose[]) => Promise<boolean>;
   hasValidConsent: () => boolean;
-  // ✅ REMOVIDO: shouldBlockAccess (não bloqueamos mais)
 }
 
 export function useConsentCheck(): ConsentCheckData {
@@ -28,8 +27,9 @@ export function useConsentCheck(): ConsentCheckData {
   
   const hasCheckedRef = useRef(false);
   const consentRegisteredRef = useRef(false);
+  const profileLoadedRef = useRef(false); // ✅ NOVO: Rastrear se profile foi carregado
 
-  // ✅ hasValidConsent com useCallback para referência estável
+  // ✅ hasValidConsent com useCallback
   const hasValidConsent = useCallback((): boolean => {
     if (!isAuthenticated || !user?.id) return false;
     
@@ -43,51 +43,64 @@ export function useConsentCheck(): ConsentCheckData {
       essentials.every(p => c.purposes.includes(p))
     );
   }, [isAuthenticated, user?.id, consents, contextEssentials]);
-// src/hooks/useConsentCheck.ts - useEffect CORRIGIDO
-useEffect(() => {
-  // ✅ Guard 1: Já verificou?
-  if (hasCheckedRef.current) {
-    console.log("⏭️ useConsentCheck skipped (already checked)");
-    return;
-  }
-  
-  // ✅ Guard 2-4: Aguardar auth e dados
-  if (authLoading || !isAuthenticated || !user?.id || consentLoading) {
-    console.log("⏳ useConsentCheck waiting:", { authLoading, isAuthenticated, userId: user?.id, consentLoading });
-    return;
-  }
-  
-  // ✅ Marcar como verificado
-  hasCheckedRef.current = true;
-  setHasChecked(true);
-  
-  // ✅ Verificar UMA ÚNICA VEZ
-  setTimeout(() => {
-    const valid = hasValidConsent();
-    console.log("🔍 LGPD Check:", { valid, consentsCount: consents.length });
+
+  // ✅ Efeito: Verificar consentimento APENAS após profile carregado
+  useEffect(() => {
+    // ✅ Guard 1: Já verificou?
+    if (hasCheckedRef.current) return;
     
-    if (!valid && !consentRegisteredRef.current) {
-      console.log("🔐 Showing consent modal");
-      setShowModal(true);
+    // ✅ Guard 2: Auth ainda carregando?
+    if (authLoading) return;
+    
+    // ✅ Guard 3: Usuário não autenticado?
+    if (!isAuthenticated || !user?.id) return;
+    
+    // ✅ Guard 4: Consentimentos ainda carregando?
+    if (consentLoading) return;
+    
+    // ✅ Guard 5: Profile ainda não carregou? (verificar se temos dados do perfil)
+    if (!profileLoadedRef.current && user?.email) {
+      profileLoadedRef.current = true;
     }
-  }, 100);
-  
-  // ✅ Cleanup
-  return () => {
-    if (!isAuthenticated) {
-      setShowModal(false);
-      setHasChecked(false);
-      hasCheckedRef.current = false;
-      consentRegisteredRef.current = false;
-    }
-  };
-}, [
-  isAuthenticated, 
-  user?.id, 
-  authLoading, 
-  consentLoading
-  // ✅ CRÍTICO: REMOVER hasValidConsent das deps para evitar loop!
-]);
+    
+    // ✅ Marcar como verificado
+    hasCheckedRef.current = true;
+    setHasChecked(true);
+    
+    // ✅ Verificar UMA ÚNICA VEZ após profile carregado
+    setTimeout(() => {
+      const valid = hasValidConsent();
+      console.log("🔍 LGPD Check (post-profile):", { 
+        valid, 
+        consentsCount: consents.length,
+        profileLoaded: profileLoadedRef.current 
+      });
+      
+      // ✅ Só mostrar modal se NÃO tem consentimento válido
+      if (!valid && !consentRegisteredRef.current) {
+        console.log("🔐 Showing consent modal (post-login trigger)");
+        setShowModal(true);
+      }
+    }, 100);
+    
+    // ✅ Cleanup
+    return () => {
+      if (!isAuthenticated) {
+        setShowModal(false);
+        setHasChecked(false);
+        hasCheckedRef.current = false;
+        consentRegisteredRef.current = false;
+        profileLoadedRef.current = false;
+      }
+    };
+  }, [
+    isAuthenticated, 
+    user?.id, 
+    user?.email,      // ✅ Gatilho: quando email do profile chega
+    authLoading, 
+    consentLoading
+    // ✅ SEM hasValidConsent nas deps!
+  ]);
 
   const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
     const purposesToRecord = [...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES])];
@@ -97,7 +110,6 @@ useEffect(() => {
     if (success) {
       consentRegisteredRef.current = true;
       await refresh();
-      // ✅ Fechar modal após sucesso
       setShowModal(false);
       console.log("✅ Consent recorded, modal closed");
       return true;
@@ -106,8 +118,6 @@ useEffect(() => {
     return false;
   }, [recordConsent, refresh]);
 
-  // ✅ REMOVIDO: shouldBlockAccess (não bloqueamos mais)
-
   return {
     showModal,
     setShowModal,
@@ -115,6 +125,5 @@ useEffect(() => {
     hasChecked,
     handleConsentComplete,
     hasValidConsent,
-    // ✅ REMOVIDO: shouldBlockAccess
   };
 }

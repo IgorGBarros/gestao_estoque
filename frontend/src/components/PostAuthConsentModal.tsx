@@ -4,47 +4,53 @@ import { useAuth } from "@/hooks/useAuth";
 import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { ConsentManager } from "./ConsentManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
-
+// src/components/PostAuthConsentModal.tsx - Guards ESTRITOS
 export function PostAuthConsentModal() {
   const { isAuthenticated } = useAuth();
   const location = useLocation();
   const { showModal, setShowModal, loading, handleConsentComplete } = useConsentCheck();
 
-  // ✅ Verificação EXPLÍCITA de rotas públicas
-  const isAuthRoute = location.pathname === '/auth';
-  const isLandingRoute = location.pathname === '/lp';
-  const isVitrineRoute = location.pathname.startsWith('/vitrine');
-  const isApiRoute = location.pathname.startsWith('/api');
-  const isRootRoute = location.pathname === '/';
+  // ✅ Rotas ONDE O MODAL NUNCA APARECE
+  const neverShowModalRoutes = [
+    '/auth',
+    '/lp',
+    '/',
+    '/admin-panel',
+  ];
+  
+  const isNeverShowRoute = neverShowModalRoutes.includes(location.pathname) || 
+                          location.pathname.startsWith('/vitrine') ||
+                          location.pathname.startsWith('/api');
 
-  // ✅ Guards: não renderizar se não deve mostrar
-  if (!isAuthenticated || !showModal || isAuthRoute || isLandingRoute || isVitrineRoute || isApiRoute || isRootRoute) {
+  // ✅ Guards: não renderizar NUNCA se:
+  if (
+    !isAuthenticated ||           // 1. Não autenticado
+    !showModal ||                 // 2. Modal não deve mostrar
+    isNeverShowRoute              // 3. Rota proibida (/lp, /auth, /, etc.)
+  ) {
     return null;
   }
 
+  console.log("🔐 PostAuthConsentModal: Rendering for", location.pathname);
+  
   return (
-    // ✅ modal={false} para NÃO bloquear interações com o fundo
     <Dialog 
       open={true} 
       onOpenChange={(open) => {
-        // ✅ Permitir fechar clicando fora ou pressionando ESC
         if (!open) setShowModal(false);
       }}
-      modal={false} // ← CRÍTICO: Não bloquear interações
+      modal={false}
     >
       <DialogContent 
         className="max-w-2xl max-h-[90vh] overflow-y-auto"
         style={{ zIndex: 1050 }}
-        // ✅ Permitir clique fora do modal
         onInteractOutside={() => {}}
-        // ✅ Permitir fechar com ESC
         onEscapeKeyDown={() => {}}
       >
         <DialogHeader>
           <DialogTitle>🔒 Preferências de Privacidade (LGPD)</DialogTitle>
           <DialogDescription>
             Para usar o sistema, precisamos do seu consentimento conforme a Lei Geral de Proteção de Dados.
-            Você pode alterar estas preferências a qualquer momento em Configurações.
             <br /><br />
             <span className="text-sm text-muted-foreground">
               💡 Você pode fechar esta janela e usar o sistema.
@@ -54,15 +60,11 @@ export function PostAuthConsentModal() {
         
         <ConsentManager 
           onComplete={async (purposes) => {
-            console.log("📝 Consent submitted");
             const success = await handleConsentComplete(purposes);
-            if (success) {
-              console.log("✅ Consent success, closing modal");
-              setShowModal(false);
-            }
+            if (success) setShowModal(false);
             return success;
           }}
-          loading={loading}
+               loading={loading}
         />
       </DialogContent>
     </Dialog>
