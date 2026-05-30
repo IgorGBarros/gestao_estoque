@@ -739,29 +739,37 @@ class ConsentRecordSerializer(serializers.Serializer):
         )
         
         return consent
-    
-
+       
     def to_representation(self, instance):
-        """Resposta com purposes como ARRAY, não string JSON"""
+        """Converter purpose_flags para ARRAY de strings"""
         rep = super().to_representation(instance)
         
-        # ✅ Converter purpose_flags (string JSON) para array de strings
+        # ✅ Converter purpose_flags (string JSON) para array
         if hasattr(instance, 'purpose_flags') and instance.purpose_flags:
-            if isinstance(instance.purpose_flags, str):
+            purposes_value = instance.purpose_flags
+            
+            if isinstance(purposes_value, str):
                 try:
-                    # ✅ Parse da string JSON para array
+                    # Parse JSON string para array
                     import json
-                    rep['purposes'] = json.loads(instance.purpose_flags)
+                    purposes = json.loads(purposes_value)
                 except (json.JSONDecodeError, TypeError):
-                    # Fallback: split simples se não for JSON válido
-                    rep['purposes'] = [p.strip() for p in instance.purpose_flags.strip('[]').split(',')]
+                    # Fallback: split simples
+                    purposes = [
+                        p.strip().strip('"').strip("'") 
+                        for p in purposes_value.strip('[]').split(',')
+                        if p.strip()
+                    ]
+            elif isinstance(purposes_value, list):
+                purposes = purposes_value
             else:
-                # Já é array
-                rep['purposes'] = instance.purpose_flags
+                purposes = []
+            
+            rep['purposes'] = purposes
         else:
             rep['purposes'] = []
         
-        # ✅ Mapear term_version → version na resposta
+        # ✅ Mapear term_version → version
         if hasattr(instance, 'term_version'):
             rep['version'] = instance.term_version
         
@@ -774,7 +782,6 @@ class ConsentRecordSerializer(serializers.Serializer):
         rep.pop('user_agent', None)
         
         return rep
-
 
 class ConsentRevocationSerializer(serializers.Serializer):
     """

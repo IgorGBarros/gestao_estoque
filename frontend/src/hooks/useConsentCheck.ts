@@ -148,22 +148,37 @@ const hasValidConsent = useCallback((): boolean => {
     consentLoading
     // ✅ CRÍTICO: SEM hasValidConsent nas deps para evitar loop!
   ]);
-
-  const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
-    const purposesToRecord = [...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES])];
-    
+// src/hooks/useConsentCheck.ts - CORREÇÃO DO REFRESH
+const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
+  console.log("📝 handleConsentComplete started");
+  const purposesToRecord = [...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES])];
+  
+  try {
     const success = await recordConsent(purposesToRecord);
+    console.log("✅ recordConsent returned:", success);
     
     if (success) {
       consentRegisteredRef.current = true;
+      
+      // ✅ AGUARDAR refresh completar ANTES de fechar modal
+      console.log("🔄 Calling refresh()...");
       await refresh();
+      console.log("✅ refresh() completed");
+      
+      // ✅ Pequeno delay para garantir estado atualizado
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       setShowModal(false);
-      console.log("✅ Consent recorded, modal closed");
+      console.log("✅ Modal closed");
       return true;
     }
     
     return false;
-  }, [recordConsent, refresh]);
+  } catch (error) {
+    console.error("❌ handleConsentComplete error:", error);
+    return false;
+  }
+}, [recordConsent, refresh]);
 
   return {
     showModal,

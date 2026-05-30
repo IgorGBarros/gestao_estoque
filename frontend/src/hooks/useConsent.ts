@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../services/api";
 import { useAuth } from "./useAuth";
-import { useToast } from "./use-toast";
+import { useToast } from "./use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
 import { consentApi } from "@/lib/api";
 
 // ==========================================
@@ -89,32 +89,40 @@ export function useConsent(): ConsentContextData {
       setLoading(false);
     }
   }, [user?.id]);
-
-  // ✅ Carregar consentimentos da API
-  const loadConsents = useCallback(async () => {
-    if (!user?.id) return;
+// src/hooks/useConsent.ts - loadConsent com log de debug
+const loadConsents = useCallback(async () => {
+  if (!user?.id) return;
+  
+  setLoading(true);
+  try {
+    console.log("🔄 Fetching consents from API...");
+    const resp = await api.get("/consent/my/");
+    const data = resp.data;
     
-    setLoading(true);
-    try {
-      const resp = await api.get("/consent/my/");
-      const data = resp.data;
-      
-      setConsents(data.consents || []);
-      if (data.essential_purposes?.length) {
-        setEssentialPurposes(data.essential_purposes);
-      }
-      if (data.revocable_purposes?.length) {
-        setRevocablePurposes(data.revocable_purposes);
-      }
-    } catch (error: any) {
-      // ✅ Não loga erro 401 (já tratado pelo interceptor)
-      if (error.response?.status !== 401) {
-        console.error("Erro ao carregar consentimentos:", error);
-      }
-    } finally {
-      setLoading(false);
+    console.log("✅ Consents API response:", {
+      count: data.consents?.length,
+      firstConsent: data.consents?.[0] ? {
+        id: data.consents[0].id,
+        version: data.consents[0].version,
+        purposes: data.consents[0].purposes,
+      } : null,
+    });
+    
+    setConsents(data.consents || []);
+    if (data.essential_purposes?.length) {
+      setEssentialPurposes(data.essential_purposes);
     }
-  }, [user?.id]);
+    if (data.revocable_purposes?.length) {
+      setRevocablePurposes(data.revocable_purposes);
+    }
+  } catch (error: any) {
+    if (error.response?.status !== 401) {
+      console.error("❌ Erro ao carregar consentimentos:", error);
+    }
+  } finally {
+    setLoading(false);
+  }
+}, [user?.id]);
 
   // ✅ Registrar consentimento - Suporta usuários autenticados e anônimos
   const recordConsent = useCallback(async (
