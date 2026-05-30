@@ -1,4 +1,4 @@
-// src/hooks/useConsentCheck.ts - VERSÃO COM SEQUÊNCIA CORRETA
+// src/hooks/useConsentCheck.ts - VERSÃO FINAL SEM LOOP
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./useAuth";
 import { useConsent, LGPD_VERSION, PURPOSES, type Purpose, ESSENTIAL_PURPOSES } from "./useConsent";
@@ -29,6 +29,7 @@ export function useConsentCheck(): ConsentCheckData {
   const hasCheckedRef = useRef(false);
   const consentRegisteredRef = useRef(false);
 
+  // ✅ hasValidConsent com deps estáveis (não causa re-render)
   const hasValidConsent = useCallback((): boolean => {
     if (!isAuthenticated || !user?.id) return false;
     
@@ -43,24 +44,19 @@ export function useConsentCheck(): ConsentCheckData {
     );
   }, [isAuthenticated, user?.id, consents, contextEssentials]);
 
-  // ✅ Efeito: Verificar consentimento APENAS após login COMPLETO
+  // ✅ Efeito: Verificar consentimento APENAS UMA VEZ
   useEffect(() => {
-    // Guard 1: Já verificou?
+    // ✅ Guard 1: Já verificou?
     if (hasCheckedRef.current) return;
     
-    // Guard 2: Auth ainda carregando?
-    if (authLoading) return;
+    // ✅ Guard 2-4: Aguardar auth e dados
+    if (authLoading || !isAuthenticated || !user?.id || consentLoading) return;
     
-    // Guard 3: Não autenticado?
-    if (!isAuthenticated || !user?.id) return;
-    
-    // Guard 4: Consentimentos ainda carregando?
-    if (consentLoading) return;
-    
-    // ✅ Tudo OK: pode verificar
+    // ✅ Marcar como verificado
     hasCheckedRef.current = true;
     setHasChecked(true);
     
+    // ✅ Verificar uma única vez
     setTimeout(() => {
       const valid = hasValidConsent();
       console.log("🔍 LGPD Check:", { valid, consentsCount: consents.length });
@@ -71,6 +67,7 @@ export function useConsentCheck(): ConsentCheckData {
       }
     }, 50);
     
+    // ✅ Cleanup
     return () => {
       if (!isAuthenticated) {
         setShowModal(false);
@@ -79,7 +76,13 @@ export function useConsentCheck(): ConsentCheckData {
         consentRegisteredRef.current = false;
       }
     };
-  }, [isAuthenticated, user?.id, authLoading, consentLoading]); // ✅ SEM hasValidConsent nas deps!
+  }, [
+    isAuthenticated, 
+    user?.id, 
+    authLoading, 
+    consentLoading
+    // ✅ REMOVER hasValidConsent das deps para evitar re-execução!
+  ]);
 
   const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
     const purposesToRecord = [...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES])];

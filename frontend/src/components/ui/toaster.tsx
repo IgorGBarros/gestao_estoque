@@ -1,33 +1,26 @@
-// src/components/ui/toaster.tsx - Versão corrigida (sem passar id)
-import { useToast as useShadcnToast } from "@/hooks/use-toast-original";
+// src/components/ui/toaster.tsx - Ouvir evento global
+import { useToast as useOriginalToast } from "@/hooks/use-toast-original";
 import { Toast, ToastProvider, ToastViewport } from "./toast";
 import { useEffect } from "react";
 
 export function Toaster() {
-  // ✅ Usar o hook original do shadcn para gerenciar toasts internos
-  const { toast: internalToast, toasts } = useShadcnToast();
+  const { toast: internalToast, toasts } = useOriginalToast();
   
   // ✅ Ouvir evento global de toast
   useEffect(() => {
     const handleGlobalToast = (event: Event) => {
       const customEvent = event as CustomEvent;
-      
-      // ✅ NÃO passar id - o shadcn gera internamente
-      // ✅ Usar apenas propriedades válidas do tipo Toast
+      // ✅ Chamar toast interno SEM passar id (shadcn gera internamente)
       internalToast({
         title: customEvent.detail?.title,
         description: customEvent.detail?.description,
         variant: customEvent.detail?.variant,
         duration: customEvent.detail?.duration,
-        // ✅ Se precisar de ação:
-        // action: customEvent.detail?.action,
       });
     };
     
     window.addEventListener('app-toast', handleGlobalToast);
-    return () => {
-      window.removeEventListener('app-toast', handleGlobalToast);
-    };
+    return () => window.removeEventListener('app-toast', handleGlobalToast);
   }, [internalToast]);
   
   return (
