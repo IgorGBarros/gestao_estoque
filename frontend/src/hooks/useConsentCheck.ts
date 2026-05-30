@@ -43,51 +43,49 @@ export function useConsentCheck(): ConsentCheckData {
       essentials.every(p => c.purposes.includes(p))
     );
   }, [isAuthenticated, user?.id, consents, contextEssentials]);
-
-  // ✅ Efeito: Verificar consentimento APENAS após login + dados carregados
-  useEffect(() => {
-    // ✅ Não executar se já verificou nesta sessão
-    if (hasCheckedRef.current) return;
+// src/hooks/useConsentCheck.ts - CORRIGIR useEffect para evitar loop
+useEffect(() => {
+  // ✅ Guard: Não executar se já verificou nesta sessão
+  if (hasCheckedRef.current) return;
+  
+  // ✅ Só verificar se:
+  // 1. Usuário está autenticado
+  // 2. Temos ID do usuário  
+  // 3. Consentimentos já foram carregados (loading = false)
+  if (isAuthenticated && user?.id && consentLoading === false) {
+    hasCheckedRef.current = true;
+    setHasChecked(true);
     
-    // ✅ Só verificar se:
-    // 1. Usuário está autenticado
-    // 2. Temos ID do usuário  
-    // 3. Consentimentos já foram carregados da API (loading = false)
-    if (isAuthenticated && user?.id && consentLoading === false) {
-      hasCheckedRef.current = true;
-      setHasChecked(true);
+    // ✅ Delay único para garantir estado consistente
+    setTimeout(() => {
+      const valid = hasValidConsent();
+      console.log("🔍 LGPD Consent Check:", { 
+        valid, 
+        consentsCount: consents.length,
+        isAuthenticated,
+        userId: user?.id,
+      });
       
-      // ✅ Pequeno delay para garantir estado consistente
-      setTimeout(() => {
-        const valid = hasValidConsent();
-        console.log("🔍 LGPD Consent Check:", { 
-          valid, 
-          consentsCount: consents.length,
-          isAuthenticated,
-          userId: user?.id,
-          version: LGPD_VERSION
-        });
-        
-        // ✅ Só mostrar modal se:
-        // - NÃO tem consentimento válido
-        // - E não registrou nesta sessão (evita loop)
-        if (!valid && !consentRegisteredRef.current) {
-          console.log("🔐 LGPD: Showing consent modal (blocking access)");
-          setShowModal(true);
-        } else if (valid) {
-          console.log("✅ LGPD: Consent already valid, access granted");
-        }
-      }, 50);
-    }
-    
-    // ✅ Resetar se usuário deslogar
-    if (!isAuthenticated) {
-      setShowModal(false);
-      setHasChecked(false);
-      hasCheckedRef.current = false;
-      consentRegisteredRef.current = false;
-    }
-  }, [isAuthenticated, user?.id, consentLoading, consents.length, hasValidConsent]);
+      // ✅ Só mostrar modal se NÃO tem consentimento válido
+      if (!valid && !consentRegisteredRef.current) {
+        console.log("🔐 LGPD: Showing consent modal (blocking access)");
+        setShowModal(true);
+      } else if (valid) {
+        console.log("✅ LGPD: Consent already valid, access granted");
+      }
+    }, 100); // ✅ Aumentar delay para 100ms
+  }
+  
+  // ✅ Resetar se usuário deslogar
+  if (!isAuthenticated) {
+    setShowModal(false);
+    setHasChecked(false);
+    hasCheckedRef.current = false;
+    consentRegisteredRef.current = false;
+  }
+  
+  // ✅ Dependencies corretas - NÃO incluir consents.length para evitar re-execução
+}, [isAuthenticated, user?.id, consentLoading, hasValidConsent]);
 
   // ✅ Handler: Registrar consentimento e liberar acesso
   const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {

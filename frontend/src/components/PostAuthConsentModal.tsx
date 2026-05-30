@@ -1,26 +1,35 @@
-// src/components/PostAuthConsentModal.tsx - VERSÃO QUE BLOQUEIA
-import { useConsentCheck } from "../hooks/useConsentCheck";
+// src/components/PostAuthConsentModal.tsx - VERSÃO CORRIGIDA
+import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { ConsentManager } from "./ConsentManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
-// src/components/PostAuthConsentModal.tsx - Trecho crítico
+
 export function PostAuthConsentModal() {
   const { showModal, setShowModal, loading, handleConsentComplete } = useConsentCheck();
 
+  // ✅ Se não deve mostrar, não renderizar nada
   if (!showModal) return null;
 
   return (
+    // ✅ Dialog com z-index MÁXIMO para ficar acima do overlay
     <Dialog 
-      open={true} // ✅ Sempre aberto quando showModal=true
+      open={true} 
       onOpenChange={(open) => {
         // ✅ NÃO permitir fechar clicando fora ou ESC
-        if (!open) setShowModal(true); // Reabrir se tentar fechar
+        if (!open) setShowModal(true);
       }}
       modal
     >
       <DialogContent 
-        className="max-w-2xl max-h-[90vh] overflow-y-auto"
-        onInteractOutside={(e) => e.preventDefault()} // ✅ Bloquear clique fora
-        onEscapeKeyDown={(e) => e.preventDefault()}    // ✅ Bloquear ESC
+        className="max-w-2xl max-h-[90vh] overflow-y-auto z-[10000]" // ✅ z-index maior que o overlay
+        onInteractOutside={(e) => {
+          e.preventDefault(); // ✅ Bloquear clique fora
+          e.stopPropagation();
+        }}
+        onEscapeKeyDown={(e) => {
+          e.preventDefault(); // ✅ Bloquear tecla ESC
+          e.stopPropagation();
+        }}
+        style={{ zIndex: 10000 }} // ✅ Forçar z-index inline
       >
         <DialogHeader>
           <DialogTitle>🔒 Preferências de Privacidade (LGPD)</DialogTitle>
@@ -33,8 +42,10 @@ export function PostAuthConsentModal() {
         <ConsentManager 
           onComplete={async (purposes) => {
             const success = await handleConsentComplete(purposes);
-            // ✅ Modal só fecha se handleConsentComplete retornar true
-            return success;
+            if (success) {
+              setShowModal(false);
+              return success;
+            }
           }}
           loading={loading}
         />

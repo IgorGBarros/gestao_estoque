@@ -1,4 +1,4 @@
-// src/components/ConsentBlockingOverlay.tsx
+// src/components/ConsentBlockingOverlay.tsx - VERSÃO CORRIGIDA
 import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { useEffect } from "react";
 
@@ -11,7 +11,7 @@ export function ConsentBlockingOverlay() {
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       
-      // ✅ Prevenir teclas que poderiam pular o modal
+      // ✅ Prevenir teclas
       const handleKey = (e: KeyboardEvent) => {
         if (!["Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) {
           e.preventDefault();
@@ -28,13 +28,14 @@ export function ConsentBlockingOverlay() {
     }
   }, [shouldBlockAccess, hasChecked]);
   
-  // ✅ Só renderizar overlay se deve bloquear E já verificou consentimento
+  // ✅ Só renderizar se deve bloquear E já verificou
   if (!shouldBlockAccess || !hasChecked) return null;
   
-  // ✅ Overlay com z-index máximo + pointer-events para bloquear cliques
+  // ✅ Overlay com z-index ALTO mas MENOR que o modal
   return (
     <div 
-      className="fixed inset-0 z-[9999] bg-black/30 backdrop-blur-[2px] pointer-events-auto"
+      className="fixed inset-0 bg-black/20 backdrop-blur-[1px] pointer-events-auto"
+      style={{ zIndex: 9999 }} // ✅ z-index menor que o modal (10000)
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -44,7 +45,6 @@ export function ConsentBlockingOverlay() {
         e.stopPropagation();
       }}
       aria-hidden="true"
-      role="presentation"
     />
   );
 }
