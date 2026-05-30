@@ -1,10 +1,16 @@
 # backend/core/inventory/middleware.py
+"""
+Middleware para validação de API Key comercial.
+Rotas de autenticação de usuário (JWT) são excluídas.
+"""
 
-from asyncio.log import logger
 import re
+import logging
+from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
-from rest_framework.response import Response
-from rest_framework import status
+
+logger = logging.getLogger(__name__)
+
 
 class ApiKeyMiddleware(MiddlewareMixin):
     """
@@ -33,42 +39,43 @@ class ApiKeyMiddleware(MiddlewareMixin):
         r'^/api/admin/feature-gates/',
     ]
     
-    # backend/core/inventory/middleware.py - dentro de process_request
-
     def process_request(self, request):
+        """
+        Intercepta requisição para validar API Key.
+        Retorna None para continuar, ou JsonResponse para bloquear.
+        """
         path = request.path_info
-        logger.info(f"🔍 [CP3] ApiKeyMiddleware: {request.method} {path}")
+        
+        # ✅ Log seguro (sem vazar dados sensíveis)
+        logger.debug(f"🔍 ApiKeyMiddleware: {request.method} {path}")
         
         # ✅ Verificar se é rota excluída
-        for excluded in self.EXCLUDED_PATHS:
-            if re.match(excluded, path):
-                logger.info(f"✅ [CP3] Rota excluída: {path} ~ {excluded}")
+        for excluded_pattern in self.EXCLUDED_PATHS:
+            if re.match(excluded_pattern, path):
+                logger.debug(f"✅ Rota excluída: {path} ~ {excluded_pattern}")
                 return None  # Continua sem validar API Key
-        
-        logger.info(f"⚠️ [CP3] Rota NÃO excluída, validando API Key...")
-        
-    # ... resto da validação ...
         
         # ✅ Validar API Key comercial apenas para endpoints protegidos
         auth_header = request.headers.get('Authorization', '')
         
         # Extrair token (pode ser JWT ou API Key)
-        if auth_header.startswith('Bearer '):
-            token = auth_header[7:]
-        else:
+        if not auth_header.startswith('Bearer '):
             return self._error_response('API Key ausente. Use: Authorization: Bearer pk_live_••••')
+        
+        token = auth_header[7:]  # Remove "Bearer "
         
         # ✅ Diferenciar JWT de API Key comercial pelo prefixo
         if token.startswith('eyJ'):  # JWT começa com "eyJ..."
             # ✅ É um token JWT de usuário - permitir passar
             # O JWT será validado depois por SimpleJWT authentication
+            logger.debug("✅ Token JWT detectado, permitindo passagem para SimpleJWT")
             return None
         
-        # ✅ É uma API Key comercial - validar no banco
+        # ✅ É uma API Key comercial - validar formato
         if not token.startswith('pk_live_') and not token.startswith('pk_test_'):
-            return self._error_response('Formato de API Key inválido')
+            return self._error_response('Formato de API Key inválido. Use pk_live_••• ou pk_test_•••')
         
-        # Validar no banco de dados
+        # ✅ Validar no banco de dados
         try:
             from .models import ApiKey
             key_obj = ApiKey.objects.select_related('owner', 'store').get(
@@ -78,11 +85,25 @@ class ApiKeyMiddleware(MiddlewareMixin):
             # Anexar ao request para uso nas views
             request.api_key = key_obj
             request.api_plan = key_obj.plan
-            request.api_scopes = key_obj.scopes
+            request.api_scopes = key_obj.scopes or []
+            logger.debug(f"✅ API Key válida: {key_obj.name or key_obj.key[:10]}...")
         except ApiKey.DoesNotExist:
+            logger.warning(f"⚠️ API Key inválida: {token[:10]}...")
             return self._error_response('API Key inválida ou inativa')
+        except Exception as e:
+            logger.error(f"❌ Erro ao validar API Key: {e}")
+            return self._error_response('Erro interno ao validar API Key')
         
         return None
     
-    def _error_response(self, message):
-        return Response({'error': message}, status=status.HTTP_401_UNAUTHORIZED)
+    def _error_response(self, message: str, status_code: int = 401):
+        """
+        Retorna resposta de erro compatível com middleware Django.
+        Usa JsonResponse em vez de DRF Response para evitar conflitos.
+        """
+        logger.warning(f"⚠️ ApiKeyMiddleware error: {message}")
+        return JsonResponse(
+            {'error': message}, 
+            status=status_code,
+            json_dumps_params={'ensure_ascii': False}
+        )
