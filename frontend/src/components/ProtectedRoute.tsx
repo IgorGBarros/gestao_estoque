@@ -1,4 +1,4 @@
-// src/components/ProtectedRoute.tsx - Sem bloqueio por LGPD
+// src/components/ProtectedRoute.tsx - Atualizar guards
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -14,8 +14,12 @@ export default function ProtectedRoute({
   const { user, loading: authLoading } = useAuth();
   const location = useLocation();
   
-  // ✅ Permitir acesso à página /auth sempre
-  if (location.pathname === '/auth') {
+  // ✅ Rotas que NÃO requerem autenticação
+  const publicRoutes = ['/auth', '/lp', '/', '/admin-panel'];
+  const isPublicRoute = publicRoutes.includes(location.pathname);
+  
+  // ✅ Permitir rotas públicas SEMPRE
+  if (isPublicRoute) {
     return <>{children}</>;
   }
   
@@ -38,9 +42,6 @@ export default function ProtectedRoute({
     return <Navigate to="/" replace />;
   }
   
-  // ✅ LGPD: NÃO bloquear acesso - modal é discreto e não impede uso do sistema
-  // O consentimento é registrado em background enquanto usuário usa o sistema
-  
-  // ✅ Renderizar conteúdo protegido normalmente
+  // ✅ LGPD: NÃO bloquear - modal é discreto
   return <>{children}</>;
 }
