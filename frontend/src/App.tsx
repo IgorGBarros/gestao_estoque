@@ -71,26 +71,32 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
-// ✅ NOVO COMPONENTE: Wrapper que só renderiza modal discreto APÓS auth em rotas protegidas
+// src/App.tsx - AuthConsentWrapper CORRIGIDO
 function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading: authLoading } = useAuth();
-  const location = useLocation(); // ✅ Para verificar rota atual
+  const location = useLocation();
   
-  // ✅ Lista de rotas onde o modal NÃO deve aparecer (públicas ou auth)
-  const publicRoutes = ['/auth', '/lp', '/'];
-  const isPublicRoute = publicRoutes.includes(location.pathname) || 
-                       location.pathname.startsWith('/vitrine') ||
-                       location.pathname.startsWith('/api');
+  // ✅ Verificação EXPLÍCITA de rotas públicas
+  const isAuthRoute = location.pathname === '/auth';
+  const isLandingRoute = location.pathname === '/lp';
+  const isVitrineRoute = location.pathname.startsWith('/vitrine');
+  const isApiRoute = location.pathname.startsWith('/api');
+  const isRootRoute = location.pathname === '/';
   
-  // ✅ NÃO renderizar modal se:
-  // 1. Auth ainda carregando
-  // 2. Usuário não autenticado
-  // 3. Está em rota pública (/auth, /lp, /vitrine/*, /api/*)
-  if (authLoading || !isAuthenticated || isPublicRoute) {
+  // ✅ NÃO mostrar modal se:
+  if (
+    authLoading ||                    // 1. Auth carregando
+    !isAuthenticated ||               // 2. Não autenticado
+    isAuthRoute ||                    // 3. Está em /auth ← CRÍTICO!
+    isLandingRoute ||                 // 4. Está em /lp
+    isVitrineRoute ||                 // 5. Está em /vitrine/*
+    isApiRoute ||                     // 6. Está em /api/*
+    isRootRoute                       // 7. Está em / (dashboard)
+  ) {
     return <>{children}</>;
   }
   
-  // ✅ Usuário autenticado em rota protegida: renderizar modal discreto (não bloqueante)
+  // ✅ Usuário autenticado em rota protegida (ex: /dashboard, /products)
   return (
     <>
       <PostAuthConsentModal />

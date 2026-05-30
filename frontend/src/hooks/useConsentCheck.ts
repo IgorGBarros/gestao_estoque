@@ -43,47 +43,51 @@ export function useConsentCheck(): ConsentCheckData {
       essentials.every(p => c.purposes.includes(p))
     );
   }, [isAuthenticated, user?.id, consents, contextEssentials]);
-
-  // ✅ Efeito: Verificar consentimento APENAS UMA VEZ (sem loop)
-  useEffect(() => {
-    // ✅ Guard 1: Já verificou?
-    if (hasCheckedRef.current) return;
+// src/hooks/useConsentCheck.ts - useEffect CORRIGIDO
+useEffect(() => {
+  // ✅ Guard 1: Já verificou?
+  if (hasCheckedRef.current) {
+    console.log("⏭️ useConsentCheck skipped (already checked)");
+    return;
+  }
+  
+  // ✅ Guard 2-4: Aguardar auth e dados
+  if (authLoading || !isAuthenticated || !user?.id || consentLoading) {
+    console.log("⏳ useConsentCheck waiting:", { authLoading, isAuthenticated, userId: user?.id, consentLoading });
+    return;
+  }
+  
+  // ✅ Marcar como verificado
+  hasCheckedRef.current = true;
+  setHasChecked(true);
+  
+  // ✅ Verificar UMA ÚNICA VEZ
+  setTimeout(() => {
+    const valid = hasValidConsent();
+    console.log("🔍 LGPD Check:", { valid, consentsCount: consents.length });
     
-    // ✅ Guard 2-4: Aguardar auth e dados
-    if (authLoading || !isAuthenticated || !user?.id || consentLoading) return;
-    
-    // ✅ Marcar como verificado
-    hasCheckedRef.current = true;
-    setHasChecked(true);
-    
-    // ✅ Verificar uma única vez
-    setTimeout(() => {
-      const valid = hasValidConsent();
-      console.log("🔍 LGPD Check:", { valid, consentsCount: consents.length });
-      
-      // ✅ Só mostrar modal discreto se NÃO tem consentimento válido
-      if (!valid && !consentRegisteredRef.current) {
-        console.log("🔐 Showing discrete consent modal (non-blocking)");
-        setShowModal(true);
-      }
-    }, 100);
-    
-    // ✅ Cleanup
-    return () => {
-      if (!isAuthenticated) {
-        setShowModal(false);
-        setHasChecked(false);
-        hasCheckedRef.current = false;
-        consentRegisteredRef.current = false;
-      }
-    };
-  }, [
-    isAuthenticated, 
-    user?.id, 
-    authLoading, 
-    consentLoading
-    // ✅ CRÍTICO: REMOVER hasValidConsent das deps para evitar loop!
-  ]);
+    if (!valid && !consentRegisteredRef.current) {
+      console.log("🔐 Showing consent modal");
+      setShowModal(true);
+    }
+  }, 100);
+  
+  // ✅ Cleanup
+  return () => {
+    if (!isAuthenticated) {
+      setShowModal(false);
+      setHasChecked(false);
+      hasCheckedRef.current = false;
+      consentRegisteredRef.current = false;
+    }
+  };
+}, [
+  isAuthenticated, 
+  user?.id, 
+  authLoading, 
+  consentLoading
+  // ✅ CRÍTICO: REMOVER hasValidConsent das deps para evitar loop!
+]);
 
   const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
     const purposesToRecord = [...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES])];

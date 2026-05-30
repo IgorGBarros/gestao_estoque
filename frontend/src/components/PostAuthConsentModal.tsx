@@ -1,4 +1,4 @@
-// src/components/PostAuthConsentModal.tsx - VERSÃO NÃO BLOQUEANTE
+// src/components/PostAuthConsentModal.tsx - VERSÃO CORRIGIDA
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useConsentCheck } from "@/hooks/useConsentCheck";
@@ -10,30 +10,30 @@ export function PostAuthConsentModal() {
   const location = useLocation();
   const { showModal, setShowModal, loading, handleConsentComplete } = useConsentCheck();
 
-  // ✅ Lista de rotas onde o modal NÃO deve aparecer
-  const publicRoutes = ['/auth', '/lp', '/vitrine', '/'];
-  const isPublicRoute = publicRoutes.includes(location.pathname) || 
-                       location.pathname.startsWith('/vitrine/') ||
-                       location.pathname.startsWith('/api/');
+  // ✅ Verificação EXPLÍCITA de rotas públicas
+  const isAuthRoute = location.pathname === '/auth';
+  const isLandingRoute = location.pathname === '/lp';
+  const isVitrineRoute = location.pathname.startsWith('/vitrine');
+  const isApiRoute = location.pathname.startsWith('/api');
+  const isRootRoute = location.pathname === '/';
 
-  // ✅ Guards: não renderizar se não deve mostrar ou está em rota pública
-  if (!isAuthenticated || !showModal || isPublicRoute) {
+  // ✅ Guards: não renderizar se não deve mostrar
+  if (!isAuthenticated || !showModal || isAuthRoute || isLandingRoute || isVitrineRoute || isApiRoute || isRootRoute) {
     return null;
   }
 
   return (
-    // ✅ Dialog com modal=false para NÃO bloquear interações com o fundo
+    // ✅ modal={false} para NÃO bloquear interações com o fundo
     <Dialog 
       open={true} 
       onOpenChange={(open) => {
         // ✅ Permitir fechar clicando fora ou pressionando ESC
         if (!open) setShowModal(false);
       }}
-      modal={false} // ✅ CRÍTICO: Não bloquear interações com o fundo
+      modal={false} // ← CRÍTICO: Não bloquear interações
     >
       <DialogContent 
         className="max-w-2xl max-h-[90vh] overflow-y-auto"
-        // ✅ z-index alto mas não máximo (permite outros elementos por cima se necessário)
         style={{ zIndex: 1050 }}
         // ✅ Permitir clique fora do modal
         onInteractOutside={() => {}}
@@ -47,7 +47,7 @@ export function PostAuthConsentModal() {
             Você pode alterar estas preferências a qualquer momento em Configurações.
             <br /><br />
             <span className="text-sm text-muted-foreground">
-              💡 Você pode fechar esta janela e usar o sistema. O consentimento pode ser registrado depois.
+              💡 Você pode fechar esta janela e usar o sistema.
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -59,7 +59,6 @@ export function PostAuthConsentModal() {
             if (success) {
               console.log("✅ Consent success, closing modal");
               setShowModal(false);
-              
             }
             return success;
           }}
