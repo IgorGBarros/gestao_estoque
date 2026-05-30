@@ -1,4 +1,4 @@
-// src/hooks/use-toast.ts - VERSÃO COM WRAPPER SEGURO
+// src/hooks/use-toast.ts - VERSÃO FINAL COM WRAPPER SEGURO
 import * as React from "react";
 import type { ToastActionElement, ToastProps } from "../components/ui/toast";
 
@@ -122,7 +122,7 @@ function toast({ ...props }: Toast) {
   return { id, dismiss, update };
 }
 
-// ✅ Hook useToast com retorno seguro
+// ✅ Hook useToast com retorno seguro (wrapper com try/catch)
 function useToast() {
   const [state, setState] = React.useState<State>(memoryState);
 
@@ -134,13 +134,14 @@ function useToast() {
     };
   }, [state]);
 
-  // ✅ Wrapper seguro para a função toast
+  // ✅ Wrapper seguro para a função toast - previne "TypeError: r is not a function"
   const safeToast = React.useCallback((props: Toast) => {
     try {
       return toast(props);
     } catch (error) {
       // Fallback seguro: log em vez de crash
       console.warn("⚠️ Toast error (silently handled):", error);
+      // Retorna objeto mínimo para evitar erros em cadeia
       return { id: genId(), dismiss: () => {}, update: () => {} };
     }
   }, []);

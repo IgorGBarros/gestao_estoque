@@ -1,19 +1,42 @@
-// src/lib/toast.ts - Wrapper 100% seguro
-import { useToast as useOriginal } from "@/hooks/use-toast";
-import type { ToastProps } from "@/hooks/use-toast";
+// src/lib/toast.ts - Wrapper seguro SEM loop de importação
+import type { ToastProps as ToastPropsBase } from "@/components/ui/toast";
 
-export function useToast() {
-  const original = useOriginal();
-  
-  return (props: ToastProps) => {
+// ✅ Tipo simplificado para evitar conflitos com Radix UI
+export type ToastProps = {
+  title?: React.ReactNode;
+  description?: React.ReactNode;
+  action?: React.ReactNode;
+  variant?: "default" | "destructive";
+  duration?: number;
+  [key: string]: any; // ✅ Permite props extras sem erro de tipo
+};
+
+/**
+ * Hook seguro para toast - NÃO importa de use-toast para evitar loop
+ * Retorna uma função que tenta chamar o toast global ou fallback
+ */
+export function useSafeToast() {
+  // ✅ Função wrapper que NUNCA lança erro
+  const safeToast = (props: ToastProps) => {
     try {
-      if (original?.toast && typeof original.toast === 'function') {
-        return original.toast(props);
+      // ✅ Tentar chamar toast global se existir (injetado pelo Toaster)
+      if (typeof (window as any).toast === 'function') {
+        return (window as any).toast(props);
       }
-    } catch (e) {
-      console.warn("⚠️ Toast fallback:", props?.title);
+      
+      // ✅ Fallback: tentar dispatch custom event para o Toaster ouvir
+      const event = new CustomEvent('toast-request', { detail: props });
+      window.dispatchEvent(event);
+      
+      // ✅ Log seguro como último fallback
+      console.log("🔔 Toast:", props.title || props.description);
+      
+    } catch (error) {
+      console.warn("⚠️ Toast error (handled):", error);
     }
   };
+  
+  return safeToast;
 }
 
-export type { ToastProps };
+export type { ToastPropsBase };
