@@ -1,4 +1,4 @@
-// src/hooks/useConsentCheck.ts - VERSÃO FINAL SEM LOOP
+// src/hooks/useConsentCheck.ts - VERSÃO COM SEQUÊNCIA CORRETA
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./useAuth";
 import { useConsent, LGPD_VERSION, PURPOSES, type Purpose, ESSENTIAL_PURPOSES } from "./useConsent";
@@ -14,7 +14,7 @@ export interface ConsentCheckData {
 }
 
 export function useConsentCheck(): ConsentCheckData {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
   const { 
     consents, 
     essentialPurposes: contextEssentials,
@@ -29,10 +29,10 @@ export function useConsentCheck(): ConsentCheckData {
   // ✅ Refs para controle de estado
   const hasCheckedRef = useRef(false);
   const consentRegisteredRef = useRef(false);
-  const isShowingModalRef = useRef(false); // ✅ NOVO: Prevenir re-exibição
 
   // ✅ Verificar consentimento válido
   const hasValidConsent = useCallback((): boolean => {
+    // ✅ Só verificar se usuário está autenticado E temos dados
     if (!isAuthenticated || !user?.id) return false;
     
     const essentials = contextEssentials.length > 0 
@@ -46,52 +46,59 @@ export function useConsentCheck(): ConsentCheckData {
     );
   }, [isAuthenticated, user?.id, consents, contextEssentials]);
 
-  // ✅ Efeito: Verificar consentimento APENAS UMA VEZ
+  // ✅ Efeito: Verificar consentimento APENAS após login COMPLETO
   useEffect(() => {
     // ✅ Guard 1: Não executar se já verificou
     if (hasCheckedRef.current) return;
     
-    // ✅ Guard 2: Só executar se auth + loading completo
-    if (!isAuthenticated || !user?.id || consentLoading) return;
+    // ✅ Guard 2: NÃO executar se auth ainda está carregando
+    if (authLoading) return;
     
-    // ✅ Marcar como verificado
+    // ✅ Guard 3: NÃO executar se usuário não está autenticado
+    if (!isAuthenticated || !user?.id) return;
+    
+    // ✅ Guard 4: NÃO executar se consentimentos ainda estão carregando
+    if (consentLoading) return;
+    
+    // ✅ Todas as condições atendidas: pode verificar
     hasCheckedRef.current = true;
     setHasChecked(true);
     
-    // ✅ Verificar após próximo tick
+    // ✅ Verificar após próximo tick (garante estado consistente)
     setTimeout(() => {
       const valid = hasValidConsent();
-      console.log("🔍 LGPD Consent Check:", { 
+      console.log("🔍 LGPD Consent Check (post-auth):", { 
         valid, 
         consentsCount: consents.length,
         isAuthenticated,
         userId: user?.id,
       });
       
-      // ✅ Só mostrar modal se:
-      // 1. NÃO tem consentimento válido
-      // 2. NÃO registrou nesta sessão
-      // 3. NÃO está mostrando já (prevenir loop)
-      if (!valid && !consentRegisteredRef.current && !isShowingModalRef.current) {
+      // ✅ Só mostrar modal se NÃO tem consentimento válido
+      if (!valid && !consentRegisteredRef.current) {
         console.log("🔐 LGPD: Showing consent modal (blocking access)");
-        isShowingModalRef.current = true;
         setShowModal(true);
       } else if (valid) {
         console.log("✅ LGPD: Consent already valid, access granted");
       }
-    }, 50);
+    }, 100);
     
-    // ✅ Resetar se deslogar
+    // ✅ Cleanup: resetar se deslogar
     return () => {
       if (!isAuthenticated) {
         setShowModal(false);
         setHasChecked(false);
         hasCheckedRef.current = false;
         consentRegisteredRef.current = false;
-        isShowingModalRef.current = false;
       }
     };
-  }, [isAuthenticated, user?.id, consentLoading]); // ✅ SEM hasValidConsent nas deps!
+  }, [
+    isAuthenticated, 
+    user?.id, 
+    authLoading,      // ✅ ADICIONADO: esperar auth terminar
+    consentLoading,   // ✅ ADICIONADO: esperar consentimentos carregarem
+    hasValidConsent
+  ]);
 
   // ✅ Handler: Registrar consentimento
   const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
@@ -102,14 +109,8 @@ export function useConsentCheck(): ConsentCheckData {
     const success = await recordConsent(purposesToRecord);
     
     if (success) {
-      // ✅ Marcar como registrado
       consentRegisteredRef.current = true;
-      isShowingModalRef.current = false;
-      
-      // ✅ Atualizar lista
       await refresh();
-      
-      // ✅ Fechar modal
       setShowModal(false);
       console.log("✅ LGPD: Consent recorded, access granted");
       return true;
@@ -118,7 +119,7 @@ export function useConsentCheck(): ConsentCheckData {
     return false;
   }, [recordConsent, refresh]);
 
-  // ✅ Verificar se deve bloquear
+  // ✅ Bloquear acesso se modal ativo e consentimento não registrado
   const shouldBlockAccess = showModal && !consentRegisteredRef.current;
 
   return {

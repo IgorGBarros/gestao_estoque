@@ -1,4 +1,4 @@
-// src/App.tsx - VERSÃO FINAL LGPD COMPLIANCE
+// src/App.tsx - VERSÃO FINAL LGPD COMPLIANCE (SEQUÊNCIA CORRIGIDA)
 import { Toaster } from "./components/ui/toaster";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -12,7 +12,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 // 5. AuthProvider: Autenticação (usa useNavigate, precisa de BrowserRouter)
 // 6. PlanProvider: Planos (depende de Auth)
 // 7. FeatureGatesProvider: Features (depende de Auth/Plan)
-import { AuthProvider } from "./hooks/useAuth";
+import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { PlanProvider } from "./hooks/usePlan";
 import { FeatureGatesProvider } from "./hooks/useFeatureGates";
 import { ThemeProvider } from "./hooks/useTheme";
@@ -71,6 +71,25 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
+// ✅ NOVO COMPONENTE: Wrapper que só renderiza consentimento APÓS auth concluída
+function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  
+  // ✅ Não renderizar modal/overlay se auth ainda está carregando ou usuário não autenticado
+  if (authLoading || !isAuthenticated) {
+    return <>{children}</>;
+  }
+  
+  // ✅ Usuário autenticado: renderizar modal e overlay (controlados por showModal/shouldBlockAccess)
+  return (
+    <>
+      <ConsentBlockingOverlay />
+      <PostAuthConsentModal />
+      {children}
+    </>
+  );
+}
+
 const App = () => {
   return (
     <ErrorBoundary 
@@ -104,144 +123,141 @@ const App = () => {
               <CookieConsentBanner />
               
               <AuthProvider>
-                {/* ✅ 2. Overlay que BLOQUEIA toda a UI enquanto consentimento LGPD não foi aceito */}
-                <ConsentBlockingOverlay />
-                
-                {/* ✅ 3. Modal de consentimento LGPD (pós-auth, aparece apenas se necessário) */}
-                <PostAuthConsentModal />
-                
-                <PlanProvider>
-                  <FeatureGatesProvider>
-                    <Routes>
-                      {/* ==========================================
-                          ROTAS PÚBLICAS (Sem autenticação)
-                          ========================================== */}
-                      <Route path="/lp" element={<LandingPage />} />
-                      <Route path="/auth" element={<Auth />} />
-                      
-                      {/* Vitrine Pública da Consultora */}
-                      <Route path="/vitrine/:slug" element={<Storefront />} />
-                      <Route path="/vitrine" element={<Storefront />} />
+                {/* ✅ 2. Wrapper que só renderiza consentimento APÓS auth concluída */}
+                <AuthConsentWrapper>
+                  <PlanProvider>
+                    <FeatureGatesProvider>
+                      <Routes>
+                        {/* ==========================================
+                            ROTAS PÚBLICAS (Sem autenticação)
+                            ========================================== */}
+                        <Route path="/lp" element={<LandingPage />} />
+                        <Route path="/auth" element={<Auth />} />
+                        
+                        {/* Vitrine Pública da Consultora */}
+                        <Route path="/vitrine/:slug" element={<Storefront />} />
+                        <Route path="/vitrine" element={<Storefront />} />
 
-                      {/* Rotas de API / Desenvolvedores */}
-                      <Route path="/api" element={<ApiLanding />} />
-                      <Route path="/api/docs" element={<ApiDocs />} />
-                      <Route path="/api/pricing" element={<ApiPricing />} />
-                      <Route path="/api/sandbox" element={<ApiSandbox />} />
-                      <Route path="/api/dashboard" element={<ApiDashboard />} />
+                        {/* Rotas de API / Desenvolvedores */}
+                        <Route path="/api" element={<ApiLanding />} />
+                        <Route path="/api/docs" element={<ApiDocs />} />
+                        <Route path="/api/pricing" element={<ApiPricing />} />
+                        <Route path="/api/sandbox" element={<ApiSandbox />} />
+                        <Route path="/api/dashboard" element={<ApiDashboard />} />
 
-                      {/* ==========================================
-                          ROTAS PROTEGIDAS (Requer autenticação + consentimento LGPD)
-                          ========================================== */}
-                      
-                      {/* Home / Dashboard Principal */}
-                      <Route path="/" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <Index />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
+                        {/* ==========================================
+                            ROTAS PROTEGIDAS (Requer autenticação + consentimento LGPD)
+                            ========================================== */}
+                        
+                        {/* Home / Dashboard Principal */}
+                        <Route path="/" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <Index />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
 
-                      {/* Gestão de Produtos */}
-                      <Route path="/products" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <ProductList />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/products/new" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <ProductForm />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/products/:id/edit" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <ProductForm />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
+                        {/* Gestão de Produtos */}
+                        <Route path="/products" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <ProductList />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/products/new" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <ProductForm />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/products/:id/edit" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <ProductForm />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
 
-                      {/* Estoque (Entrada/Saída) */}
-                      <Route path="/stock/entry" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <StockWizard />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/add" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <AddProduct />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/withdraw" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <WithdrawProduct />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
+                        {/* Estoque (Entrada/Saída) */}
+                        <Route path="/stock/entry" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <StockWizard />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/add" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <AddProduct />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/withdraw" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <WithdrawProduct />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
 
-                      {/* Analytics & Histórico */}
-                      <Route path="/dashboard" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <Dashboard />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/history" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <MovementHistory />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
+                        {/* Analytics & Histórico */}
+                        <Route path="/dashboard" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <Dashboard />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/history" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <MovementHistory />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
 
-                      {/* Configurações & Perfil */}
-                      <Route path="/settings" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <Settings />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/profile" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <Profile />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/plans" element={
-                        <ProtectedRoute>
-                          <ProtectedLayout>
-                            <Plans />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
+                        {/* Configurações & Perfil */}
+                        <Route path="/settings" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <Settings />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/profile" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <Profile />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/plans" element={
+                          <ProtectedRoute>
+                            <ProtectedLayout>
+                              <Plans />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
 
-                      {/* Admin Panel (requer permissão de staff) */}
-                      <Route path="/admin-panel" element={
-                        <ProtectedRoute requireAdmin>
-                          <ProtectedLayout>
-                            <AdminPanel />
-                          </ProtectedLayout>
-                        </ProtectedRoute>
-                      } />
+                        {/* Admin Panel (requer permissão de staff) */}
+                        <Route path="/admin-panel" element={
+                          <ProtectedRoute requireAdmin>
+                            <ProtectedLayout>
+                              <AdminPanel />
+                            </ProtectedLayout>
+                          </ProtectedRoute>
+                        } />
 
-                      {/* Catch-all para 404 */}
-                      <Route path="*" element={<NotFound />} />
-                    </Routes>
-                  </FeatureGatesProvider>
-                </PlanProvider>
+                        {/* Catch-all para 404 */}
+                        <Route path="*" element={<NotFound />} />
+                      </Routes>
+                    </FeatureGatesProvider>
+                  </PlanProvider>
+                </AuthConsentWrapper>
               </AuthProvider>
             </BrowserRouter>
             

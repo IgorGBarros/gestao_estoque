@@ -1,34 +1,29 @@
-// src/components/PostAuthConsentModal.tsx - VERSÃO FINAL
+// src/components/PostAuthConsentModal.tsx - GUARD adicional
+import { useAuth } from "@/hooks/useAuth";
 import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { ConsentManager } from "./ConsentManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
 
 export function PostAuthConsentModal() {
+  const { isAuthenticated } = useAuth(); // ✅ Verificar auth
   const { showModal, setShowModal, loading, handleConsentComplete } = useConsentCheck();
 
-  // ✅ Se não deve mostrar, retornar null imediatamente
-  if (!showModal) return null;
+  // ✅ Guard: Não renderizar se não autenticado OU não deve mostrar
+  if (!isAuthenticated || !showModal) return null;
 
   return (
     <Dialog 
       open={true} 
       onOpenChange={(open) => {
-        // ✅ NÃO permitir fechar
-        if (!open) setShowModal(true);
+        if (!open) setShowModal(true); // Não permitir fechar
       }}
       modal
     >
       <DialogContent 
         className="max-w-2xl max-h-[90vh] overflow-y-auto"
         style={{ zIndex: 10000 }}
-        onInteractOutside={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
-        onEscapeKeyDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-        }}
+        onInteractOutside={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        onEscapeKeyDown={(e) => { e.preventDefault(); e.stopPropagation(); }}
       >
         <DialogHeader>
           <DialogTitle>🔒 Preferências de Privacidade (LGPD)</DialogTitle>
@@ -39,17 +34,12 @@ export function PostAuthConsentModal() {
         
         <ConsentManager 
           onComplete={async (purposes) => {
-            console.log("📝 Consent submitted");
             const success = await handleConsentComplete(purposes);
-            if (success) {
-              console.log("✅ Consent success, closing modal");
-              setShowModal(false);
-            } else {
-              console.warn("⚠️ Consent failed, keeping modal open");
-            }
+            if (success) setShowModal(false);
             return success;
           }}
           loading={loading}
+        
         />
       </DialogContent>
     </Dialog>
