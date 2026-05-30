@@ -71,32 +71,34 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
-// src/App.tsx - AuthConsentWrapper CORRIGIDO
+
 function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading: authLoading } = useAuth();
   const location = useLocation();
   
-  // ✅ Verificação EXPLÍCITA de rotas públicas
-  const isAuthRoute = location.pathname === '/auth';
-  const isLandingRoute = location.pathname === '/lp';
-  const isVitrineRoute = location.pathname.startsWith('/vitrine');
-  const isApiRoute = location.pathname.startsWith('/api');
-  const isRootRoute = location.pathname === '/';
+  // ✅ Lista COMPLETA de rotas onde o modal NÃO deve aparecer
+  const publicRoutes = [
+    '/auth',
+    '/lp',
+    '/',
+    '/admin-panel',  // ← ADICIONAR: Rota pública
+  ];
   
-  // ✅ NÃO mostrar modal se:
+  const isPublicRoute = 
+    publicRoutes.includes(location.pathname) || 
+    location.pathname.startsWith('/vitrine') ||
+    location.pathname.startsWith('/api');
+  
+  // ✅ NÃO renderizar modal se:
   if (
-    authLoading ||                    // 1. Auth carregando
-    !isAuthenticated ||               // 2. Não autenticado
-    isAuthRoute ||                    // 3. Está em /auth ← CRÍTICO!
-    isLandingRoute ||                 // 4. Está em /lp
-    isVitrineRoute ||                 // 5. Está em /vitrine/*
-    isApiRoute ||                     // 6. Está em /api/*
-    isRootRoute                       // 7. Está em / (dashboard)
+    authLoading ||           // 1. Auth carregando
+    !isAuthenticated ||      // 2. Não autenticado
+    isPublicRoute            // 3. Está em rota pública ← CRÍTICO!
   ) {
     return <>{children}</>;
   }
   
-  // ✅ Usuário autenticado em rota protegida (ex: /dashboard, /products)
+  // ✅ Usuário autenticado em rota protegida do sistema
   return (
     <>
       <PostAuthConsentModal />
@@ -104,7 +106,6 @@ function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
     </>
   );
 }
-
 const App = () => {
   return (
     <ErrorBoundary 
