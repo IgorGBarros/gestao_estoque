@@ -7,11 +7,11 @@ import { useEffect } from "react";
 export function ConsentBlockingOverlay() {
   const { isAuthenticated } = useAuth();
   const location = useLocation(); // ✅ Para verificar rota
-  const { shouldBlockAccess, hasChecked } = useConsentCheck();
+  const {  hasChecked } = useConsentCheck();
   
   useEffect(() => {
     // ✅ Só bloquear se: auth + deve bloquear + já verificou + NÃO está em /auth
-    if (isAuthenticated && shouldBlockAccess && hasChecked && location.pathname !== '/auth') {
+    if (isAuthenticated  && hasChecked && location.pathname !== '/auth') {
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       
@@ -29,10 +29,10 @@ export function ConsentBlockingOverlay() {
         document.removeEventListener("keydown", handleKey, { capture: true });
       };
     }
-  }, [isAuthenticated, shouldBlockAccess, hasChecked, location.pathname]);
+  }, [isAuthenticated, hasChecked, location.pathname]);
   
   // ✅ Só renderizar overlay se todas as condições forem verdadeiras
-  if (!isAuthenticated || !shouldBlockAccess || !hasChecked || location.pathname === '/auth') {
+  if (!isAuthenticated  || !hasChecked || location.pathname === '/auth') {
     return null;
   }
   

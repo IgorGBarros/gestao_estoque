@@ -1,7 +1,6 @@
-// src/components/ProtectedRoute.tsx
+// src/components/ProtectedRoute.tsx - Sem bloqueio por LGPD
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { useConsentCheck } from "@/hooks/useConsentCheck";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -13,10 +12,9 @@ export default function ProtectedRoute({
   requireAdmin = false 
 }: ProtectedRouteProps) {
   const { user, loading: authLoading } = useAuth();
-  const { shouldBlockAccess, hasChecked } = useConsentCheck();
   const location = useLocation();
   
-  // ✅ Permitir acesso à página /auth sempre (não é rota protegida)
+  // ✅ Permitir acesso à página /auth sempre
   if (location.pathname === '/auth') {
     return <>{children}</>;
   }
@@ -40,11 +38,9 @@ export default function ProtectedRoute({
     return <Navigate to="/" replace />;
   }
   
-  // ✅ LGPD: Bloquear se consentimento não registrado E já verificou
-  if (shouldBlockAccess && hasChecked) {
-    return null; // Overlay já cobre a tela
-  }
+  // ✅ LGPD: NÃO bloquear acesso - modal é discreto e não impede uso do sistema
+  // O consentimento é registrado em background enquanto usuário usa o sistema
   
-  // ✅ Tudo OK → renderizar conteúdo protegido
+  // ✅ Renderizar conteúdo protegido normalmente
   return <>{children}</>;
 }

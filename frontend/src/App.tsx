@@ -1,8 +1,8 @@
-// src/App.tsx - VERSÃO FINAL LGPD COMPLIANCE (SEQUÊNCIA CORRIGIDA)
+// src/App.tsx - VERSÃO FINAL LGPD NÃO BLOQUEANTE
 import { Toaster } from "./components/ui/toaster";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 
 // ✅ Providers - ORDEM CRÍTICA:
 // 1. QueryClientProvider: Cache de dados (independente)
@@ -23,7 +23,7 @@ import { SessionHeader } from "./components/SessionHeader";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
-import { ConsentBlockingOverlay } from "./components/ConsentBlockingOverlay";
+// ✅ ConsentBlockingOverlay removido (modal não é mais bloqueante)
 
 // Pages - Public
 import LandingPage from "./pages/LandingPage";
@@ -71,19 +71,28 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
-// ✅ NOVO COMPONENTE: Wrapper que só renderiza consentimento APÓS auth concluída
+// ✅ NOVO COMPONENTE: Wrapper que só renderiza modal discreto APÓS auth em rotas protegidas
 function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading: authLoading } = useAuth();
+  const location = useLocation(); // ✅ Para verificar rota atual
   
-  // ✅ Não renderizar modal/overlay se auth ainda está carregando ou usuário não autenticado
-  if (authLoading || !isAuthenticated) {
+  // ✅ Lista de rotas onde o modal NÃO deve aparecer (públicas ou auth)
+  const publicRoutes = ['/auth', '/lp', '/'];
+  const isPublicRoute = publicRoutes.includes(location.pathname) || 
+                       location.pathname.startsWith('/vitrine') ||
+                       location.pathname.startsWith('/api');
+  
+  // ✅ NÃO renderizar modal se:
+  // 1. Auth ainda carregando
+  // 2. Usuário não autenticado
+  // 3. Está em rota pública (/auth, /lp, /vitrine/*, /api/*)
+  if (authLoading || !isAuthenticated || isPublicRoute) {
     return <>{children}</>;
   }
   
-  // ✅ Usuário autenticado: renderizar modal e overlay (controlados por showModal/shouldBlockAccess)
+  // ✅ Usuário autenticado em rota protegida: renderizar modal discreto (não bloqueante)
   return (
     <>
-      <ConsentBlockingOverlay />
       <PostAuthConsentModal />
       {children}
     </>
@@ -123,7 +132,7 @@ const App = () => {
               <CookieConsentBanner />
               
               <AuthProvider>
-                {/* ✅ 2. Wrapper que só renderiza consentimento APÓS auth concluída */}
+                {/* ✅ 2. Wrapper que só renderiza modal discreto APÓS auth em rotas protegidas */}
                 <AuthConsentWrapper>
                   <PlanProvider>
                     <FeatureGatesProvider>
@@ -146,7 +155,7 @@ const App = () => {
                         <Route path="/api/dashboard" element={<ApiDashboard />} />
 
                         {/* ==========================================
-                            ROTAS PROTEGIDAS (Requer autenticação + consentimento LGPD)
+                            ROTAS PROTEGIDAS (Requer autenticação)
                             ========================================== */}
                         
                         {/* Home / Dashboard Principal */}

@@ -36,7 +36,5 @@ export const useToast = () => ({
   dismiss: () => {},
 });
 
-// ✅ Alias para compatibilidade
 export { useToast as useSafeToast };
-
 export type { BaseToastProps };

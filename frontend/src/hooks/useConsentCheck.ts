@@ -1,4 +1,4 @@
-// src/hooks/useConsentCheck.ts - VERSÃO FINAL SEM LOOP
+// src/hooks/useConsentCheck.ts - VERSÃO FINAL NÃO BLOQUEANTE
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./useAuth";
 import { useConsent, LGPD_VERSION, PURPOSES, type Purpose, ESSENTIAL_PURPOSES } from "./useConsent";
@@ -10,7 +10,7 @@ export interface ConsentCheckData {
   hasChecked: boolean;
   handleConsentComplete: (purposes: Purpose[]) => Promise<boolean>;
   hasValidConsent: () => boolean;
-  shouldBlockAccess: boolean;
+  // ✅ REMOVIDO: shouldBlockAccess (não bloqueamos mais)
 }
 
 export function useConsentCheck(): ConsentCheckData {
@@ -29,7 +29,7 @@ export function useConsentCheck(): ConsentCheckData {
   const hasCheckedRef = useRef(false);
   const consentRegisteredRef = useRef(false);
 
-  // ✅ hasValidConsent com deps estáveis (não causa re-render)
+  // ✅ hasValidConsent com useCallback para referência estável
   const hasValidConsent = useCallback((): boolean => {
     if (!isAuthenticated || !user?.id) return false;
     
@@ -44,7 +44,7 @@ export function useConsentCheck(): ConsentCheckData {
     );
   }, [isAuthenticated, user?.id, consents, contextEssentials]);
 
-  // ✅ Efeito: Verificar consentimento APENAS UMA VEZ
+  // ✅ Efeito: Verificar consentimento APENAS UMA VEZ (sem loop)
   useEffect(() => {
     // ✅ Guard 1: Já verificou?
     if (hasCheckedRef.current) return;
@@ -61,11 +61,12 @@ export function useConsentCheck(): ConsentCheckData {
       const valid = hasValidConsent();
       console.log("🔍 LGPD Check:", { valid, consentsCount: consents.length });
       
+      // ✅ Só mostrar modal discreto se NÃO tem consentimento válido
       if (!valid && !consentRegisteredRef.current) {
-        console.log("🔐 Showing consent modal");
+        console.log("🔐 Showing discrete consent modal (non-blocking)");
         setShowModal(true);
       }
-    }, 50);
+    }, 100);
     
     // ✅ Cleanup
     return () => {
@@ -81,7 +82,7 @@ export function useConsentCheck(): ConsentCheckData {
     user?.id, 
     authLoading, 
     consentLoading
-    // ✅ REMOVER hasValidConsent das deps para evitar re-execução!
+    // ✅ CRÍTICO: REMOVER hasValidConsent das deps para evitar loop!
   ]);
 
   const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
@@ -92,15 +93,16 @@ export function useConsentCheck(): ConsentCheckData {
     if (success) {
       consentRegisteredRef.current = true;
       await refresh();
+      // ✅ Fechar modal após sucesso
       setShowModal(false);
-      console.log("✅ Consent recorded");
+      console.log("✅ Consent recorded, modal closed");
       return true;
     }
     
     return false;
   }, [recordConsent, refresh]);
 
-  const shouldBlockAccess = showModal && !consentRegisteredRef.current;
+  // ✅ REMOVIDO: shouldBlockAccess (não bloqueamos mais)
 
   return {
     showModal,
@@ -109,6 +111,6 @@ export function useConsentCheck(): ConsentCheckData {
     hasChecked,
     handleConsentComplete,
     hasValidConsent,
-    shouldBlockAccess,
+    // ✅ REMOVIDO: shouldBlockAccess
   };
 }
