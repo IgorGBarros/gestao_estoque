@@ -740,21 +740,39 @@ class ConsentRecordSerializer(serializers.Serializer):
         
         return consent
     
+
     def to_representation(self, instance):
-        """Resposta segura sem dados sensíveis"""
+        """Resposta com purposes como ARRAY, não string JSON"""
         rep = super().to_representation(instance)
-        rep.pop('ip_hash', None)
-        rep.pop('user_agent', None)
         
-        # ✅ Mapear 'term_version' → 'version' na resposta
+        # ✅ Converter purpose_flags (string JSON) para array de strings
+        if hasattr(instance, 'purpose_flags') and instance.purpose_flags:
+            if isinstance(instance.purpose_flags, str):
+                try:
+                    # ✅ Parse da string JSON para array
+                    import json
+                    rep['purposes'] = json.loads(instance.purpose_flags)
+                except (json.JSONDecodeError, TypeError):
+                    # Fallback: split simples se não for JSON válido
+                    rep['purposes'] = [p.strip() for p in instance.purpose_flags.strip('[]').split(',')]
+            else:
+                # Já é array
+                rep['purposes'] = instance.purpose_flags
+        else:
+            rep['purposes'] = []
+        
+        # ✅ Mapear term_version → version na resposta
         if hasattr(instance, 'term_version'):
             rep['version'] = instance.term_version
         
-        rep['purposes_granted'] = instance.purpose_flags
-        rep['can_revoke'] = [
-            p for p in instance.purpose_flags 
-            if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', ['essential', 'authentication'])
-        ]
+        # ✅ is_active: true se não foi revogado
+        rep['is_active'] = instance.revoked_at is None
+        
+        # Remover campos internos
+        rep.pop('purpose_flags', None)
+        rep.pop('ip_hash', None)
+        rep.pop('user_agent', None)
+        
         return rep
 
 

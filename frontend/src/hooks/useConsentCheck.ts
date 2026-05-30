@@ -1,4 +1,4 @@
-// src/hooks/useConsentCheck.ts - VERSÃO FINAL COM GATILHO CORRETO
+// src/hooks/useConsentCheck.ts - VERSÃO FINAL COM CORREÇÃO DE PURPOSE_FLAGS
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./useAuth";
 import { useConsent, LGPD_VERSION, PURPOSES, type Purpose, ESSENTIAL_PURPOSES } from "./useConsent";
@@ -27,22 +27,69 @@ export function useConsentCheck(): ConsentCheckData {
   
   const hasCheckedRef = useRef(false);
   const consentRegisteredRef = useRef(false);
-  const profileLoadedRef = useRef(false); // ✅ NOVO: Rastrear se profile foi carregado
+  const profileLoadedRef = useRef(false);
+// src/hooks/useConsentCheck.ts - Correção do parse de purpose_flags
 
-  // ✅ hasValidConsent com useCallback
-  const hasValidConsent = useCallback((): boolean => {
-    if (!isAuthenticated || !user?.id) return false;
+const hasValidConsent = useCallback((): boolean => {
+  if (!isAuthenticated || !user?.id) return false;
+  
+  const essentials = contextEssentials.length > 0 
+    ? contextEssentials 
+    : ESSENTIAL_PURPOSES;
+  
+  // ✅ LOG DE DEBUG
+  if (consents.length > 0 && import.meta.env.DEV) {
+    console.log("🔍 hasValidConsent debug:", {
+      consentsCount: consents.length,
+      firstConsent: {
+        purposes: consents[0].purposes,
+        purposesType: typeof consents[0].purposes,
+        isArray: Array.isArray(consents[0].purposes),
+      },
+    });
+  }
+  
+  const valid = consents.some(c => {
+    // ✅ CORREÇÃO: Parse de purpose_flags com cast para evitar erro TypeScript
+    let purposes: string[] = [];
     
-    const essentials = contextEssentials.length > 0 
-      ? contextEssentials 
-      : ESSENTIAL_PURPOSES;
+    if (Array.isArray(c.purposes)) {
+      // Já é array ✅
+      purposes = c.purposes;
+    } else {
+      // ✅ Cast para any para permitir operação em string
+      const purposesValue = c.purposes as any;
+      
+      if (typeof purposesValue === 'string') {
+        // ✅ Parse da string JSON para array
+        try {
+          purposes = JSON.parse(purposesValue);
+        } catch (e) {
+          // Fallback: split simples se não for JSON válido
+          purposes = purposesValue
+            .replace(/[\[\]"]/g, '') // Remove [, ], "
+            .split(',')
+            .map((p: string) => p.trim())
+            .filter((p: string) => p.length > 0);
+        }
+      } else {
+        // Fallback para qualquer outro tipo
+        purposes = Array.isArray(purposesValue) ? purposesValue : [];
+      }
+    }
     
-    return consents.some(c => 
-      c.is_active && 
-      c.version === LGPD_VERSION &&
-      essentials.every(p => c.purposes.includes(p))
-    );
-  }, [isAuthenticated, user?.id, consents, contextEssentials]);
+    // ✅ Verificar consentimento válido
+    return c.is_active && 
+           c.version === LGPD_VERSION &&
+           essentials.every(p => purposes.includes(p));
+  });
+  
+  if (import.meta.env.DEV) {
+    console.log("✅ hasValidConsent result:", valid);
+  }
+  
+  return valid;
+}, [isAuthenticated, user?.id, consents, contextEssentials]);
 
   // ✅ Efeito: Verificar consentimento APENAS após profile carregado
   useEffect(() => {
@@ -58,7 +105,7 @@ export function useConsentCheck(): ConsentCheckData {
     // ✅ Guard 4: Consentimentos ainda carregando?
     if (consentLoading) return;
     
-    // ✅ Guard 5: Profile ainda não carregou? (verificar se temos dados do perfil)
+    // ✅ Guard 5: Profile ainda não carregou?
     if (!profileLoadedRef.current && user?.email) {
       profileLoadedRef.current = true;
     }
@@ -96,10 +143,10 @@ export function useConsentCheck(): ConsentCheckData {
   }, [
     isAuthenticated, 
     user?.id, 
-    user?.email,      // ✅ Gatilho: quando email do profile chega
+    user?.email,
     authLoading, 
     consentLoading
-    // ✅ SEM hasValidConsent nas deps!
+    // ✅ CRÍTICO: SEM hasValidConsent nas deps para evitar loop!
   ]);
 
   const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
