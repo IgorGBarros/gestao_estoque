@@ -1,14 +1,17 @@
 // src/components/ConsentBlockingOverlay.tsx
+import { useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { useEffect } from "react";
 
 export function ConsentBlockingOverlay() {
   const { isAuthenticated } = useAuth();
+  const location = useLocation(); // ✅ Para verificar rota
   const { shouldBlockAccess, hasChecked } = useConsentCheck();
   
   useEffect(() => {
-    if (isAuthenticated && shouldBlockAccess && hasChecked) {
+    // ✅ Só bloquear se: auth + deve bloquear + já verificou + NÃO está em /auth
+    if (isAuthenticated && shouldBlockAccess && hasChecked && location.pathname !== '/auth') {
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
       
@@ -26,10 +29,14 @@ export function ConsentBlockingOverlay() {
         document.removeEventListener("keydown", handleKey, { capture: true });
       };
     }
-  }, [isAuthenticated, shouldBlockAccess, hasChecked]);
+  }, [isAuthenticated, shouldBlockAccess, hasChecked, location.pathname]);
   
-  if (!isAuthenticated || !shouldBlockAccess || !hasChecked) return null;
+  // ✅ Só renderizar overlay se todas as condições forem verdadeiras
+  if (!isAuthenticated || !shouldBlockAccess || !hasChecked || location.pathname === '/auth') {
+    return null;
+  }
   
+  // ✅ Overlay com z-index MENOR que o modal (9999 < 10000)
   return (
     <div 
       className="fixed inset-0 bg-black/20 backdrop-blur-[1px] pointer-events-auto"

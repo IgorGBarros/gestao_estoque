@@ -1,5 +1,5 @@
 // src/hooks/useSafeToast.ts
-import { useToast as useShadcnToast } from "./use-toast";
+import { useToast as useShadcnToast } from "./use-toast-original";
 
 /**
  * Hook seguro para toast que garante retorno de função

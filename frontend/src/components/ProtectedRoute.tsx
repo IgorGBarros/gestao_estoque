@@ -1,4 +1,4 @@
-// src/components/ProtectedRoute.tsx - COM BLOQUEIO LGPD
+// src/components/ProtectedRoute.tsx
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useConsentCheck } from "@/hooks/useConsentCheck";
@@ -13,10 +13,15 @@ export default function ProtectedRoute({
   requireAdmin = false 
 }: ProtectedRouteProps) {
   const { user, loading: authLoading } = useAuth();
-  const { shouldBlockAccess, hasChecked } = useConsentCheck(); // ✅ Usar hasChecked
+  const { shouldBlockAccess, hasChecked } = useConsentCheck();
   const location = useLocation();
   
-  // ✅ 1. Loading de autenticação
+  // ✅ Permitir acesso à página /auth sempre (não é rota protegida)
+  if (location.pathname === '/auth') {
+    return <>{children}</>;
+  }
+  
+  // ✅ Loading de autenticação
   if (authLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -25,24 +30,21 @@ export default function ProtectedRoute({
     );
   }
   
-  // ✅ 2. Não autenticado → redirect para login
+  // ✅ Não autenticado → redirect para login
   if (!user) {
     return <Navigate to="/auth" state={{ from: location }} replace />;
   }
   
-  // ✅ 3. Requer admin mas usuário não é staff
+  // ✅ Requer admin mas usuário não é staff
   if (requireAdmin && !user.is_staff) {
     return <Navigate to="/" replace />;
   }
   
-  // ✅ 4. LGPD: Bloquear se consentimento não registrado E já verificou
-  // (hasChecked evita bloquear durante o loading inicial dos consentimentos)
+  // ✅ LGPD: Bloquear se consentimento não registrado E já verificou
   if (shouldBlockAccess && hasChecked) {
-    // ✅ Não renderizar conteúdo sensível
-    // ✅ Overlay já cobre a tela via ConsentBlockingOverlay
-    return null;
+    return null; // Overlay já cobre a tela
   }
   
-  // ✅ 5. Tudo OK → renderizar conteúdo protegido
+  // ✅ Tudo OK → renderizar conteúdo protegido
   return <>{children}</>;
 }

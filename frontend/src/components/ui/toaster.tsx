@@ -1,4 +1,4 @@
-// src/components/ui/toaster.tsx - Ouvir evento global
+// src/components/ui/toaster.tsx
 import { useToast as useOriginalToast } from "@/hooks/use-toast-original";
 import { Toast, ToastProvider, ToastViewport } from "./toast";
 import { useEffect } from "react";
@@ -6,7 +6,6 @@ import { useEffect } from "react";
 export function Toaster() {
   const { toast: internalToast, toasts } = useOriginalToast();
   
-  // ✅ Ouvir evento global de toast
   useEffect(() => {
     const handleGlobalToast = (event: Event) => {
       const customEvent = event as CustomEvent;
