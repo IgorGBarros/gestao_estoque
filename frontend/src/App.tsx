@@ -1,14 +1,17 @@
-// src/App.tsx - VERSÃO FINAL COM ORDEM DE PROVIDERS CORRIGIDA
+// src/App.tsx - VERSÃO FINAL COM CONSENTIMENTO E BLOQUEIO
 import { Toaster } from "./components/ui/toaster";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import type { ComponentType } from "react";
 
-// ✅ Providers - ORDEM IMPORTANTE:
-// 1. Auth primeiro (dependências básicas)
-// 2. Plan (depende de Auth para saber o usuário)
-// 3. FeatureGates (depende de Auth/Plan para liberar features)
+// ✅ Providers - ORDEM CRÍTICA:
+// 1. QueryClientProvider: Cache de dados (independente)
+// 2. ThemeProvider: Tema visual (independente)  
+// 3. TooltipProvider/Toaster: UI components (independentes)
+// 4. BrowserRouter: Rotas (deve envolver Auth para useNavigate)
+// 5. AuthProvider: Autenticação (usa useNavigate, precisa de BrowserRouter)
+// 6. PlanProvider: Planos (depende de Auth)
+// 7. FeatureGatesProvider: Features (depende de Auth/Plan)
 import { AuthProvider } from "./hooks/useAuth";
 import { PlanProvider } from "./hooks/usePlan";
 import { FeatureGatesProvider } from "./hooks/useFeatureGates";
@@ -18,8 +21,11 @@ import { ThemeProvider } from "./hooks/useTheme";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { SessionHeader } from "./components/SessionHeader";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { CookieConsentBanner } from "./components/CookieConsentBanner";
+import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
+import { ConsentBlockingOverlay } from "./components/ConsentBlockingOverlay"; // ✅ NOVO
 
-// Pages - Public (não requerem auth)
+// Pages - Public
 import LandingPage from "./pages/LandingPage";
 import Auth from "./pages/Auth";
 import Storefront from "./pages/Storefront";
@@ -45,16 +51,14 @@ import MovementHistory from "./pages/MovementHistory";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
-import { CookieConsentBanner } from "./components/CookieConsentBanner";
-import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
 
 // ✅ QueryClient FORA do componente (evita recriação a cada render)
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false, // Evita requisições desnecessárias
-      retry: 1, // Tenta 1 vez antes de falhar
-      staleTime: 1000 * 60 * 5, // Cache válido por 5 minutos
+      refetchOnWindowFocus: false,
+      retry: 1,
+      staleTime: 1000 * 60 * 5, // 5 minutos
     },
   },
 });
@@ -87,14 +91,7 @@ const App = () => {
     >
       {/* 
         ✅ ORDEM DOS PROVIDERS (CRÍTICO):
-        1. QueryClientProvider: Cache de dados (independente)
-        2. ThemeProvider: Tema visual (independente)
-        3. TooltipProvider: UI components (independente)
-        4. Toaster: Notificações (independente)
-        5. BrowserRouter: Rotas (deve envolver Auth para useNavigate)
-        6. AuthProvider: Autenticação (usa useNavigate, precisa de BrowserRouter)
-        7. PlanProvider: Planos (depende de Auth para saber o usuário)
-        8. FeatureGatesProvider: Features (depende de Auth/Plan)
+        QueryClient → Theme → UI → Router → Auth → Plan → Features
       */}
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
@@ -103,7 +100,16 @@ const App = () => {
             
             {/* ✅ BrowserRouter DEVE envolver AuthProvider para useNavigate funcionar */}
             <BrowserRouter>
+              {/* ✅ Banner de cookies (pré-auth, sempre visível) */}
+              <CookieConsentBanner />
+              
               <AuthProvider>
+                {/* ✅ Overlay que BLOQUEIA a UI enquanto modal de consentimento está ativo */}
+                <ConsentBlockingOverlay />
+                
+                {/* ✅ Modal de consentimento pós-auth (renderizado mas invisível se não necessário) */}
+                <PostAuthConsentModal />
+                
                 <PlanProvider>
                   <FeatureGatesProvider>
                     <Routes>
@@ -125,7 +131,7 @@ const App = () => {
                       <Route path="/api/dashboard" element={<ApiDashboard />} />
 
                       {/* ==========================================
-                          ROTAS PROTEGIDAS (Requer autenticação)
+                          ROTAS PROTEGIDAS (Requer autenticação + consentimento)
                           ========================================== */}
                       
                       {/* Home / Dashboard Principal */}
@@ -234,11 +240,6 @@ const App = () => {
                       {/* Catch-all para 404 */}
                       <Route path="*" element={<NotFound />} />
                     </Routes>
-                                 {/* ✅ Banner leve (pré-auth) */}
-                  <CookieConsentBanner />
-                  
-                  {/* ✅ Modal completo (pós-auth) */}
-                  <PostAuthConsentModal />
                   </FeatureGatesProvider>
                 </PlanProvider>
               </AuthProvider>

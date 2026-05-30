@@ -1,33 +1,19 @@
 // src/lib/toast.ts
-import { useToast as useShadcnToast, type ToastProps } from "@/hooks/use-toast";
+import { useToast as useOriginalToast } from "@/hooks/use-toast";
 
 /**
- * Wrapper global seguro para toast
- * Previne "TypeError: r is not a function" em qualquer componente
+ * ✅ Wrapper 100% seguro para toast - nunca lança erro
  */
-export function useSafeToast() {
-  const toastHook = useShadcnToast() as unknown;
-  
-  // ✅ Função segura que nunca lança erro
-  const safeToast = (props: ToastProps) => {
+export function useToast() {
+  // cast to any to avoid incorrect inferred "never" call signature
+  const original: any = useOriginalToast();
+
+  return (props: any) => {
     try {
-      // Caso 1: hook retorna função direta
-      if (typeof toastHook === 'function') {
-        return (toastHook as (props: ToastProps) => void)(props);
-      }
-      // Caso 2: hook retorna objeto com método toast()
-      if (toastHook && typeof (toastHook as { toast?: unknown }).toast === 'function') {
-        return (toastHook as { toast: (props: ToastProps) => void }).toast(props);
-      }
-      // Fallback: log seguro em vez de crash
-      console.warn("⚠️ Toast fallback:", props);
-    } catch (error) {
-      console.error("❌ Toast error (silently handled):", error);
+      if (typeof original === "function") return original(props);
+      if (original?.toast && typeof original.toast === "function") return original.toast(props);
+    } catch (e) {
+      console.warn("⚠️ Toast fallback:", props?.title);
     }
   };
-  
-  return safeToast;
 }
-
-// ✅ Exportar tipo para compatibilidade com TypeScript
-export type { ToastProps };
