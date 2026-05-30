@@ -3,35 +3,48 @@ import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { useEffect } from "react";
 
 export function ConsentBlockingOverlay() {
-  const { shouldBlockAccess } = useConsentCheck();
+  const { shouldBlockAccess, hasChecked } = useConsentCheck();
   
   useEffect(() => {
-    if (shouldBlockAccess) {
+    if (shouldBlockAccess && hasChecked) {
       // ✅ Bloquear scroll
+      const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
-      // ✅ Prevenir atalhos que poderiam pular o modal
+      
+      // ✅ Prevenir teclas que poderiam pular o modal
       const handleKey = (e: KeyboardEvent) => {
-        if (!["Tab", "Shift", "Control", "Alt"].includes(e.key)) {
+        if (!["Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) {
           e.preventDefault();
+          e.stopPropagation();
         }
       };
+      
       document.addEventListener("keydown", handleKey, { capture: true });
       
       return () => {
-        document.body.style.overflow = "";
+        document.body.style.overflow = originalOverflow;
         document.removeEventListener("keydown", handleKey, { capture: true });
       };
     }
-  }, [shouldBlockAccess]);
+  }, [shouldBlockAccess, hasChecked]);
   
-  if (!shouldBlockAccess) return null;
+  // ✅ Só renderizar overlay se deve bloquear E já verificou consentimento
+  if (!shouldBlockAccess || !hasChecked) return null;
   
-  // ✅ Overlay que cobre TUDO com alta prioridade (z-index máximo)
+  // ✅ Overlay com z-index máximo + pointer-events para bloquear cliques
   return (
     <div 
-      className="fixed inset-0 z-[9999] bg-black/30 backdrop-blur-[2px]"
-      onClick={(e) => e.preventDefault()}
-      onContextMenu={(e) => e.preventDefault()}
+      className="fixed inset-0 z-[9999] bg-black/30 backdrop-blur-[2px] pointer-events-auto"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+      aria-hidden="true"
+      role="presentation"
     />
   );
 }

@@ -1,4 +1,4 @@
-// src/App.tsx - VERSÃO FINAL COM CONSENTIMENTO E BLOQUEIO
+// src/App.tsx - VERSÃO FINAL LGPD COMPLIANCE
 import { Toaster } from "./components/ui/toaster";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -23,7 +23,7 @@ import { SessionHeader } from "./components/SessionHeader";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
-import { ConsentBlockingOverlay } from "./components/ConsentBlockingOverlay"; // ✅ NOVO
+import { ConsentBlockingOverlay } from "./components/ConsentBlockingOverlay";
 
 // Pages - Public
 import LandingPage from "./pages/LandingPage";
@@ -100,14 +100,14 @@ const App = () => {
             
             {/* ✅ BrowserRouter DEVE envolver AuthProvider para useNavigate funcionar */}
             <BrowserRouter>
-              {/* ✅ Banner de cookies (pré-auth, sempre visível) */}
+              {/* ✅ 1. Banner de cookies básico (pré-auth, para TODOS os visitantes) */}
               <CookieConsentBanner />
               
               <AuthProvider>
-                {/* ✅ Overlay que BLOQUEIA a UI enquanto modal de consentimento está ativo */}
+                {/* ✅ 2. Overlay que BLOQUEIA toda a UI enquanto consentimento LGPD não foi aceito */}
                 <ConsentBlockingOverlay />
                 
-                {/* ✅ Modal de consentimento pós-auth (renderizado mas invisível se não necessário) */}
+                {/* ✅ 3. Modal de consentimento LGPD (pós-auth, aparece apenas se necessário) */}
                 <PostAuthConsentModal />
                 
                 <PlanProvider>
@@ -131,7 +131,7 @@ const App = () => {
                       <Route path="/api/dashboard" element={<ApiDashboard />} />
 
                       {/* ==========================================
-                          ROTAS PROTEGIDAS (Requer autenticação + consentimento)
+                          ROTAS PROTEGIDAS (Requer autenticação + consentimento LGPD)
                           ========================================== */}
                       
                       {/* Home / Dashboard Principal */}
