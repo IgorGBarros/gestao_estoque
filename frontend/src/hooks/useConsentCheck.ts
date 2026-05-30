@@ -1,45 +1,97 @@
-// src/hooks/useConsentCheck.ts
-import { useState, useEffect } from "react";
-import { consentApi } from "../lib/api";
+// src/hooks/useConsentCheck.ts - VERSÃO CORRIGIDA
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./useAuth";
-// src/hooks/useConsentCheck.ts - Lógica CORRIGIDA
+import { useConsent, LGPD_VERSION, PURPOSES, type Purpose } from "./useConsent";
 
-export function useConsentCheck() {
+export interface ConsentCheckData {
+  showModal: boolean;
+  setShowModal: (show: boolean) => void;
+  loading: boolean;
+  handleConsentComplete: (purposes: Purpose[]) => Promise<boolean>;
+  hasValidConsent: () => boolean;
+}
+
+export function useConsentCheck(): ConsentCheckData {
   const { user, isAuthenticated } = useAuth();
+  const { 
+    consents, 
+    essentialPurposes, 
+    recordConsent, 
+    loading: consentLoading,
+    refresh 
+  } = useConsent();
+  
   const [showModal, setShowModal] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [checked, setChecked] = useState(false);
+  
+  // ✅ Ref para evitar re-renders desnecessários
+  const hasCheckedRef = useRef(false);
 
+  // ✅ Verificar se usuário tem consentimento válido
+  const hasValidConsent = useCallback((): boolean => {
+    if (!isAuthenticated || !user?.id) return false;
+    
+    return consents.some(c => 
+      c.is_active && 
+      c.version === LGPD_VERSION &&
+      essentialPurposes.every(p => c.purposes.includes(p))
+    );
+  }, [isAuthenticated, user?.id, consents, essentialPurposes]);
+
+  // ✅ Efeito: Verificar consentimento APENAS UMA VEZ após autenticação
   useEffect(() => {
-    if (!isAuthenticated || !user?.id) {
-      setLoading(false);
-      return;
+    // ✅ Guard: Só executar uma vez por sessão de login
+    if (hasCheckedRef.current) return;
+    
+    // ✅ Só verificar se usuário está autenticado e temos dados
+    if (isAuthenticated && user?.id && consents.length >= 0) {
+      hasCheckedRef.current = true;
+      
+      // ✅ Usar setTimeout para garantir que consents foi populado
+      setTimeout(() => {
+        const valid = hasValidConsent();
+        console.log("🔍 Consent check result:", { valid, consentsCount: consents.length });
+        
+        // ✅ Só mostrar modal se NÃO tem consentimento válido
+        if (!valid) {
+          console.log("🔐 Showing consent modal");
+          setShowModal(true);
+        }
+      }, 200); // Pequeno delay para garantir que dados carregaram
     }
-    checkConsentStatus();
-  }, [user?.id, isAuthenticated]);
+    
+    // ✅ Resetar se usuário deslogar
+    if (!isAuthenticated) {
+      setShowModal(false);
+      setChecked(false);
+      hasCheckedRef.current = false;
+    }
+  }, [isAuthenticated, user?.id, consents.length, hasValidConsent]); // ← deps corretas
 
-  const checkConsentStatus = async () => {
-    try {
-      const { consents, current_version, essential_purposes } = await consentApi.getMyConsents();
-      
-      // ✅ Verificar se já existe consentimento ATIVO para a versão atual
-      const hasActiveConsent = consents.some((c: any) => 
-        c.is_active && 
-        c.version === current_version &&
-        // ✅ Verificar se tem pelo menos os propósitos essenciais
-        essential_purposes?.every((p: string) => c.purposes?.includes(p))
-      );
-      
-      // ✅ Só mostrar modal se NÃO tiver consentimento válido
-      setShowModal(!hasActiveConsent);
-      
-    } catch (error) {
-      // Em caso de erro, mostrar modal por segurança
-      console.warn("⚠️ Erro ao verificar consentimento, mostrando modal por segurança");
-      setShowModal(true);
-    } finally {
-      setLoading(false);
+  // ✅ Handler: Quando usuário completa o consentimento
+  const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
+    const purposesToRecord = [
+      ...new Set<Purpose>([...purposes, ...(essentialPurposes as Purpose[])])
+    ] as Purpose[];
+    
+    const success = await recordConsent(purposesToRecord);
+    
+    if (success) {
+      await refresh();
+      // ✅ Só fechar modal após confirmação de sucesso
+      setShowModal(false);
+      return true;
     }
+    
+    // ✅ NÃO fechar modal se falhar - usuário deve tentar novamente
+    return false;
+  }, [essentialPurposes, recordConsent, refresh]);
+
+  return {
+    showModal,
+    setShowModal,
+    loading: consentLoading,
+    handleConsentComplete,
+    hasValidConsent,
   };
-
-  return { showModal, setShowModal, loading };
 }
