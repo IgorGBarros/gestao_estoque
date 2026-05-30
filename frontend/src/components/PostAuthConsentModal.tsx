@@ -1,10 +1,11 @@
-// src/components/PostAuthConsentModal.tsx - VERSÃO CORRIGIDA
+// src/components/PostAuthConsentModal.tsx - VERSÃO FINAL CORRIGIDA
 import { useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useConsentCheck } from "@/hooks/useConsentCheck";
 import { ConsentManager } from "./ConsentManager";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "./ui/dialog";
-// src/components/PostAuthConsentModal.tsx - Guards ESTRITOS
+import type { Purpose } from "@/hooks/useConsent";
+
 export function PostAuthConsentModal() {
   const { isAuthenticated } = useAuth();
   const location = useLocation();
@@ -59,12 +60,20 @@ export function PostAuthConsentModal() {
         </DialogHeader>
         
         <ConsentManager 
-          onComplete={async (purposes) => {
+          // ✅ CORREÇÃO: Função deve retornar Promise<boolean>
+          onComplete={async (purposes: Purpose[]): Promise<boolean> => {
+            console.log("📝 onComplete called with:", purposes);
             const success = await handleConsentComplete(purposes);
-            if (success) setShowModal(false);
+            console.log("✅ handleConsentComplete returned:", success);
+            
+            if (success) {
+              setShowModal(false);
+            }
+            
+            // ✅ CRÍTICO: Retornar o boolean para satisfazer o tipo
             return success;
           }}
-               loading={loading}
+          loading={loading}
         />
       </DialogContent>
     </Dialog>
