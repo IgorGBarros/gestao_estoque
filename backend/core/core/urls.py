@@ -115,7 +115,7 @@ urlpatterns = [
     # ==========================================
     # 📦 INVENTORY (Inclusão do app inventory)
     # ==========================================
-    path('api/', include('inventory.urls')),
+    path('', include('inventory.urls')),
     
     # ==========================================
     # 🤖 AI & PAYMENTS (Outros apps)
