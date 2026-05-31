@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, User, Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
 import { useConsent, PURPOSES } from "../hooks/useConsent"; // ✅ Import correto
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
 
@@ -263,7 +263,7 @@ export default function Auth() {
                   Concordo com o tratamento dos meus dados pessoais para criação e gestão da conta, 
                   conforme a{" "}
                   <a 
-                    href="/privacidade" 
+                    href="/privacy" 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-brand hover:underline font-medium"
@@ -272,7 +272,7 @@ export default function Auth() {
                   </a>
                   {" "}e{" "}
                   <a 
-                    href="/termos" 
+                    href="/terms" 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="text-brand hover:underline font-medium"

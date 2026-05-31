@@ -53,6 +53,11 @@ import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
 import { useEffect, useState } from "react";
 
+import PrivacyPage from "./pages/PrivacyPage";
+import TermsPage from "./pages/TermsPage";
+
+
+
 // ✅ QueryClient FORA do componente (evita recriação a cada render)
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -159,6 +164,8 @@ const App = () => {
                             ========================================== */}
                         <Route path="/lp" element={<LandingPage />} />
                         <Route path="/auth" element={<Auth />} />
+                        <Route path="/privacy" element={<PrivacyPage />} />
+                        <Route path="/terms" element={<TermsPage />} />
                         
                         {/* Vitrine Pública da Consultora */}
                         <Route path="/vitrine/:slug" element={<Storefront />} />
