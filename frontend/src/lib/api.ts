@@ -1,38 +1,21 @@
-// src/lib/api.ts - VERSÃO FINAL CORRIGIDA
+// src/lib/api.ts - VERSÃO FINAL CONSOLIDADA
 import {
   isDemoMode, DEMO_INVENTORY, DEMO_MOVEMENTS,
   DEMO_PROFILE, DEMO_BATCHES
 } from "./demoData";
-import { api } from "../services/api"; // ✅ Usa instância Axios configurada
+// ✅ Importar instância Axios E helpers de token da configuração global
+import { api, getToken, setToken, clearToken } from "../services/api";
 
 // ✅ CORREÇÃO: Base URL limpa (services/api.ts já adiciona /api/)
 const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || "https://dev-brih.onrender.com")
   .replace(/\/$/, "");
 
-// ✅ Token helpers (usando services/api.ts para consistência)
-function getToken(): string | null {
-  return localStorage.getItem("auth_token");
-}
-
-export function setToken(token: string) {
-  localStorage.setItem("auth_token", token);
-  // ✅ Sincroniza com services/api.ts
-  api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-}
-
-export function clearToken() {
-  localStorage.removeItem("auth_token");
-  localStorage.removeItem("refresh_token");
-  localStorage.removeItem("auth_user");
-  delete api.defaults.headers.common["Authorization"];
-}
+// ✅ REMOVIDO: getToken, setToken, clearToken duplicados
+// Agora importados de "@/services/api" para consistência
 
 // ✅ CORREÇÃO: Função apiRequest usando Axios (consistente com services/api.ts)
 async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
-  
   // ✅ CORREÇÃO: Não duplicar /api/ - services/api.ts já adiciona
-  // Endpoint deve começar com / para ser relativo à baseURL
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   
   console.log(`🔄 API Request: ${options.method || 'GET'} ${cleanEndpoint}`);
@@ -47,37 +30,17 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
         "Content-Type": "application/json",
         ...(options.headers as Record<string, string>),
       },
-      // ✅ Não sobrescrever timeout/config do Axios instance
     });
     
     console.log(`📊 Response Status: ${response.status} for ${cleanEndpoint}`);
     
-    // ✅ Axios já lança erro para status < 200 ou >= 300
-    // Mas mantemos tratamento customizado para 401
-    if (response.status === 401) {
-      // ✅ Só limpa sessão se NÃO for rota pública
-      const publicRoutes = ['/auth/', '/consent/', '/public/', '/vitrine/'];
-      const isPublicRoute = publicRoutes.some(route => cleanEndpoint.includes(route));
-      
-      if (!isPublicRoute && token) {
-        console.log("🔐 Token expirado em rota protegida, limpando sessão");
-        clearToken();
-        clearAppCache();
-        // ✅ Só redireciona se não estiver já na página de auth
-        if (!window.location.pathname.includes('/auth')) {
-          window.location.href = "/auth";
-        }
-      }
-      throw new Error("Sessão expirada ou inválida");
-    }
-    
+    // ✅ Tratamento de 401: deixar services/api.ts gerenciar (já tem lógica mais robusta)
     if (response.status === 204) return null as T;
     
     console.log(`✅ API Success: ${cleanEndpoint}`, response.data);
     return response.data as T;
     
   } catch (error: any) {
-    // ✅ Axios já captura erros de rede e HTTP
     console.error(`❌ API Request Failed: ${endpoint}`, {
       message: error.message,
       status: error.response?.status,
@@ -144,10 +107,7 @@ export interface LookupResult {
 export const productLookupApi = {
   lookup: (barcodeOrName: string | null) => {
     const query = barcodeOrName ?? "";
-    // ✅ Endpoint correto sem duplicação de /api/
-    return apiRequest<LookupResult>(
-      `/products/lookup/?q=${encodeURIComponent(query)}`
-    );
+    return apiRequest<LookupResult>(`/products/lookup/?q=${encodeURIComponent(query)}`);
   },
   confirmMatch: (barcode: string, productId: number) =>
     apiRequest<GlobalProduct>("/products/confirm-match/", {
@@ -172,15 +132,12 @@ export const clearAppCache = () => {
 function isCacheValid(type: 'inventory' | 'movements'): boolean {
   const timestamp = cacheTimestamp[type];
   if (!timestamp) return false;
-  
   const isValid = Date.now() - timestamp < CACHE_DURATION;
-  if (!isValid) {
-    console.log(`⏰ Cache ${type} expirado`);
-  }
+  if (!isValid) console.log(`⏰ Cache ${type} expirado`);
   return isValid;
 }
 
-// ── Inventory (endpoints corrigidos) ──
+// ── Inventory ──
 export interface InventoryItem {
   product_id?: string | number;
   id: string;
@@ -188,7 +145,6 @@ export interface InventoryItem {
   min_quantity?: number;
   cost_price: number;
   sale_price: number | null;
-  
   product?: {
     id: number | string;
     name: string;
@@ -199,7 +155,6 @@ export interface InventoryItem {
     official_price: number;
     brand?: string;
   };
-  
   batches?: InventoryBatch[];
   quantity?: number;
   barcode?: string;
@@ -225,7 +180,7 @@ export const stockApi = {
       method: "POST",
       body: JSON.stringify(data),
     });
-    clearAppCache(); // ✅ Limpa cache após criação
+    clearAppCache();
     return res;
   }
 };
@@ -233,88 +188,61 @@ export const stockApi = {
 export const inventoryApi = {
   list: async (forceRefresh = false) => {
     console.log(`📦 Carregando inventário (forceRefresh: ${forceRefresh})`);
-    
     if (isDemoMode()) {
-      console.log("🎭 Modo demo ativo - retornando dados mock");
+      console.log("🎭 Modo demo ativo");
       return DEMO_INVENTORY;
     }
-    
-    // ✅ Usar cache se válido e não forçar refresh
     if (!forceRefresh && isCacheValid('inventory') && inventoryCache) {
       console.log("⚡ Usando cache do inventário");
       return inventoryCache;
     }
-    
     try {
       const data = await apiRequest<InventoryItem[]>("/inventory/");
-      
-      // ✅ Atualizar cache
       inventoryCache = data;
       cacheTimestamp.inventory = Date.now();
-      
       console.log(`✅ Inventário carregado: ${data.length} itens`);
       return data;
     } catch (error) {
       console.error("❌ Erro ao carregar inventário:", error);
-      
-      // ✅ Fallback para cache se houver erro de rede (não 401)
       if (inventoryCache && (error as any).response?.status !== 401) {
         console.log("🔄 Usando cache como fallback");
         return inventoryCache;
       }
-      
       throw error;
     }
   },
 
-  // ✅ CORREÇÃO: Busca por código de barras melhorada
   getByBarcode: async (barcode: string): Promise<InventoryItem | null> => {
     console.log(`🔍 Buscando produto por código: ${barcode}`);
-    
     if (isDemoMode()) {
       const found = DEMO_INVENTORY.find(item => 
-        item.product?.bar_code === barcode || 
-        item.barcode === barcode
+        item.product?.bar_code === barcode || item.barcode === barcode
       );
-      console.log(found ? "✅ Produto encontrado no demo" : "❌ Produto não encontrado no demo");
       return found || null;
     }
-    
     try {
-      // ✅ CORREÇÃO: Endpoint correto para busca por código
       const data = await apiRequest<InventoryItem>(`/inventory/by-barcode/${encodeURIComponent(barcode)}/`);
       console.log("✅ Produto encontrado:", data);
       return data;
     } catch (error: any) {
       console.error(`❌ Erro ao buscar produto ${barcode}:`, error);
-      
-      // ✅ Se erro 404, retornar null em vez de lançar erro
-      if (error.response?.status === 404 || error.message?.includes('404') || error.message?.includes('Não encontrado')) {
+      if (error.response?.status === 404 || error.message?.includes('404')) {
         console.log("📝 Produto não encontrado no estoque (404)");
         return null;
       }
-      
       throw error;
     }
   },
 
   update: async (id: string, data: Partial<InventoryItem>) => {
     console.log(`📝 Atualizando item ${id}:`, data);
-    
-    if (isDemoMode()) {
-      console.log("🎭 Modo demo - simulando atualização");
-      return { ...DEMO_INVENTORY[0], ...data };
-    }
-    
+    if (isDemoMode()) return { ...DEMO_INVENTORY[0], ...data };
     try {
       const result = await apiRequest<InventoryItem>(`/inventory/${id}/`, {
         method: "PATCH",
         body: JSON.stringify(data),
       });
-      
-      // ✅ Limpar cache após atualização
       clearAppCache();
-      
       console.log("✅ Item atualizado:", result);
       return result;
     } catch (error) {
@@ -325,20 +253,10 @@ export const inventoryApi = {
 
   delete: async (id: string) => {
     console.log(`🗑️ Removendo item ${id}`);
-    
-    if (isDemoMode()) {
-      console.log("🎭 Modo demo - simulando remoção");
-      return;
-    }
-    
+    if (isDemoMode()) return;
     try {
-      await apiRequest<void>(`/inventory/${id}/`, {
-        method: "DELETE",
-      });
-      
-      // ✅ Limpar cache após remoção
+      await apiRequest<void>(`/inventory/${id}/`, { method: "DELETE" });
       clearAppCache();
-      
       console.log("✅ Item removido");
     } catch (error) {
       console.error(`❌ Erro ao remover item ${id}:`, error);
@@ -347,7 +265,7 @@ export const inventoryApi = {
   },
 };
 
-// ✅ API FIFO para baixas automáticas
+// ✅ API FIFO
 export const fifoApi = {
   applyWithdrawal: async (data: {
     product_id: string;
@@ -359,27 +277,18 @@ export const fifoApi = {
   }) => {
     try {
       console.log('🎯 Aplicando baixa FIFO:', data);
-      
       const response = await apiRequest<{
         message: string;
         product_name: string;
         quantity_withdrawn: number;
         new_total_quantity: number;
-        batches_used: Array<{
-          batch_id: number;
-          quantity_used: number;
-          expiration_date: string;
-        }>;
+        batches_used: Array<{ batch_id: number; quantity_used: number; expiration_date: string }>;
       }>('/fifo-withdrawal/', {
         method: 'POST',
         body: JSON.stringify(data)
       });
-      
       console.log('✅ FIFO aplicado com sucesso:', response);
-      
-      // ✅ Limpar cache após baixa
       clearAppCache();
-      
       return response;
     } catch (error) {
       console.error('❌ Erro ao aplicar FIFO:', error);
@@ -390,7 +299,7 @@ export const fifoApi = {
 
 // ── Batches ──
 export interface InventoryBatch {
-  id: string; // ✅ CORREÇÃO: string para consistência
+  id: string;
   batch_code: string;
   quantity: number;
   cost_price: number;
@@ -402,18 +311,14 @@ export interface InventoryBatch {
 export const batchApi = {
   listByItem: async (inventoryItemId: string): Promise<InventoryBatch[]> => {
     console.log(`📦 Carregando lotes para item ${inventoryItemId}`);
-    
-    if (isDemoMode()) {
-      return DEMO_BATCHES[inventoryItemId] || [];
-    }
-    
+    if (isDemoMode()) return DEMO_BATCHES[inventoryItemId] || [];
     try {
       const data = await apiRequest<InventoryBatch[]>(`/inventory/${inventoryItemId}/batches/`);
       console.log(`✅ ${data.length} lotes carregados`);
       return data;
     } catch (error) {
       console.error(`❌ Erro ao carregar lotes:`, error);
-      return []; // ✅ Fallback para array vazio
+      return [];
     }
   },
 };
@@ -428,7 +333,7 @@ export interface Movement {
   created_at: string;
   description?: string;
   notes?: string;
-  movement_type?: string; // Alias para transaction_type
+  movement_type?: string;
 }
 
 export type TransactionType = "venda" | "presente" | "brinde" | "perda" | "uso_proprio";
@@ -436,56 +341,36 @@ export type TransactionType = "venda" | "presente" | "brinde" | "perda" | "uso_p
 export const movementsApi = {
   list: async (forceRefresh = false) => {
     console.log(`📊 Carregando movimentações (forceRefresh: ${forceRefresh})`);
-    
-    if (isDemoMode()) {
-      return DEMO_MOVEMENTS;
-    }
-    
-    // ✅ Usar cache se válido
+    if (isDemoMode()) return DEMO_MOVEMENTS;
     if (!forceRefresh && isCacheValid('movements') && movementsCache) {
       console.log("⚡ Usando cache das movimentações");
       return movementsCache;
     }
-    
     try {
       const data = await apiRequest<Movement[]>("/transactions/");
-      
-      // ✅ Atualizar cache
       movementsCache = data;
       cacheTimestamp.movements = Date.now();
-      
       console.log(`✅ ${data.length} movimentações carregadas`);
       return data;
     } catch (error) {
       console.error("❌ Erro ao carregar movimentações:", error);
-      
-      // ✅ Fallback para cache (exceto em 401)
       if (movementsCache && (error as any).response?.status !== 401) {
         console.log("🔄 Usando cache como fallback");
         return movementsCache;
       }
-      
       throw error;
     }
   },
 
   create: async (data: any) => {
     console.log("📝 Criando movimentação:", data);
-    
-    if (isDemoMode()) {
-      console.log("🎭 Modo demo - simulando criação");
-      return { ...data, id: Date.now().toString() };
-    }
-    
+    if (isDemoMode()) return { ...data, id: Date.now().toString() };
     try {
       const result = await apiRequest<Movement>("/transactions/", {
         method: "POST",
         body: JSON.stringify(data),
       });
-      
-      // ✅ Limpar cache após criação
       clearAppCache();
-      
       console.log("✅ Movimentação criada:", result);
       return result;
     } catch (error) {
@@ -495,14 +380,13 @@ export const movementsApi = {
   },
 };
 
-// ── Payments (Asaas Integration) ──
+// ── Payments ──
 export interface CheckoutResponse {
   checkout_url: string;
   payment_link_id: string;
   billing_cycle: string;
   status: string;
 }
-
 export interface SubscriptionStatus {
   plan: string;
   is_active: boolean;
@@ -511,7 +395,6 @@ export interface SubscriptionStatus {
   subscription_expires_at: string | null;
   days_remaining: number;
 }
-
 export interface AsaasConfig {
   environment: string;
   base_url: string;
@@ -519,7 +402,6 @@ export interface AsaasConfig {
   has_webhook_token: boolean;
   webhook_url: string;
 }
-
 export interface AsaasConnectionTest {
   status: "connected" | "error";
   balance?: number;
@@ -527,28 +409,23 @@ export interface AsaasConnectionTest {
   message?: string;
 }
 
-// ✅ API de Pagamentos (usuário autenticado)
 export const paymentsApi = {
   createCheckout: (billingCycle: "monthly" | "yearly") =>
     apiRequest<CheckoutResponse>("/payments/asaas/checkout/", {
       method: "POST",
       body: JSON.stringify({ billing_cycle: billingCycle }),
     }),
-
   getSubscriptionStatus: () =>
     apiRequest<SubscriptionStatus>("/payments/asaas/status/"),
-
   cancelSubscription: () =>
     apiRequest<{ status: string; message: string }>("/payments/asaas/cancel/", {
       method: "POST",
     }),
 };
 
-// ✅ API Admin de Pagamentos (apenas staff)
 export const adminPaymentsApi = {
   getAsaasConfig: () =>
     apiRequest<AsaasConfig>("/admin/payments/asaas/config/"),
-
   testAsaasConnection: () =>
     apiRequest<AsaasConnectionTest>("/admin/payments/asaas/test/", {
       method: "POST",
@@ -556,7 +433,6 @@ export const adminPaymentsApi = {
 };
 
 export const adminApi = {
-  // Usuários
   listUsers: () => apiRequest<any[]>("/admin/users/"),
   updatePlan: (id: string | number, plan: "free" | "pro") =>
     apiRequest<{ message: string; plan: string }>(`/admin/users/${id}/plan/`, {
@@ -568,21 +444,13 @@ export const adminApi = {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
-
-  // Analytics
   getProductAnalytics: () => apiRequest<any>("/admin/analytics/products/"),
   getBehaviorAnalytics: () => apiRequest<any>("/admin/analytics/behavior/"),
   getMlInsights: () => apiRequest<any>("/admin/analytics/ml-insights/"),
-
-  // Planos e Promoções
   listPlanConfigs: () => apiRequest<any[]>("/admin/plan-configs/"),
   listPromotions: () => apiRequest<any[]>("/admin/promotions/"),
   getSystemStats: () => apiRequest<any>("/admin/stats/"),
-
-  // Monitoramento de API
   getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
-  
-  // Asaas (Admin)
   getAsaasConfig: () => apiRequest<AsaasConfig>("/payments/asaas/config/"),
   testAsaasConnection: () =>
     apiRequest<AsaasConnectionTest>("/payments/asaas/test/", {
@@ -598,7 +466,6 @@ export interface Profile {
   storefront_enabled: boolean;
   store_slug: string | null;
   plan: "free" | "pro";
-  // ✅ Campos adicionais do backend
   user?: { id: number; email: string; name?: string };
   stats?: {
     total_products: number;
@@ -623,7 +490,7 @@ export const profileApi = {
   },
 };
 
-// ── Storefront (public) ──
+// ── Storefront ──
 export interface StorefrontItem {
   id: string;
   product_name?: string;
@@ -640,7 +507,6 @@ export interface StorefrontItem {
   user_id?: string;
   image_url?: string | null;
   store_slug?: string | null;
-  
   product?: {
     id: number | string;
     name: string;
@@ -651,7 +517,6 @@ export interface StorefrontItem {
     image_url?: string;
     official_price?: number;
   };
-  
   stock_info?: {
     quantity: number;
     is_urgent: boolean;
@@ -659,20 +524,13 @@ export interface StorefrontItem {
   };
 }
 
-// ✅ API pública usando Axios para consistência
 export const publicStorefrontApi = {
   listBySlug: async (slug: string) => {
     try {
       console.log(`🔍 Buscando vitrine por slug: ${slug}`);
-      
-      // ✅ Usa instância api (sem auth header para endpoint público)
       const response = await api.get(`/public/storefront/${slug}/`, {
-        headers: {
-          // ✅ Não envia Authorization para endpoint público
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' }
       });
-      
       console.log('✅ Dados recebidos:', response.data);
       return response.data;
     } catch (error) {
@@ -680,18 +538,13 @@ export const publicStorefrontApi = {
       throw error;
     }
   },
-  
   listById: async (sellerId: string) => {
     try {
       console.log(`🔍 Buscando vitrine por ID: ${sellerId}`);
-      
       const response = await api.get('/public/storefront/', {
         params: { seller: sellerId },
-        headers: {
-          'Content-Type': 'application/json'
-        }
+        headers: { 'Content-Type': 'application/json' }
       });
-      
       console.log('✅ Dados recebidos:', response.data);
       return response.data;
     } catch (error) {
@@ -708,7 +561,7 @@ export const storefrontApi = {
         d1: "/products/kaiak.jpg", d2: "/products/luna.jpg", d3: "/products/tododia.jpg",
         d4: "/products/chronos.jpg", d6: "/products/batom.jpg", d7: "/products/ekos.jpg",
       };
-      const demoItems: StorefrontItem[] = DEMO_INVENTORY
+      return Promise.resolve(DEMO_INVENTORY
         .filter((i) => i.is_available_storefront && (i.quantity ?? 0) > 0)
         .map((i) => ({
           id: i.id, 
@@ -726,18 +579,11 @@ export const storefrontApi = {
           user_id: "demo",
           image_url: imageMap[i.id] || i.product?.image_url || i.image_url || null, 
           store_slug: DEMO_PROFILE.store_slug,
-        }));
-      return Promise.resolve(demoItems);
+        })));
     }
-    
-    if (sellerId) {
-      return publicStorefrontApi.listById(sellerId);
-    }
-    
-    // ✅ Endpoint interno sem /api/ duplicado
+    if (sellerId) return publicStorefrontApi.listById(sellerId);
     return apiRequest<StorefrontItem[]>("/storefront/");
   },
-  
   listBySlug: (slug: string) => {
     if (slug === "demo") return storefrontApi.list("demo");
     return publicStorefrontApi.listBySlug(slug);
@@ -752,15 +598,12 @@ export const ocrApi = {
     const token = getToken();
     const formData = new FormData();
     formData.append("image", file);
-    
-    // ✅ Usa Axios com formData (não JSON)
     const response = await api.post("/ocr-expiry/", formData, {
       headers: {
         "Content-Type": "multipart/form-data",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
-    
     return response.data;
   },
 };
@@ -782,15 +625,9 @@ export const salesApi = {
 export function getProductBrand(item: any): string | null {
   return item.product?.brand || item.brand || null;
 }
-
 export function getProductDisplayName(item: any): string {
-  return item.product?.name ||
-         item.display_name ||
-         item.product_name ||
-         item.custom_name ||
-         "Produto sem nome";
+  return item.product?.name || item.display_name || item.product_name || item.custom_name || "Produto sem nome";
 }
-
 export function getProductQuantity(item: any): number {
   return item.total_quantity ?? item.quantity ?? 0;
 }
@@ -801,14 +638,9 @@ export const debugApi = {
       const response = await api.get('/health/');
       return { status: response.status, ok: response.status === 200 };
     } catch (error: any) {
-      return { 
-        status: error.response?.status || 0, 
-        ok: false, 
-        error: error.message 
-      };
+      return { status: error.response?.status || 0, ok: false, error: error.message };
     }
   },
-  
   clearAllCache: () => {
     clearAppCache();
     localStorage.removeItem('demo_mode');
@@ -816,7 +648,7 @@ export const debugApi = {
   }
 };
 
-// ✅ Session Control (usando Axios para consistência)
+// ── Session Control ──
 export interface SessionStatus {
   has_session: boolean;
   products_count?: number;
@@ -824,7 +656,6 @@ export interface SessionStatus {
   total_estimated_cost?: number;
   session_id?: number;
 }
-
 export interface SessionSummary {
   products_count: number;
   total_estimated_cost: number;
@@ -841,27 +672,20 @@ export const sessionApi = {
       return { has_session: false };
     }
   },
-  
   startSession: async () => {
     const response = await api.post('/session-control/', { action: 'start' });
     return response.data;
   },
-  
   finishSession: async () => {
     const response = await api.post('/session-control/', { action: 'finish' });
     return response.data;
   },
-
   getSummary: async () => {
     const response = await api.get('/session-summary/');
     return response.data;
   },
-
   confirmInvestment: async (sessionId: number, data: any) => {
-    const response = await api.post('/session-summary/', {
-      session_id: sessionId,
-      ...data
-    });
+    const response = await api.post('/session-summary/', { session_id: sessionId, ...data });
     return response.data;
   }
 };
@@ -883,21 +707,15 @@ export interface ThemeConfig {
   updated_at: string;
 }
 
-// Público — sem auth (para landing page)
 export const themeApi = {
   get: async (): Promise<ThemeConfig> => {
-    // ✅ Endpoint público não requer auth
     const response = await api.get('/public/theme/', {
-      headers: {
-        // ✅ Não envia Authorization para endpoint público
-        'Content-Type': 'application/json'
-      }
+      headers: { 'Content-Type': 'application/json' }
     });
     return response.data;
   },
 };
 
-// Admin — com auth
 export const adminThemeApi = {
   get: () => apiRequest<ThemeConfig>('/admin/theme/'),
   update: (data: Partial<ThemeConfig>) =>
@@ -921,13 +739,13 @@ export const statsApi = {
 };
 
 // ==========================================
-// CONSENTIMENTO LGPD (Art. 8º)
+// CONSENTIMENTO LGPD (Art. 8º) - ✅ JÁ CORRETO
 // ==========================================
 
 export interface ConsentRecord {
   id: number;
   version: string;
-  purposes: string[];
+  purposes: string[];  // ✅ Deve ser ARRAY
   accepted_at: string;
   revoked_at: string | null;
   is_active: boolean;
@@ -943,76 +761,97 @@ export interface ConsentRequest {
   accepted_at: string;
 }
 
+// ✅ FUNÇÃO AUXILIAR: Normaliza purpose_flags que pode vir como string JSON
+function normalizeConsentRecord(raw: any): ConsentRecord {
+  let purposes: string[] = [];
+  
+  if (Array.isArray(raw.purposes)) {
+    purposes = raw.purposes;
+  } else if (typeof raw.purposes === 'string') {
+    try {
+      purposes = JSON.parse(raw.purposes);
+    } catch {
+      purposes = raw.purposes.replace(/[\[\]"]/g, '').split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+    }
+  } else if (Array.isArray(raw.purpose_flags)) {
+    purposes = raw.purpose_flags;
+  } else if (typeof raw.purpose_flags === 'string') {
+    try {
+      purposes = JSON.parse(raw.purpose_flags);
+    } catch {
+      purposes = raw.purpose_flags.replace(/[\[\]"]/g, '').split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+    }
+  }
+  
+  return {
+    id: raw.id,
+    version: raw.version || raw.term_version || '',
+    purposes,  // ✅ Sempre array
+    accepted_at: raw.accepted_at,
+    revoked_at: raw.revoked_at ?? null,
+    is_active: raw.is_active ?? (raw.revoked_at === null),
+    purposes_granted: raw.purposes_granted || purposes,
+    can_revoke: raw.can_revoke,
+  };
+}
+
 export const consentApi = {
-  /**
-   * Registra novo consentimento (público ou autenticado)
-   */
   record: async (data: ConsentRequest): Promise<ConsentRecord> => {
-    return apiRequest<ConsentRecord>("/consent/", {
+    const response = await apiRequest<ConsentRecord>("/consent/", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return normalizeConsentRecord(response);
   },
 
-  /**
-   * Revoga consentimento para finalidade específica
-   */
   revoke: async (purpose: string): Promise<{ status: string; purpose: string }> => {
-    return apiRequest(`/consent/revoke/${purpose}/`, {
-      method: "DELETE",
-    });
+    return apiRequest(`/consent/revoke/${purpose}/`, { method: "DELETE" });
   },
 
-  /**
-   * Lista todos os consentimentos do usuário logado
-   */
   getMyConsents: async (): Promise<{
     consents: ConsentRecord[];
     essential_purposes: string[];
     revocable_purposes: string[];
     current_version: string;
   }> => {
-    return apiRequest("/consent/my/");
+    const raw = await apiRequest<any>("/consent/my/");
+    
+    let consentsRaw: any[] = [];
+    if (Array.isArray(raw)) {
+      consentsRaw = raw;
+    } else if (raw?.consents && Array.isArray(raw.consents)) {
+      consentsRaw = raw.consents;  // ← Seu backend retorna assim
+    } else if (raw?.results && Array.isArray(raw.results)) {
+      consentsRaw = raw.results;
+    }
+    
+    const consents = consentsRaw.map(normalizeConsentRecord);
+    
+    return {
+      consents,
+      essential_purposes: raw.essential_purposes || [],
+      revocable_purposes: raw.revocable_purposes || [],
+      current_version: raw.current_version || raw.version || "v1.0_2026-05",
+    };
   },
 
-  /**
-   * Verifica se usuário tem consentimento ativo para finalidade
-   */
   hasConsent: async (purpose: string): Promise<boolean> => {
     try {
       const { consents } = await consentApi.getMyConsents();
-      return consents.some(
-        (c) => c.is_active && c.purposes.includes(purpose)
-      );
+      return consents.some((c) => c.is_active && c.purposes.includes(purpose));
     } catch {
       return false;
     }
   },
-};
-
-// src/lib/api.ts - No interceptor de request
-
-api.interceptors.request.use(
-  (config) => {
-    const token = getToken();
-    
-    // ✅ Lista de rotas públicas que NÃO devem levar token JWT
-    const publicRoutes = ['/auth/', '/consent/', '/public/', '/vitrine/', '/theme/', '/health/'];
-    const isPublicRoute = publicRoutes.some(route => config.url?.includes(route));
-    
-    // ✅ Só adiciona token JWT se NÃO for rota pública
-    if (token && !isPublicRoute) {
-      config.headers["Authorization"] = `Bearer ${token}`;
-    }
-    
-    // ✅ API Key de gateway é adicionada separadamente (se configurada)
-    const apiKey = import.meta.env.VITE_API_GATEWAY_KEY;
-    if (apiKey && !isPublicRoute) {
-      // Usa header diferente para não conflitar com JWT
-      config.headers["X-API-Key"] = apiKey;
-    }
-    
-    return config;
+  
+  hasValidConsent: (
+    consents: ConsentRecord[], 
+    version: string = "v1.0_2026-05",
+    essentialPurposes: string[] = ["essential", "authentication", "service_delivery"]
+  ): boolean => {
+    const active = consents.filter(c => c.is_active && c.version === version);
+    if (active.length === 0) return false;
+    const granted = new Set(active.flatMap(c => c.purposes));
+    return essentialPurposes.every(p => granted.has(p));
   },
-  (error) => Promise.reject(error)
-);
+};

@@ -1,9 +1,9 @@
-// src/services/api.ts - CONFIGURAÇÃO BASE OTIMIZADA
+// src/services/api.ts - CONFIGURAÇÃO BASE OTIMIZADA + LGPD FIX
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
 
 // ✅ Base URL com fallback seguro
 const rawBaseUrl = (import.meta as any).env?.VITE_API_BASE_URL || "https://dev-brih.onrender.com";
-const finalBaseUrl = rawBaseUrl.replace(/\/$/, "") + "/api"; // ✅ Adicionar /api/ aqui
+const finalBaseUrl = rawBaseUrl.replace(/\/$/, "") + "/api";
 
 // 🔐 Helpers de Token
 export function getToken(): string | null {
@@ -12,7 +12,6 @@ export function getToken(): string | null {
 
 export function setToken(token: string) {
   localStorage.setItem("auth_token", token);
-  // Configurar header automaticamente na instância global
   api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 }
 
@@ -30,40 +29,64 @@ export const api = axios.create({
     "Content-Type": "application/json",
     "Accept": "application/json"
   },
-  timeout: 30000, // ✅ 300 segundos para evitar timeout em cold starts do Render
+  timeout: 30000, // ✅ 30 segundos para cold starts do Render
 });
 
-// ✅ Lista de rotas públicas que NÃO devem receber token JWT
+// ==========================================
+// ✅ LISTAS DE ROTAS - CRÍTICO PARA LGPD
+// ==========================================
+
+// 🔓 Rotas VERDADEIRAMENTE públicas (NÃO recebem JWT)
 const PUBLIC_ROUTES = [
   '/auth/login/',
   '/auth/register/',
-  '/auth/firebase/',
+  '/auth/firebase/',      // ← Firebase auth usa token próprio
   '/auth/refresh/',
-  '/consent/',
   '/public/',
   '/vitrine/',
   '/theme/',
   '/health/',
   '/products/lookup/',
+  '/schema/',
+  '/docs/',
+  '/redoc/',
+  // ✅ REMOVIDO: '/consent/' - rotas de consentimento usam JWT!
 ];
 
-// 🔁 Interceptador REQUEST
+// 🔐 Rotas de consentimento que DEVEM receber JWT (usuário autenticado)
+// Estas NÃO estão em PUBLIC_ROUTES, então recebem token automaticamente
+const CONSENT_PROTECTED_ROUTES = [
+  '/consent/my/',         // ← Lista consentimentos do usuário (REQUER JWT)
+  '/consent/revoke/',     // ← Revoga consentimento (REQUER JWT)
+  '/consent/export/',     // ← Exporta dados (REQUER JWT)
+];
+
+// 🔁 Interceptador REQUEST - LÓGICA CORRIGIDA
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = getToken();
-    
-    // ✅ Verificar se é rota pública
     const url = config.url || '';
+    const method = config.method?.toLowerCase();
+    
+    // ✅ Verificar tipo de rota
     const isPublicRoute = PUBLIC_ROUTES.some(route => url.includes(route));
     
-    // ✅ Só injetar token JWT se NÃO for rota pública
-    if (token && !isPublicRoute && !config.headers["Authorization"]) {
+    // ✅ Caso especial: POST /consent/ pode ser público, mas GET/DELETE requerem JWT
+    const isConsentPublicPost = url.includes('/consent/') && method === 'post' && !url.includes('/my/') && !url.includes('/revoke/');
+    
+    // ✅ Só injetar token JWT se:
+    // 1. Token existe
+    // 2. NÃO é rota pública
+    // 3. NÃO é POST público de consentimento
+    // 4. Header ainda não foi definido
+    if (token && !isPublicRoute && !isConsentPublicPost && !config.headers["Authorization"]) {
       config.headers["Authorization"] = `Bearer ${token}`;
       if (import.meta.env.DEV) {
-        console.log(`✅ Token JWT injetado em ${config.method?.toUpperCase()} ${url}`);
+        console.log(`✅ JWT injetado em ${method?.toUpperCase()} ${url}`);
       }
     } else if (import.meta.env.DEV) {
-      console.log(`🔍 ${isPublicRoute ? 'Rota pública' : 'Sem token'}: ${config.method?.toUpperCase()} ${url}`);
+      const reason = isPublicRoute ? 'rota pública' : isConsentPublicPost ? 'POST consent público' : 'sem token';
+      console.log(`🔍 ${reason}: ${method?.toUpperCase()} ${url}`);
     }
     
     return config;
@@ -98,16 +121,15 @@ api.interceptors.response.use(
     
     // ✅ Tratamento de erro 401 (token expirado/inválido)
     if (status === 401) {
-      // ✅ NÃO limpar token em rotas públicas (pode ser erro de validação de dados, não de auth)
       const isAuthRoute = url.includes('/auth/');
+      const isConsentRoute = url.includes('/consent/');
       
-      if (!isAuthRoute && getToken()) {
+      // ✅ NÃO limpar token em rotas de auth ou consentimento (pode ser validação de dados)
+      if (!isAuthRoute && !isConsentRoute && getToken()) {
         console.warn("🔒 Sessão expirada ou inválida. Limpando dados locais.");
         clearToken();
         
-        // ✅ Redirecionar para login apenas se não estiver já na página de auth
         if (!window.location.pathname.includes('/auth')) {
-          // Usar setTimeout para evitar loop de renderização
           setTimeout(() => {
             window.location.href = '/auth';
           }, 100);
@@ -119,20 +141,18 @@ api.interceptors.response.use(
     if (status === 403) {
       const data = error.response?.data as any;
       if (data?.action_required === 'accept_consent') {
-        // Opcional: redirecionar para página de consentimento
-        if (!window.location.pathname.includes('/consent')) {
-          console.log("🔐 Consentimento necessário, redirecionando...");
-          // window.location.href = '/consent';
-        }
+        console.log("🔐 Consentimento necessário");
+        // Emitir evento para frontend mostrar modal
+        window.dispatchEvent(new CustomEvent('consent-required'));
       }
     }
     
-    // ✅ Tratamento de erro 404 (endpoint não encontrado)
+    // ✅ Tratamento de erro 404
     if (status === 404 && import.meta.env.DEV) {
       console.warn(`⚠️ Endpoint não encontrado: ${url}`);
     }
     
-    // ✅ Tratamento de erro de rede/timeout
+    // ✅ Tratamento de timeout
     if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
       console.warn(`⏳ Timeout na requisição para ${url}`);
     }
@@ -141,18 +161,17 @@ api.interceptors.response.use(
   }
 );
 
-// ✅ Inicialização: Carrega token salvo ao iniciar a aplicação
+// ✅ Inicialização: Carrega token salvo ao iniciar
 const initializeApi = () => {
   const token = getToken();
   if (token) {
     api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
     if (import.meta.env.DEV) {
-      console.log("🔐 Token carregado do localStorage");
+      console.log("🔐 Token JWT carregado do localStorage");
     }
   }
 };
 
-// Executar inicialização apenas no lado do cliente
 if (typeof window !== 'undefined') {
   initializeApi();
 }
