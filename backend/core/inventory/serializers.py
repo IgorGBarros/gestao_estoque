@@ -741,46 +741,28 @@ class ConsentRecordSerializer(serializers.Serializer):
         return consent
        
     def to_representation(self, instance):
-        """Converter purpose_flags para ARRAY de strings"""
         rep = super().to_representation(instance)
         
         # ✅ Converter purpose_flags (string JSON) para array
         if hasattr(instance, 'purpose_flags') and instance.purpose_flags:
-            purposes_value = instance.purpose_flags
-            
-            if isinstance(purposes_value, str):
+            pf = instance.purpose_flags
+            if isinstance(pf, str):
                 try:
-                    # Parse JSON string para array
                     import json
-                    purposes = json.loads(purposes_value)
-                except (json.JSONDecodeError, TypeError):
-                    # Fallback: split simples
-                    purposes = [
-                        p.strip().strip('"').strip("'") 
-                        for p in purposes_value.strip('[]').split(',')
-                        if p.strip()
-                    ]
-            elif isinstance(purposes_value, list):
-                purposes = purposes_value
+                    rep['purposes'] = json.loads(pf)  # ✅ Parse JSON string
+                except:
+                    rep['purposes'] = [p.strip().strip('"') for p in pf.strip('[]').split(',') if p.strip()]
             else:
-                purposes = []
-            
-            rep['purposes'] = purposes
+                rep['purposes'] = pf
         else:
             rep['purposes'] = []
         
-        # ✅ Mapear term_version → version
+        # Mapear term_version → version
         if hasattr(instance, 'term_version'):
             rep['version'] = instance.term_version
         
-        # ✅ is_active: true se não foi revogado
         rep['is_active'] = instance.revoked_at is None
-        
-        # Remover campos internos
         rep.pop('purpose_flags', None)
-        rep.pop('ip_hash', None)
-        rep.pop('user_agent', None)
-        
         return rep
 
 class ConsentRevocationSerializer(serializers.Serializer):
