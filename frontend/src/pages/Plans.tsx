@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { usePlan } from "../hooks/usePlan";
 import { useAuth } from "../hooks/useAuth";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
 
 type BillingCycle = "monthly" | "yearly";
 type PaymentMethod = "stripe" | "link" | "pix" | "whatsapp";

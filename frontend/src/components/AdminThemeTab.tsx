@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Palette, Save, RotateCcw, Loader2, Eye } from 'lucide-react';
 import { adminThemeApi, ThemeConfig } from '../lib/api';
-import { useToast } from '../hooks/use-toast';
+import { useToast } from '../hooks/use-toast-original'; // ✅ Importar useToast original para evitar dependência circular
 import { useTheme } from '../contexts/ThemeContext';
 
 interface ColorField {

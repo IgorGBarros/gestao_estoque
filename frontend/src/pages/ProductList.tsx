@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { inventoryApi, formatMoney } from "../lib/api";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
 import StockAdjustmentModal from "../components/StockAdjustmentModal";
 import ProductSearchModal from "../components/ProductSearchModal";
 

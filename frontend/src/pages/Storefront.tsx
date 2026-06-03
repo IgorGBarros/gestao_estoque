@@ -7,7 +7,7 @@ import { storefrontApi, StorefrontItem, formatMoney } from "../lib/api";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../components/ui/sheet";
 import { Button } from "../components/ui/button";
 import { Separator } from "../components/ui/separator";
-import { toast } from "../hooks/use-toast";
+import { toast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
 import { publicStorefrontApi } from "../lib/api";
 
 type PaymentMethod = "pix" | "cartao";

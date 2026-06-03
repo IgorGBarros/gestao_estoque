@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import { profileApi, adminApi } from "../lib/api";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
 import { Badge } from "../components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";

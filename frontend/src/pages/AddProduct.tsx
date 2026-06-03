@@ -15,7 +15,7 @@ import { ocrApi, formatMoney, sessionApi } from "../lib/api";
 import { productService } from "../lib/productService";
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
 import { useStockEntry } from "../hooks/useStockEntry";
 
 // ══════════════════════════════════════════
@@ -93,7 +93,8 @@ const createEmptyEntry = (): EntryData => ({
 export default function AddProduct() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isLocked } = useFeatureGates();
+  // legacy name `isLocked` used across this file — alias to current hook API
+  const { isFeatureEnabled: isLocked } = useFeatureGates();
   const { toast } = useToast();
   const { loading, saveEntry } = useStockEntry();
 

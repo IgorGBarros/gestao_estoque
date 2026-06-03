@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { stockApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
 
 export interface StockEntryData {
   bar_code: string;
