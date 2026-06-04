@@ -29,6 +29,7 @@ import traceback
 
 # Imports do Django Auth
 from django.contrib.auth import authenticate, get_user_model, login
+from django.core.cache import cache  
 
 # Imports dos seus modelos
 from .models import (
@@ -2210,43 +2211,73 @@ from rest_framework.response import Response
 logger = logging.getLogger(__name__)
 
 
+
 @api_view(["GET", "PATCH"])
-@permission_classes([permissions.IsAuthenticated])
+@permission_classes([IsAuthenticated])
 def profile_view(request):
     """
     Retorna ou atualiza as informações da loja do usuário.
-    ✅ GARANTIDO: Retorna Response DRF "pronto" para evitar ContentNotRenderedError
+    
+    ✅ OTIMIZAÇÕES:
+    - Cache Django para evitar queries repetidas
+    - Serialização imediata para evitar ContentNotRenderedError
+    - Tratamento de erro seguro que sempre retorna Response DRF
+    - Validação de tenant para segurança
     """
+    user = request.user
+    cache_key = f"profile_{user.id}"
+    
     try:
-        # ✅ Obter ou criar loja do usuário
-        from .utils import get_current_store, validate_store_ownership
-        
-        store = get_current_store(request.user)
-        
-        if not store:
-            return Response(
-                {"error": "Loja não encontrada para este usuário"}, 
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # ✅ Validar ownership (segurança tenant)
-        validate_store_ownership(request.user, store)
-        
+        # ✅ GET: Tentar cache primeiro (5 minutos)
         if request.method == "GET":
-            from .serializers import ProfileSerializer
+            cached = cache.get(cache_key)
+            if cached:
+                logger.info(f"✅ Profile cache hit for user {user.id}")
+                return Response(cached, status=status.HTTP_200_OK)
+            
+            # ✅ Obter ou criar loja do usuário
+            from .utils import get_current_store, validate_store_ownership
+            
+            # ✅ Query otimizada com select_related para evitar N+1
+            store = get_current_store(user)
+            
+            if not store:
+                return Response(
+                    {"error": "Loja não encontrada para este usuário"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # ✅ Validar ownership (segurança tenant)
+            validate_store_ownership(user, store)
             
             # ✅ Serializar dados
+            from .serializers import ProfileSerializer
             serializer = ProfileSerializer(store, context={"request": request})
             
-            # ✅ CRÍTICO: Acessar .data força a serialização IMEDIATA
-            # Isso evita que o middleware acesse .content antes do render
+            # ✅ CRÍTICO: Acessar .data força serialização IMEDIATA
+            # Isso evita que middleware acesse .content antes do render
             serialized_data = serializer.data
+            
+            # ✅ Salvar no cache (5 minutos)
+            cache.set(cache_key, serialized_data, 300)
+            logger.info(f"✅ Profile cached for user {user.id}")
             
             # ✅ Retorna Response com dados já serializados (dict puro)
             return Response(serialized_data, status=status.HTTP_200_OK)
         
+        # ✅ PATCH: Atualizar perfil
         elif request.method == "PATCH":
+            from .utils import get_current_store, validate_store_ownership
             from .serializers import ProfileSerializer
+            
+            store = get_current_store(user)
+            if not store:
+                return Response(
+                    {"error": "Loja não encontrada"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            validate_store_ownership(user, store)
             
             serializer = ProfileSerializer(
                 store, 
@@ -2254,10 +2285,20 @@ def profile_view(request):
                 partial=True,
                 context={"request": request}
             )
+            
             if serializer.is_valid():
                 instance = serializer.save()
+                
                 # ✅ Forçar serialização imediata
-                serialized_data = ProfileSerializer(instance, context={"request": request}).data
+                serialized_data = ProfileSerializer(
+                    instance, 
+                    context={"request": request}
+                ).data
+                
+                # ✅ Invalidar cache após atualização
+                cache.delete(cache_key)
+                logger.info(f"✅ Profile updated and cache invalidated for user {user.id}")
+                
                 return Response(serialized_data, status=status.HTTP_200_OK)
             
             # ✅ Retorna erros de validação como Response válido
@@ -2271,7 +2312,7 @@ def profile_view(request):
         if settings.DEBUG:
             logger.error(f"❌ Erro no profile_view: {e}", exc_info=True)
         else:
-            user_id = request.user.id if request.user.is_authenticated else 'anon'
+            user_id = user.id if user.is_authenticated else 'anon'
             logger.error(f"❌ Erro no profile_view para user {user_id}")
         
         # ✅ Sempre retorna Response DRF, nunca raise

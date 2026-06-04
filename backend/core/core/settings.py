@@ -23,7 +23,6 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 # ✅ CRÍTICO PARA RENDER: Ler PORT da variável de ambiente
-# Render injeta a porta dinâmica via $PORT
 PORT = os.getenv("PORT", "8000")
 
 # ✅ CRÍTICO: ALLOWED_HOSTS dinâmico para Render/Vercel
@@ -58,27 +57,21 @@ elif not SECRET_KEY:
 
 # ✅ Configurações de segurança para proxy (Render/Vercel)
 if os.getenv("RENDER") or os.getenv("VERCEL"):
-    # ✅ Importante quando atrás de proxy com HTTPS termination
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
     USE_X_FORWARDED_HOST = True
     USE_X_FORWARDED_PORT = True
     
-    # ✅ Redirecionar HTTP → HTTPS em produção
     if not DEBUG:
         SECURE_SSL_REDIRECT = True
         SESSION_COOKIE_SECURE = True
         CSRF_COOKIE_SECURE = True
-        SECURE_HSTS_SECONDS = 3600  # 1 hora em produção
+        SECURE_HSTS_SECONDS = 3600
         SECURE_HSTS_INCLUDE_SUBDOMAINS = True
-        SECURE_HSTS_PRELOAD = False  # Ativar apenas após testes
+        SECURE_HSTS_PRELOAD = False
 
 # ✅ COOP para permitir popups do Firebase Auth
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin-allow-popups"
-
-# ✅ Conteúdo tipo não-sniff
 SECURE_CONTENT_TYPE_NOSNIFF = True
-
-# ✅ Clickjacking protection
 X_FRAME_OPTIONS = "DENY"
 
 # ==========================================
@@ -86,33 +79,18 @@ X_FRAME_OPTIONS = "DENY"
 # ==========================================
 
 CORS_ALLOWED_ORIGINS = [
-    # Desenvolvimento local
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    
-    # Produção - Domínios principais
-    "https://minhaamora.com.br",
-    "https://www.minhaamora.com.br",
+    "http://localhost:3000", "http://localhost:5173",
+    "http://127.0.0.1:3000", "http://127.0.0.1:5173",
+    "https://minhaamora.com.br", "https://www.minhaamora.com.br",
     "https://api.minhaamora.com.br",
-    
-    # Produção - Vercel
     "https://gestao-estoque-one.vercel.app",
     "https://gestao-estoque-dev-one.vercel.app",
-    
-    # Produção - Render
     "https://gestao-estoque-k5vy.onrender.com",
     "https://dev-brih.onrender.com",
-    
-    # Firebase Auth (necessário para popup de login)
-    "https://*.firebaseapp.com",
-    "https://*.googleapis.com",
-    "https://*.google.com",
-    "https://*.gstatic.com",
+    "https://*.firebaseapp.com", "https://*.googleapis.com",
+    "https://*.google.com", "https://*.gstatic.com",
 ]
 
-# ✅ Regex para origens dinâmicas
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.vercel\.app$",
     r"^https://.*\.onrender\.com$",
@@ -120,37 +98,17 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^http://127\.0\.0\.1:\d+$",
 ]
 
-# ✅ Permitir credenciais (cookies, auth headers)
 CORS_ALLOW_CREDENTIALS = True
-
-# ✅ Headers permitidos
 CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-    # Firebase headers
-    "x-firebase-locale",
-    "x-firebase-gmpid",
-    "x-client-data",
-    "x-goog-authuser",
-    "x-firebase-app-check",
+    "accept", "accept-encoding", "authorization", "content-type",
+    "dnt", "origin", "user-agent", "x-csrftoken", "x-requested-with",
+    "x-firebase-locale", "x-firebase-gmpid", "x-client-data",
+    "x-goog-authuser", "x-firebase-app-check",
 ]
+CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
 
-# ✅ Métodos permitidos
-CORS_ALLOW_METHODS = [
-    "DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT",
-]
-
-# ✅ CSRF para origens confiáveis
 CSRF_TRUSTED_ORIGINS = [
-    "https://minhaamora.com.br",
-    "https://www.minhaamora.com.br",
+    "https://minhaamora.com.br", "https://www.minhaamora.com.br",
     "https://gestao-estoque-one.vercel.app",
     "https://gestao-estoque-dev-one.vercel.app",
     "https://gestao-estoque-k5vy.onrender.com",
@@ -168,15 +126,11 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
-    # Third-party
     'drf_spectacular',
     'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',
     'django_filters',
-    
-    # Project apps
     'inventory',
     'ai',
     'apps.payments',
@@ -184,22 +138,13 @@ INSTALLED_APPS = [
 
 # ✅ ORDEM CRÍTICA DO MIDDLEWARE
 MIDDLEWARE = [
-    # CORS primeiro para processar preflight requests
     'corsheaders.middleware.CorsMiddleware',
-    
-    # Security básico
     'django.middleware.security.SecurityMiddleware',
-    
-    # Sessions e auth
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    
-    # Middleware customizado DEPOIS da auth do Django
     'inventory.middleware.ApiKeyMiddleware',
-    
-    # Messages e clickjacking
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -211,23 +156,21 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # 🗄️ DATABASE CONFIGURATION
 # ==========================================
 
-# Variáveis locais com fallbacks seguros
 DB_NAME = os.getenv("DB_NAME", "natura_inventory")
 DB_USER = os.getenv("DB_USER", "natura_admin")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
-# ✅ Prioridade: DATABASE_URL (Render/Supabase) > Config local > SQLite fallback
 database_url = os.getenv("DATABASE_URL")
 if database_url:
     import dj_database_url
     DATABASES = {
         "default": dj_database_url.parse(
             database_url,
-            conn_max_age=600,  # Reuse connections for 10 min
-            conn_health_checks=True,  # Check connection before use
-            disable_server_side_cursors=True,  # Compatível com connection pooling
+            conn_max_age=600,
+            conn_health_checks=True,
+            disable_server_side_cursors=True,
         )
     }
     print(f"✅ PostgreSQL configurado via DATABASE_URL", file=sys.stderr)
@@ -242,11 +185,14 @@ elif all([DB_NAME, DB_USER, DB_PASSWORD]):
             "PORT": DB_PORT,
             "CONN_MAX_AGE": 600,
             "CONN_HEALTH_CHECKS": True,
+            # ✅ Otimizações para Render
+            "OPTIONS": {
+                "connect_timeout": 10,  # Timeout de conexão mais curto
+            }
         }
     }
     print(f"✅ PostgreSQL local configurado: {DB_NAME}", file=sys.stderr)
 else:
-    # Fallback para SQLite em desenvolvimento mínimo
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
@@ -254,6 +200,66 @@ else:
         }
     }
     print("⚠️ SQLite configurado (apenas para dev)", file=sys.stderr)
+
+# ==========================================
+# 💾 CACHING CONFIGURATION (NOVO - CRÍTICO PARA PERFORMANCE)
+# ==========================================
+
+# ✅ Cache em memória para desenvolvimento/Render free tier
+# Para produção com Redis, use a configuração comentada abaixo
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "unique-snowflake",
+        "TIMEOUT": 300,  # 5 minutos
+        "OPTIONS": {
+            "MAX_ENTRIES": 1000,  # Limitar entradas para evitar uso excessivo de memória
+        }
+    }
+}
+
+# ✅ Para produção com Redis (descomente quando adicionar Redis no Render):
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django_redis.cache.RedisCache",
+#         "LOCATION": os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1"),
+#         "OPTIONS": {
+#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+#             "SOCKET_CONNECT_TIMEOUT": 5,
+#             "SOCKET_TIMEOUT": 5,
+#             "CONNECTION_POOL_KWARGS": {"max_connections": 50},
+#             "RETRY_ON_TIMEOUT": True,
+#         },
+#         "TIMEOUT": 300,
+#     }
+# }
+
+# ✅ Cache de templates para performance
+TEMPLATES = [
+    {
+        'BACKEND': 'django.template.backends.django.DjangoTemplates',
+        'DIRS': [],
+        'APP_DIRS': True,
+        'OPTIONS': {
+            'context_processors': [
+                'django.template.context_processors.debug',
+                'django.template.context_processors.request',
+                'django.contrib.auth.context_processors.auth',
+                'django.contrib.messages.context_processors.messages',
+            ],
+            # ✅ Cache de templates em produção
+            'loaders': [
+                ('django.template.loaders.cached.Loader', [
+                    'django.template.loaders.filesystem.Loader',
+                    'django.template.loaders.app_directories.Loader',
+                ])
+            ] if not DEBUG else [
+                'django.template.loaders.filesystem.Loader',
+                'django.template.loaders.app_directories.Loader',
+            ],
+        },
+    },
+]
 
 # ==========================================
 # 🔐 AUTH & JWT
@@ -269,7 +275,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-# ✅ JWT Configuration
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
@@ -284,7 +289,10 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
 }
 
-# ✅ Django REST Framework
+# ==========================================
+# 🚀 DJANGO REST FRAMEWORK - OTIMIZAÇÕES
+# ==========================================
+
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     'DEFAULT_FILTER_BACKENDS': ['django_filters.rest_framework.DjangoFilterBackend'],
@@ -296,6 +304,19 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
     'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
+    # ✅ Otimizações de performance
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 50,  # Limitar resultados por página
+    'MAX_PAGINATE_BY': 100,
+    # ✅ Throttling para prevenir abuso (ajustar conforme plano)
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/hour',    # Anônimos: 100 req/hora
+        'user': '1000/hour',   # Autenticados: 1000 req/hora
+    },
 }
 
 # ==========================================
@@ -304,26 +325,7 @@ REST_FRAMEWORK = {
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Minha Amora API',
-    'DESCRIPTION': '''
-    API comercial para acesso ao banco de dados de produtos de beleza.
-    
-    ## Recursos
-    - Catálogo global de produtos (Natura, Avon, Boticário, etc.)
-    - Lookup por código de barras com fallback inteligente
-    - Analytics agregados (LGPD-compliant)
-    - Webhooks em tempo real
-    
-    ## Autenticação
-    Todas as requisições exigem API Key no header:
-    ```
-    Authorization: Bearer pk_live_••••••••
-    ```
-    
-    ## Rate Limits
-    - Starter: 20 req/min • 1K req/mês
-    - Pro: 100 req/min • 50K req/mês  
-    - Enterprise: 500+ req/min • Ilimitado
-    ''',
+    'DESCRIPTION': 'API comercial para acesso ao banco de dados de produtos de beleza.',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,
@@ -347,8 +349,10 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-"""
-# ✅ Firebase Admin - Inicialização robusta para Render
+# ==========================================
+# 🔥 FIREBASE ADMIN - Inicialização robusta
+# ==========================================
+
 try:
     import firebase_admin
     from firebase_admin import credentials
@@ -357,23 +361,16 @@ try:
     
     if firebase_json_str:
         try:
-            # ✅ Corrigir escaped newlines que o Render/VS Code pode adicionar
             firebase_json_str = firebase_json_str.replace('\\n', '\n')
-            
-            # ✅ Tentar parse como JSON
             firebase_creds_dict = json.loads(firebase_json_str)
             
-            # ✅ Verificar campos obrigatórios
             required_fields = ['type', 'project_id', 'private_key', 'client_email']
             missing = [f for f in required_fields if f not in firebase_creds_dict]
             if missing:
                 raise ValueError(f"Firebase JSON missing fields: {missing}")
             
-            # ✅ Criar credenciais
             cred = credentials.Certificate(firebase_creds_dict)
             
-            # ✅ Inicializar apenas se não houver app já inicializado
-            # (importante para múltiplos workers do Gunicorn)
             if not firebase_admin._apps:
                 firebase_admin.initialize_app(cred, {
                     'projectId': firebase_creds_dict.get('project_id'),
@@ -385,9 +382,7 @@ try:
         except json.JSONDecodeError as e:
             print(f"❌ Firebase JSON inválido: {e}", file=sys.stderr)
             if DEBUG:
-                # Log seguro: apenas comprimento, não o conteúdo
                 print(f"🔍 Raw credentials length: {len(firebase_json_str)}", file=sys.stderr)
-                print(f"🔍 First 100 chars: {firebase_json_str[:100]}", file=sys.stderr)
         except ValueError as e:
             print(f"❌ Firebase config error: {e}", file=sys.stderr)
         except Exception as e:
@@ -396,11 +391,11 @@ try:
                 import traceback
                 traceback.print_exc(file=sys.stderr)
     else:
-        print("⚠️ Variável FIREBASE_CREDENTIALS não encontrada. Login Firebase não funcionará.", file=sys.stderr)
+        print("⚠️ Variável FIREBASE_CREDENTIALS não encontrada.", file=sys.stderr)
         
 except ImportError:
-    print("⚠️ Firebase Admin SDK não instalado. Adicione firebase-admin ao requirements.txt", file=sys.stderr)
-"""
+    print("⚠️ Firebase Admin SDK não instalado.", file=sys.stderr)
+
 # ==========================================
 # 💳 ASAAS CONFIGURATION
 # ==========================================
@@ -416,31 +411,14 @@ ASAAS_BASE_URLS = {
 ASAAS_BASE_URL = ASAAS_BASE_URLS.get(ASAAS_ENVIRONMENT, ASAAS_BASE_URLS['sandbox'])
 
 # ==========================================
-# 🌐 TEMPLATES & I18N
+# 🌐 I18N & STATIC
 # ==========================================
-
-TEMPLATES = [
-    {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.debug',
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
-            ],
-        },
-    },
-]
 
 LANGUAGE_CODE = 'pt-br'
 TIME_ZONE = 'America/Sao_Paulo'
 USE_I18N = True
 USE_TZ = True
 
-# Static files
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
@@ -492,7 +470,6 @@ LOGGING = {
     },
 }
 
-# ✅ Em produção, usar logger seguro (sem dados pessoais)
 if not DEBUG:
     LOGGING['root']['handlers'] = ['console_safe']
 
@@ -506,13 +483,14 @@ LGPD_ESSENTIAL_PURPOSES = ["essential", "authentication", "legal_compliance", "s
 LGPD_CONSENT_VERSION = "v1.0_2026-05"
 
 # ==========================================
-# 🚀 STARTUP LOGS (para debug de deploy)
+# 🚀 STARTUP LOGS
 # ==========================================
 
 print(f"✅ Settings carregado com sucesso!", file=sys.stderr)
 print(f"📊 DEBUG: {DEBUG}", file=sys.stderr)
 print(f"🔧 PORT: {PORT}", file=sys.stderr)
 print(f"🗄️ Database: {DATABASES['default']['ENGINE']}", file=sys.stderr)
+print(f"💾 Cache: {CACHES['default']['BACKEND']}", file=sys.stderr)
 print(f"🌐 ALLOWED_HOSTS: {ALLOWED_HOSTS[:3]}... ({len(ALLOWED_HOSTS)} total)", file=sys.stderr)
 
 if os.getenv("RENDER"):
