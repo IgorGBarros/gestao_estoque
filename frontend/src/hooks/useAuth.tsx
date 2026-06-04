@@ -140,101 +140,135 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       navigate("/auth", { replace: true });
     }
   }, [navigate]);
+// src/hooks/useAuth.tsx - initializeAuth CORRIGIDO
 
-  // ==========================================
-  // ✅ INICIALIZAÇÃO COM PREVENÇÃO DE RACE CONDITION
-  // ==========================================
-  const initializeAuth = useCallback(async () => {
-    if (initRef.current) {
-      if (import.meta.env.DEV) console.log("⏳ initializeAuth já está rodando, ignorando...");
-      return;
-    }
-    
-    initRef.current = true;
-    
-    if (import.meta.env.DEV) console.log("[DEBUG] initializeAuth iniciado");
+const initializeAuth = useCallback(async () => {
+  // ✅ Guard 1: Prevenir execução múltipla (race condition)
+  if (initRef.current) {
+    if (import.meta.env.DEV) console.log("⏳ initializeAuth já está rodando, ignorando...");
+    return;
+  }
+  
+  initRef.current = true;
+  
+  if (import.meta.env.DEV) console.log("[DEBUG] initializeAuth iniciado");
 
-    const storedToken = localStorage.getItem("auth_token");
-    const storedUser = localStorage.getItem("auth_user");
-    
-    if (!storedToken) {
-      setUser(null);
-      setLoading(false);
-      setIsInitialized(true);
-      initRef.current = false;
-      return;
-    }
+  const storedToken = localStorage.getItem("auth_token");
+  const storedUser = localStorage.getItem("auth_user");
+  
+  // ✅ Guard 2: Se não tem token, NÃO tentar carregar profile
+  if (!storedToken) {
+    console.log("🔐 initializeAuth: Sem token, usuário não autenticado");
+    setUser(null);
+    setLoading(false);
+    setIsInitialized(true);
+    initRef.current = false;
+    return;
+  }
 
-    api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
-    
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch (e) {
-        localStorage.removeItem("auth_user");
-      }
-    }
-
+  // ✅ Configurar header global para requisições futuras
+  api.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
+  
+  // ✅ Carregar usuário do localStorage (dados otimistas)
+  if (storedUser) {
     try {
-      let profileData = null;
-      
-      try {
-        profileData = await optimizedProfileApi.get();
-      } catch (err: any) {
-        if (err.response?.status === 401) {
-          if (import.meta.env.DEV) console.log("🔄 Token expirado. Tentando renovar...");
-          const newToken = await refreshToken();
-          
-          if (newToken) {
-            profileData = await optimizedProfileApi.get(true);
-          } else {
-            if (import.meta.env.DEV) console.warn("🔒 Renovação falhou. Limpando sessão...");
-            handleLogout(false);
-            setLoading(false);
-            setIsInitialized(true);
-            initRef.current = false;
-            return;
-          }
-        } else {
-          if (import.meta.env.DEV) console.warn("⚠️ Erro de rede ao carregar perfil, usando dados locais");
-        }
-      }
+      const parsedUser = JSON.parse(storedUser);
+      setUser(parsedUser);
+      if (import.meta.env.DEV) console.log("📦 User carregado do localStorage:", parsedUser.email);
+    } catch (e) {
+      console.warn("⚠️ Erro ao parsear auth_user, limpando...");
+      localStorage.removeItem("auth_user");
+    }
+  }
 
-      if (profileData) {
-        const userData: User = {
-          ...(storedUser ? JSON.parse(storedUser) : {}),
-          ...profileData,
-          id: profileData.id || 0,
-          email: profileData.email || '',
-          name: profileData.display_name || profileData.name || '',
-          is_staff: profileData.is_staff ?? false
-        };
-        setUser(userData);
-        localStorage.setItem("auth_user", JSON.stringify(userData));
+  try {
+    let profileData = null;
+    
+    // ✅ Tentar carregar profile do backend
+    try {
+      if (import.meta.env.DEV) console.log("🔄 Buscando profile do backend...");
+      profileData = await optimizedProfileApi.get();
+    } catch (err: any) {
+      // ✅ Tratamento de erro 401: tentar renovar token
+      if (err.response?.status === 401) {
+        if (import.meta.env.DEV) console.log("🔄 Token expirado. Tentando renovar...");
+        const newToken = await refreshToken();
         
-        // ✅ Log para debug: profile carregado (gatilho para consentimento)
-        console.log("✅ Profile loaded:", userData.email);
+        if (newToken) {
+          // ✅ Retry com token renovado
+          profileData = await optimizedProfileApi.get(true);
+          if (import.meta.env.DEV) console.log("✅ Token renovado com sucesso");
+        } else {
+          // ✅ Renovação falhou: limpar sessão
+          if (import.meta.env.DEV) console.warn("🔒 Renovação falhou. Limpando sessão...");
+          handleLogout(false);
+          setLoading(false);
+          setIsInitialized(true);
+          initRef.current = false;
+          return;
+        }
+      } else {
+        // ✅ Erro de rede ou outro: log e continua com dados locais
+        if (import.meta.env.DEV) console.warn("⚠️ Erro ao carregar profile:", err.message);
       }
-
-    } catch (error: any) {
-      if (import.meta.env.DEV) console.error("❌ Erro na inicialização:", {
-        message: error?.message,
-        status: error?.response?.status
-      });
-      handleLogout(false);
-    } finally {
-      setLoading(false);
-      setIsInitialized(true);
-      initRef.current = false;
     }
-  }, [handleLogout]);
 
-  useEffect(() => {
-    if (!isInitialized && !initRef.current) {
-      initializeAuth();
+    // ✅ Se recebeu dados do profile, atualizar estado
+    if (profileData) {
+      const userData: User = {
+        ...(storedUser ? JSON.parse(storedUser) : {}),
+        ...profileData,
+        id: profileData.id || 0,
+        email: profileData.email || '',  // ✅ Email é CRÍTICO para gatilho de consentimento
+        name: profileData.display_name || profileData.name || '',
+        is_staff: profileData.is_staff ?? false
+      };
+      
+      setUser(userData);
+      localStorage.setItem("auth_user", JSON.stringify(userData));
+      
+      // ✅ Log de debug: profile carregado (gatilho para useConsentCheck)
+      console.log("✅ Profile loaded:", userData.email);
+      
+      // ✅ Guard extra: se email não veio do backend, não disparar consentimento
+      if (!userData.email) {
+        console.warn("⚠️ Profile sem email, consentimento não será verificado");
+      }
     }
-  }, [isInitialized, initializeAuth]);
 
+  } catch (error: any) {
+    // ✅ Erro crítico na inicialização
+    if (import.meta.env.DEV) console.error("❌ Erro na inicialização:", {
+      message: error?.message,
+      status: error?.response?.status,
+      stack: error?.stack,
+    });
+    
+    // ✅ Em caso de erro, limpar sessão para evitar estado inconsistente
+    handleLogout(false);
+  } finally {
+    // ✅ Sempre finalizar loading e marcar como inicializado
+    setLoading(false);
+    setIsInitialized(true);
+    initRef.current = false;
+    
+    if (import.meta.env.DEV) console.log("[DEBUG] initializeAuth finalizado", {
+      loading: false,
+      isInitialized: true,
+      user: user?.email || null,
+    });
+  }
+}, [handleLogout]); // ✅ Dependencies mínimas para evitar re-criação
+
+// ✅ Efeito que dispara initializeAuth apenas uma vez
+useEffect(() => {
+  // ✅ Só executar se:
+  // 1. Ainda não foi inicializado
+  // 2. Não está em execução (previne race condition)
+  if (!isInitialized && !initRef.current) {
+    initializeAuth();
+  }
+}, [isInitialized, initializeAuth]); // ✅ initializeAuth está no useCallback, então é estável
   // ==========================================
   // ✅ LOGIN (Email/Senha)
   // ==========================================

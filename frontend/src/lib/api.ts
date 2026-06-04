@@ -476,11 +476,32 @@ export interface Profile {
   };
 }
 
+// src/lib/api.ts - profileApi CORRIGIDO
+
 export const profileApi = {
-  get: () => {
+  get: async () => {
+    // ✅ Guard: Só fazer requisição se houver token
+    const token = getToken();
+    if (!token) {
+      console.log("🔐 profileApi.get(): Sem token, retornando null");
+      return null;
+    }
+    
     if (isDemoMode()) return Promise.resolve(DEMO_PROFILE);
-    return apiRequest<Profile>("/profile/");
+    
+    try {
+      return await apiRequest<Profile>("/profile/");
+    } catch (error: any) {
+      // ✅ Se erro 401, limpar token e retornar null (não quebrar app)
+      if (error.response?.status === 401) {
+        console.warn("🔒 Token inválido no profile, limpando sessão");
+        clearToken();
+        return null;
+      }
+      throw error;
+    }
   },
+  
   update: (data: Partial<Profile>) => {
     if (isDemoMode()) return Promise.resolve({ ...DEMO_PROFILE, ...data } as Profile);
     return apiRequest<Profile>("/profile/", { 
