@@ -479,24 +479,18 @@ export interface Profile {
 // src/lib/api.ts - profileApi CORRIGIDO
 
 export const profileApi = {
-  get: async () => {
-    // ✅ Guard: Só fazer requisição se houver token
+  get: async (retries = 2) => {
     const token = getToken();
-    if (!token) {
-      console.log("🔐 profileApi.get(): Sem token, retornando null");
-      return null;
-    }
-    
-    if (isDemoMode()) return Promise.resolve(DEMO_PROFILE);
+    if (!token) return null;
     
     try {
       return await apiRequest<Profile>("/profile/");
     } catch (error: any) {
-      // ✅ Se erro 401, limpar token e retornar null (não quebrar app)
-      if (error.response?.status === 401) {
-        console.warn("🔒 Token inválido no profile, limpando sessão");
-        clearToken();
-        return null;
+      // ✅ Retry simples para timeout ou erro de rede
+      if (retries > 0 && (error.code === 'ECONNABORTED' || error.message?.includes('timeout'))) {
+        console.log(`🔄 Retry profileApi.get() (${retries} restantes)`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Aguarda 1s
+        return profileApi.get(retries - 1);
       }
       throw error;
     }

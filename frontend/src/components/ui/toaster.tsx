@@ -6,15 +6,15 @@ import { useEffect } from "react";
 export function Toaster() {
   const { toast: internalToast, toasts } = useOriginalToast();
   
+  // ✅ Ouvir evento global do wrapper seguro
   useEffect(() => {
     const handleGlobalToast = (event: Event) => {
-      const customEvent = event as CustomEvent;
-      // ✅ Chamar toast interno SEM passar id (shadcn gera internamente)
+      const custom = event as CustomEvent;
       internalToast({
-        title: customEvent.detail?.title,
-        description: customEvent.detail?.description,
-        variant: customEvent.detail?.variant,
-        duration: customEvent.detail?.duration,
+        title: custom.detail?.title,
+        description: custom.detail?.description,
+        variant: custom.detail?.variant,
+        duration: custom.detail?.duration,
       });
     };
     
