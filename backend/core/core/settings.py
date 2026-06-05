@@ -202,44 +202,38 @@ else:
     print("⚠️ SQLite configurado (apenas para dev)", file=sys.stderr)
 
 # ==========================================
-# 💾 CACHING CONFIGURATION (NOVO - CRÍTICO PARA PERFORMANCE)
+# 💾 CACHING CONFIGURATION
 # ==========================================
 
-# ✅ Cache em memória para desenvolvimento/Render free tier
-# Para produção com Redis, use a configuração comentada abaixo
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
         "LOCATION": "unique-snowflake",
         "TIMEOUT": 300,  # 5 minutos
         "OPTIONS": {
-            "MAX_ENTRIES": 1000,  # Limitar entradas para evitar uso excessivo de memória
+            "MAX_ENTRIES": 1000,
         }
     }
 }
 
-# ✅ Para produção com Redis (descomente quando adicionar Redis no Render):
-# CACHES = {
-#     "default": {
-#         "BACKEND": "django_redis.cache.RedisCache",
-#         "LOCATION": os.getenv("REDIS_URL", "redis://127.0.0.1:6379/1"),
-#         "OPTIONS": {
-#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-#             "SOCKET_CONNECT_TIMEOUT": 5,
-#             "SOCKET_TIMEOUT": 5,
-#             "CONNECTION_POOL_KWARGS": {"max_connections": 50},
-#             "RETRY_ON_TIMEOUT": True,
-#         },
-#         "TIMEOUT": 300,
-#     }
-# }
+# ==========================================
+# 🌐 TEMPLATES - ✅ CORREÇÃO CRÍTICA: loaders e APP_DIRS não podem coexistir
+# ==========================================
 
-# ✅ Cache de templates para performance
+LANGUAGE_CODE = 'pt-br'
+TIME_ZONE = 'America/Sao_Paulo'
+USE_I18N = True
+USE_TZ = True
+
+STATIC_URL = 'static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# ✅ Configuração base de templates (funciona em dev e produção)
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': [],
-        'APP_DIRS': True,
+        'APP_DIRS': True,  # ✅ Padrão: True
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.debug',
@@ -247,19 +241,22 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
             ],
-            # ✅ Cache de templates em produção
-            'loaders': [
+        },
+    },
+]
+
+# ✅ Em produção, ativar cache de templates (modificando após definição)
+if not DEBUG:
+    for template_config in TEMPLATES:
+        if template_config['BACKEND'] == 'django.template.backends.django.DjangoTemplates':
+            # ✅ Remover APP_DIRS e usar loaders com cache
+            template_config['APP_DIRS'] = False
+            template_config['OPTIONS']['loaders'] = [
                 ('django.template.loaders.cached.Loader', [
                     'django.template.loaders.filesystem.Loader',
                     'django.template.loaders.app_directories.Loader',
                 ])
-            ] if not DEBUG else [
-                'django.template.loaders.filesystem.Loader',
-                'django.template.loaders.app_directories.Loader',
-            ],
-        },
-    },
-]
+            ]
 
 # ==========================================
 # 🔐 AUTH & JWT
@@ -304,18 +301,16 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
     'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
-    # ✅ Otimizações de performance
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 50,  # Limitar resultados por página
+    'PAGE_SIZE': 50,
     'MAX_PAGINATE_BY': 100,
-    # ✅ Throttling para prevenir abuso (ajustar conforme plano)
     'DEFAULT_THROTTLE_CLASSES': [
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'anon': '100/hour',    # Anônimos: 100 req/hora
-        'user': '1000/hour',   # Autenticados: 1000 req/hora
+        'anon': '100/hour',
+        'user': '1000/hour',
     },
 }
 
@@ -348,6 +343,7 @@ SPECTACULAR_SETTINGS = {
         }
     },
 }
+
 # ==========================================
 # 🔥 FIREBASE ADMIN - Inicialização robusta para Render
 # ==========================================
@@ -355,31 +351,20 @@ SPECTACULAR_SETTINGS = {
 try:
     import firebase_admin
     from firebase_admin import credentials
-    import codecs
     
     firebase_json_str = os.environ.get("FIREBASE_CREDENTIALS")
     
     if firebase_json_str:
         try:
-            # ✅ Correção em múltiplas camadas para escapes do Render
+            # ✅ Correção agressiva de escapes para Render
             firebase_json_str = (
                 firebase_json_str
-                # Corrige \n literal → nova linha real
-                .replace('\\n', '\n')
-                # Corrige \" literal → aspas real
-                .replace('\\"', '"')
-                # Corrige \\ literal → barra única
-                .replace('\\\\', '\\')
-                # Remove caracteres de controle invisíveis problemáticos
-                .replace('\r', '')
-                .replace('\t', '    ')
+                .replace('\\n', '\n')      # \n literal → nova linha
+                .replace('\\"', '"')        # \" literal → aspas
+                .replace('\\\\', '\\')      # \\ literal → barra única
+                .replace('\r', '')          # Remove carriage return
+                .replace('\t', '    ')      # Tab → 4 espaços
             )
-            
-            # ✅ Tenta decode de unicode escapes (comum ao copiar do console)
-            try:
-                firebase_json_str = codecs.decode(firebase_json_str, 'unicode_escape')
-            except:
-                pass  # Se falhar, usa a string já processada
             
             # ✅ Tenta parse como JSON
             firebase_creds_dict = json.loads(firebase_json_str)
@@ -393,7 +378,7 @@ try:
             # ✅ Validação extra: private_key deve conter BEGIN/END
             private_key = firebase_creds_dict.get('private_key', '')
             if 'BEGIN PRIVATE KEY' not in private_key:
-                # Tenta reconstruir a chave se estiver quebrada
+                # Tenta reconstruir se estiver truncada
                 if private_key.startswith('-----') and 'END' not in private_key:
                     firebase_creds_dict['private_key'] = private_key + '\n-----END PRIVATE KEY-----\n'
             
@@ -410,29 +395,22 @@ try:
                 print(f"ℹ️ Firebase Admin já inicializado ({len(firebase_admin._apps)} app(s)).", file=sys.stderr)
                 
         except json.JSONDecodeError as e:
-            print(f"❌ Firebase JSON inválido: {e}", file=sys.stderr)
+            # ✅ Em produção, falha silenciosa para não travar o app
             if DEBUG:
-                # Log seguro: apenas metadados, NUNCA o conteúdo da chave
+                print(f"❌ Firebase JSON inválido: {e}", file=sys.stderr)
                 print(f"🔍 Credentials length: {len(firebase_json_str)}", file=sys.stderr)
-                print(f"🔍 First 200 chars preview: {firebase_json_str[:200]}...", file=sys.stderr)
-                # Mostra qual campo pode estar problemático
-                try:
-                    # Tenta parse parcial para identificar o problema
-                    partial = json.loads(firebase_json_str[:171] + '"..."}')
-                except:
-                    print(f"🔍 Error at char 171: likely in private_key field", file=sys.stderr)
-        except ValueError as e:
-            print(f"❌ Firebase config error: {e}", file=sys.stderr)
+            # Não raise - permite que o app continue sem Firebase
         except Exception as e:
-            print(f"❌ Falha ao inicializar Firebase Admin: {type(e).__name__}: {e}", file=sys.stderr)
             if DEBUG:
-                import traceback
-                traceback.print_exc(file=sys.stderr)
+                print(f"❌ Firebase init error: {type(e).__name__}: {e}", file=sys.stderr)
+            # Não raise - permite que o app continue sem Firebase
     else:
-        print("⚠️ Variável FIREBASE_CREDENTIALS não encontrada. Login Firebase não funcionará.", file=sys.stderr)
+        if DEBUG:
+            print("⚠️ FIREBASE_CREDENTIALS não definida", file=sys.stderr)
         
 except ImportError:
-    print("⚠️ Firebase Admin SDK não instalado. Adicione firebase-admin ao requirements.txt", file=sys.stderr)
+    if DEBUG:
+        print("⚠️ firebase-admin não instalado", file=sys.stderr)
 
 # ==========================================
 # 💳 ASAAS CONFIGURATION
@@ -447,18 +425,6 @@ ASAAS_BASE_URLS = {
     'production': 'https://api.asaas.com/v3',
 }
 ASAAS_BASE_URL = ASAAS_BASE_URLS.get(ASAAS_ENVIRONMENT, ASAAS_BASE_URLS['sandbox'])
-
-# ==========================================
-# 🌐 I18N & STATIC
-# ==========================================
-
-LANGUAGE_CODE = 'pt-br'
-TIME_ZONE = 'America/Sao_Paulo'
-USE_I18N = True
-USE_TZ = True
-
-STATIC_URL = 'static/'
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # ==========================================
 # 📝 LOGGING CONFIGURATION
