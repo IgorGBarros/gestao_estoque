@@ -6,7 +6,7 @@ import { api } from "../services/api";
 // ✅ Imports do Firebase vêm do arquivo separado
 import { auth, googleProvider, signInWithPopup } from "../firebaseConfig";
 // ✅ Import do useToast original para evitar conflito com wrapper
-import { useToast as useOriginalToast } from "./use-toast-original";
+import { useToast as useOriginalToast } from "../components/ui/use-toast";
 
 // ==========================================
 // ✅ CACHE DE PROFILE (FORA DO COMPONENTE)

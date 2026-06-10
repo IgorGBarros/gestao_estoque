@@ -13,7 +13,7 @@ import {
   GlobalProduct, formatMoney,
 } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
-import { useToast } from "../hooks/use-toast-original";
+import { useToast } from '../components/ui/use-toast';
 import { useStockEntry } from "../hooks/useStockEntry";
 
 const STEPS = [

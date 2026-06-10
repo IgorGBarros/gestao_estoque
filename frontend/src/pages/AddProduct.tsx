@@ -15,7 +15,7 @@ import { ocrApi, formatMoney, sessionApi } from "../lib/api";
 import { productService } from "../lib/productService";
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
-import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
+import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import { useStockEntry } from "../hooks/useStockEntry";
 
 // ══════════════════════════════════════════

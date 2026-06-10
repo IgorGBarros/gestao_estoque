@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Mail, Lock, User, Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
-import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
+import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { useConsent, PURPOSES } from "../hooks/useConsent"; // ✅ Import correto
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
 

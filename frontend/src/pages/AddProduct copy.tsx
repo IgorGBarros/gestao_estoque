@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import { api } from "../services/api"; // ✅ Usa sua API
-import { useToast } from "../hooks/use-toast";
+import { useToast } from '../components/ui/use-toast';
 
 const STEPS = [
   { id: "scan", label: "Código", icon: ScanBarcode },

@@ -7,7 +7,7 @@ import { storefrontApi, StorefrontItem, formatMoney } from "../lib/api";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../components/ui/sheet";
 import { Button } from "../components/ui/button";
 import { Separator } from "../components/ui/separator";
-import { toast } from "../hooks/use-toast-original";
+import { toast } from '../components/ui/use-toast';
 
 // 🔹 CRM: Importar utilitários de captura de lead e persistência de carrinho
 import { upsertLead, type LeadInput } from "../lib/leads";

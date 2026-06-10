@@ -18,7 +18,7 @@ import {
 } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
-import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
+import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 
 const SALE_TYPES: {
   value: TransactionType; label: string; emoji: string;

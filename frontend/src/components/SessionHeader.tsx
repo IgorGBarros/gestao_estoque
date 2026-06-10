@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Package, Clock, Check, AlertCircle } from 'lucide-react';
 import { sessionApi } from '../lib/api'; // Importa do seu lib/api.ts consolidado
 import { SessionSummaryModal } from './SessionSummaryModal';
-import { useToast } from '../hooks/use-toast-original'; // ✅ Importar useToast original para evitar dependência circular
+import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 
 export function SessionHeader() {
   const [session, setSession] = useState<any>(null);

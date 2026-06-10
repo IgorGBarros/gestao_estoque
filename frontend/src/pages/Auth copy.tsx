@@ -4,7 +4,7 @@ import { Package, Mail, Lock, User, Loader2, Eye, EyeOff, Shield, X } from "luci
 import { AnimatePresence, motion } from "framer-motion";
 import { useAuth } from "../hooks/useAuth";
 import { usePlan } from "../hooks/usePlan";
-import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
+import { useToast } from "../hooks/use-toast"; // ✅ Importar useToast original para evitar dependência circular
 import { api } from "../services/api";
 
 export default function Auth() {

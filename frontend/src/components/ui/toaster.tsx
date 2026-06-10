@@ -1,25 +1,31 @@
 // src/components/ui/toaster.tsx
-import { useToast as useOriginalToast } from "@/hooks/use-toast-original";
+import { useToast as useShadcnToast } from "./use-toast"; // ← Hook original do shadcn (interno)
 import { Toast, ToastProvider, ToastViewport } from "./toast";
 import { useEffect } from "react";
 
 export function Toaster() {
-  const { toast: internalToast, toasts } = useOriginalToast();
+  // Hook interno do shadcn para gerenciar fila
+  const { toast: internalToast, toasts } = useShadcnToast();
   
-  // ✅ Ouvir evento global do wrapper seguro
+  // ✅ Ouvir evento global do wrapper simples
   useEffect(() => {
     const handleGlobalToast = (event: Event) => {
       const custom = event as CustomEvent;
+      const detail = custom.detail;
+      
+      // Adicionar à fila do shadcn
       internalToast({
-        title: custom.detail?.title,
-        description: custom.detail?.description,
-        variant: custom.detail?.variant,
-        duration: custom.detail?.duration,
+        
+        title: detail?.title,
+        description: detail?.description,
+        variant: detail?.variant,
+        action: detail?.action,
+        duration: detail?.duration,
       });
     };
     
-    window.addEventListener('app-toast', handleGlobalToast);
-    return () => window.removeEventListener('app-toast', handleGlobalToast);
+    window.addEventListener("app-toast", handleGlobalToast);
+    return () => window.removeEventListener("app-toast", handleGlobalToast);
   }, [internalToast]);
   
   return (

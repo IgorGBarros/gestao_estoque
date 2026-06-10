@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api } from "../services/api";
 import { useAuth } from "./useAuth";
-import { useToast } from "./use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
+import { useToast } from "../components/ui/use-toast";
 import { consentApi } from "@/lib/api";
 
 // ==========================================
@@ -29,6 +29,13 @@ export const ESSENTIAL_PURPOSES = [
   PURPOSES.SERVICE,
 ] as const;
 
+export const OPTIONAL_PURPOSES: Purpose[] = [
+  PURPOSES.ANALYTICS,
+  PURPOSES.MARKETING,
+  PURPOSES.BEHAVIOR,
+  PURPOSES.AI,
+];
+
 // ==========================================
 // ✅ INTERFACES
 // ==========================================
@@ -51,7 +58,7 @@ export interface ConsentContextData {
   recordConsent: (purposes: Purpose[], email?: string, sessionId?: string) => Promise<boolean>;
   revokeConsent: (purpose: Purpose) => Promise<boolean>;
   hasConsent: (purpose: Purpose) => boolean;
-  hasValidConsent: (version?: string) => boolean; // ✅ NOVO: Verifica consentimento válido para versão
+  hasValidConsent: (version?: string) => boolean;
   refresh: () => Promise<void>;
 }
 
@@ -63,19 +70,58 @@ export function useConsent(): ConsentContextData {
   const toastHook = useToast();
   
   // ✅ Garantir que toast é uma função (evita "r is not a function")
+  // O hook do shadcn retorna { toast: fn, dismiss: fn, toasts: [] }
   const toast = typeof toastHook === 'function' 
     ? toastHook 
-    : toastHook?.toast;
+    : (toastHook as any)?.toast;
   
   const [consents, setConsents] = useState<ConsentRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [essentialPurposes, setEssentialPurposes] = useState<string[]>([...ESSENTIAL_PURPOSES]);
-  const [revocablePurposes, setRevocablePurposes] = useState<string[]>([
-    PURPOSES.ANALYTICS,
-    PURPOSES.MARKETING,
-    PURPOSES.BEHAVIOR,
-    PURPOSES.AI,
-  ]);
+  const [revocablePurposes, setRevocablePurposes] = useState<string[]>([...OPTIONAL_PURPOSES]);
+
+  // ✅ Função para carregar consentimentos
+  const loadConsents = useCallback(async (forceRefresh = false) => {
+    if (!user?.id) return;
+    
+    // ✅ Evitar chamadas duplicadas se já está carregando (a menos que forceRefresh)
+    if (!forceRefresh && loading) return;
+    
+    setLoading(true);
+    try {
+      console.log("🔄 Fetching consents from API...", { forceRefresh, userId: user.id });
+      
+      const resp = await api.get("/consent/my/", {
+        params: { t: forceRefresh ? Date.now() : null } // Cache buster
+      });
+      const data = resp.data;
+      
+      console.log("✅ Consents API response:", {
+        count: data.consents?.length,
+        firstConsent: data.consents?.[0] ? {
+          id: data.consents[0].id,
+          version: data.consents[0].version,
+          purposes: data.consents[0].purposes,
+          purposesType: typeof data.consents[0].purposes,
+          isArray: Array.isArray(data.consents[0].purposes),
+        } : null,
+      });
+      
+      setConsents(data.consents || []);
+      if (data.essential_purposes?.length) {
+        setEssentialPurposes(data.essential_purposes);
+      }
+      if (data.revocable_purposes?.length) {
+        setRevocablePurposes(data.revocable_purposes);
+      }
+    } catch (error: any) {
+      if (error.response?.status !== 401) {
+        console.error("❌ Erro ao carregar consentimentos:", error);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id, loading]); // ✅ Dependencies corretas
 
   // ✅ Carregar consentimentos apenas se usuário estiver autenticado
   useEffect(() => {
@@ -85,54 +131,10 @@ export function useConsent(): ConsentContextData {
       // Se não tem user, limpa estados
       setConsents([]);
       setEssentialPurposes([...ESSENTIAL_PURPOSES]);
-      setRevocablePurposes([PURPOSES.ANALYTICS, PURPOSES.MARKETING, PURPOSES.BEHAVIOR, PURPOSES.AI]);
+      setRevocablePurposes([...OPTIONAL_PURPOSES]);
       setLoading(false);
     }
-  }, [user?.id]);
-// src/hooks/useConsent.ts - loadConsents com forçar atualização
-
-const loadConsents = useCallback(async (forceRefresh = false) => {
-  if (!user?.id) return;
-  
-  if (!forceRefresh && setLoading) return; // Evitar chamadas duplicadas
-  
-  setLoading(true);
-  try {
-    console.log("🔄 Fetching consents from API...", { forceRefresh });
-    
-    const resp = await api.get("/consent/my/", {
-      params: { t: forceRefresh ? Date.now() : null } // Cache buster
-    });
-    const data = resp.data;
-    
-    console.log("✅ Consents API response:", {
-      count: data.consents?.length,
-      firstConsent: data.consents?.[0] ? {
-        id: data.consents[0].id,
-        version: data.consents[0].version,
-        purposes: data.consents[0].purposes,
-        purposesType: typeof data.consents[0].purposes,
-        isArray: Array.isArray(data.consents[0].purposes),
-      } : null,
-    });
-    
-    setConsents(data.consents || []);
-    if (data.essential_purposes?.length) {
-      setEssentialPurposes(data.essential_purposes);
-    }
-    if (data.revocable_purposes?.length) {
-      setRevocablePurposes(data.revocable_purposes);
-    }
-  } catch (error: any) {
-    if (error.response?.status !== 401) {
-      console.error("❌ Erro ao carregar consentimentos:", error);
-    }
-  } finally {
-    setLoading(false);
-  }
-}, [user?.id, setLoading]);
-
-
+  }, [user?.id, loadConsents]); // ✅ Incluir loadConsents nas deps
 
   // ✅ Registrar consentimento - Suporta usuários autenticados e anônimos
   const recordConsent = useCallback(async (
@@ -151,7 +153,6 @@ const loadConsents = useCallback(async (forceRefresh = false) => {
       
       // Atualizar estado local
       setConsents(prev => {
-        // Remover registro antigo com mesmo ID (se existir)
         const filtered = prev.filter(c => c.id !== data.id);
         return [data, ...filtered];
       });
@@ -166,10 +167,9 @@ const loadConsents = useCallback(async (forceRefresh = false) => {
       
       return true;
     } catch (error: any) {
-      // ✅ Tratamento específico por status code
       const status = error.response?.status;
       
-      // Não mostrar toast para erros esperados (400 = validação, 404 = endpoint não encontrado)
+      // Não mostrar toast para erros esperados
       if (status !== 400 && status !== 404 && typeof toast === 'function') {
         toast({
           title: "❌ Erro ao registrar consentimento",
@@ -178,7 +178,6 @@ const loadConsents = useCallback(async (forceRefresh = false) => {
         });
       }
       
-      // Log para debug em desenvolvimento
       if (import.meta.env.DEV) {
         console.error("❌ Consent record error:", {
           status,
@@ -194,7 +193,7 @@ const loadConsents = useCallback(async (forceRefresh = false) => {
   // ✅ Revogar consentimento para finalidade específica
   const revokeConsent = useCallback(async (purpose: Purpose): Promise<boolean> => {
     // ✅ Não permite revogar finalidades essenciais
-    if (essentialPurposes.includes(purpose)) {
+    if (essentialPurposes.includes(purpose as any)) {
       if (typeof toast === 'function') {
         toast({
           title: "⚠️ Não é possível revogar",
@@ -247,8 +246,6 @@ const loadConsents = useCallback(async (forceRefresh = false) => {
 
   // ✅ NOVO: Verificar se usuário tem consentimento VÁLIDO para a versão atual
   const hasValidConsent = useCallback((version: string = LGPD_VERSION): boolean => {
-    // Verificar se existe consentimento ativo para a versão especificada
-    // E se contém pelo menos as finalidades essenciais
     return consents.some(c => 
       c.is_active && 
       c.version === version &&
@@ -256,11 +253,11 @@ const loadConsents = useCallback(async (forceRefresh = false) => {
     );
   }, [consents, essentialPurposes]);
 
-// ✅ Expor refresh forçado
-const refresh = useCallback(async () => {
-  console.log("🔄 Manual refresh called");
-  await loadConsents(true); // Forçar atualização
-}, [loadConsents]);
+  // ✅ Expor refresh forçado
+  const refresh = useCallback(async () => {
+    console.log("🔄 Manual refresh called");
+    await loadConsents(true);
+  }, [loadConsents]);
 
   return {
     consents,
@@ -270,7 +267,7 @@ const refresh = useCallback(async () => {
     recordConsent,
     revokeConsent,
     hasConsent,
-    hasValidConsent, // ✅ Exportar nova função
+    hasValidConsent,
     refresh,
   };
 }

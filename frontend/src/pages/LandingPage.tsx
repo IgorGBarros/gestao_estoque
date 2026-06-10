@@ -7,7 +7,7 @@ import {
   Zap, Users, CreditCard, Loader2,
 } from "lucide-react";
 import { api } from "../services/api"; 
-import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
+import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
 import appPreview1 from "../assets/app-preview-1.png";

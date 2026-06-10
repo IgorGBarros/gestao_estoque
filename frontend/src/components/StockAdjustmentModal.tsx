@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { X, Loader2, Scale, Minus, Plus, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { movementsApi, InventoryItem } from "../lib/api";
-import { useToast } from "../hooks/use-toast-original"; // ✅ Importar useToast original para evitar dependência circular
+import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 
 interface StockAdjustmentModalProps {
   isOpen: boolean;
