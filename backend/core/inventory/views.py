@@ -2,7 +2,6 @@
 # IMPORTS GERAIS - CORRIGIDOS
 # ==========================================
 from time import time
-from aiohttp import request
 from django.db import models, transaction
 from django.db.models import Q, Count, Sum, F, Prefetch
 from django.utils import timezone
