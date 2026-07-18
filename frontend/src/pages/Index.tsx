@@ -14,7 +14,7 @@ import ProBadge from "../components/ProBadge";
 import UpgradeModal from "../components/UpgradeModal";
 import ProfileCompletionBanner from "../components/ProfileCompletionBanner";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
-import AiTrainingConsentBanner from "@/components/Aitrainingconsentbanner ";
+import AiTrainingConsentBanner from "@/components/AitrainingConsentBanner";
 
 interface Stats {
   investedValue: number;
