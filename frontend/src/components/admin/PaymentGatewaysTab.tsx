@@ -1,6 +1,6 @@
 // src/components/admin/PaymentGatewaysTab.tsx
 import { useState, useEffect } from "react";
-import { useToast } from "../../hooks/use-toast";
+import { useToast } from "@/components/ui/use-toast"
 import { adminApi } from "../../lib/api";
 import {
   AlertTriangle, Bell, Check, CheckCircle, CreditCard, ExternalLink,
