@@ -50,9 +50,6 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, Sp
 
 urlpatterns = [
     
-    # Admin Django
-    path('admin/', admin.site.urls),
-    
     # ==========================================
     # 🔐 AUTHENTICATION (Rotas principais)
     # ==========================================
@@ -111,20 +108,4 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
-    
-    # ==========================================
-    # 📦 INVENTORY (Inclusão do app inventory)
-    # ==========================================
-    path('', include('inventory.urls')),
-    
-    # ==========================================
-    # 🤖 AI & PAYMENTS (Outros apps)
-    # ==========================================
-    path('api/chat/', include('ai.urls')),
-    path('api/payments/', include('apps.payments.urls')),
-    
-    # ==========================================
-    # 🛍️ API COMERCIAL (v1)
-    # ==========================================
-    path('api/v1/', include('inventory.api_comercial_urls')),
 ]
