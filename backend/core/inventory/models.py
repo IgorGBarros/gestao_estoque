@@ -914,6 +914,7 @@ class ConsentRecord(models.Model):
         ('marketing', 'Marketing e comunicações promocionais'),
         ('behavior_tracking', 'Captura de comportamento para IA'),
         ('ai_features', 'Recursos de IA/Amorinha'),
+        ('ai_training', 'Uso de dados de estoque e vendas para treinamento de modelos de IA'),
     ]
 
     # Identificação do titular

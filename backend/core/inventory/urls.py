@@ -1,46 +1,131 @@
-# backend/core/inventory/urls.py
+"""
+backend/core/core/urls.py
+URL configuration for core project.
+"""
+from django.contrib import admin
 from django.urls import path, include
-from rest_framework.routers import DefaultRouter
+from rest_framework_simplejwt.views import TokenRefreshView
 
-from .views import (
-    ProductViewSet,
-    InventoryViewSet,
-    StockTransactionViewSet,
-    StockEntryView,
-    SaleCheckoutView,
-    inventory_item_batches_view,
-    apply_fifo_withdrawal,
-    debug_user_store,
-    associate_user_store,
-    fix_user_store,
+# Views de autenticação e perfil
+from inventory.views import (
+    CustomTokenObtainPairView,
+    CustomUserCreateView,
+    FirebaseLoginView,
+  
+    profile_view,
 )
 
-# Router para ViewSets (CRUD automático)
-router = DefaultRouter()
-router.register(r'products', ProductViewSet, basename='product')
-router.register(r'inventory', InventoryViewSet, basename='inventory')
-router.register(r'transactions', StockTransactionViewSet, basename='stock-transaction')
+# Views de consentimento LGPD
+from inventory.views import (
+    record_consent,
+    revoke_consent,
+    get_my_consents,
+    export_my_data,
+)
+
+# Views de tema (público e admin)
+from inventory.views import ThemeConfigPublicView, ThemeConfigAdminView
+
+# Views de dashboard e analytics
+from inventory.views import (
+    dashboard_overview,
+    dashboard_stats,
+    dashboard_financial_summary,
+    dashboard_inventory_analysis,
+    cash_flow_summary,
+    cash_flow_detailed,
+)
+
+# Views de feature gates e planos
+from inventory.views import feature_gates_view, check_plan_limits_complete
+
+# Views de sessão
+from inventory.views import SessionControlView, SessionSummaryView
+
+# Views públicas
+from inventory.views import public_storefront, public_storefront_view, lookup_product
+
+# Swagger/Documentação
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 
 urlpatterns = [
-    # Rotas do Router (CRUD automático)
-    path('', include(router.urls)),
+    
+    # Admin Django
+    path('admin/', admin.site.urls),
     
     # ==========================================
-    # 📦 OPERAÇÕES DE ESTOQUE
+    # 🔐 AUTHENTICATION (Rotas principais)
     # ==========================================
-    path('stock/entry/', StockEntryView.as_view(), name='stock_entry'),
-    path('sales/checkout/', SaleCheckoutView.as_view(), name='sale_checkout'),
+    path('api/auth/login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/auth/register/', CustomUserCreateView.as_view(), name='register'),
+    path('api/auth/firebase/', FirebaseLoginView.as_view(), name='firebase_login'),
     
     # ==========================================
-    # 🔄 FIFO & LOTES
+    # 👤 PROFILE & CONFIGURAÇÕES
     # ==========================================
-    path('inventory/<int:item_id>/batches/', inventory_item_batches_view, name='inventory_batches'),
-    path('fifo-withdrawal/', apply_fifo_withdrawal, name='fifo_withdrawal'),
+    path('api/profile/', profile_view, name='profile'),
+    path('api/admin/feature-gates/', feature_gates_view, name='feature_gates'),
+    path('api/check-plan-limits/', check_plan_limits_complete, name='check_plan_limits'),
     
     # ==========================================
-    # 🐛 DEBUG (apenas desenvolvimento)
+    # 📊 DASHBOARD & ANALYTICS
     # ==========================================
-    path('debug/user-store/', debug_user_store, name='debug_user_store'),
-    path('debug/associate-store/', associate_user_store, name='associate_user_store'),
-    path('debug/fix-store/', fix_user_store, name='fix_user_store'),
+    path('api/dashboard/overview/', dashboard_overview, name='dashboard_overview'),
+    path('api/stats/dashboard/', dashboard_stats, name='dashboard_stats'),
+    path('api/dashboard/financial/', dashboard_financial_summary, name='dashboard_financial'),
+    path('api/dashboard/inventory/', dashboard_inventory_analysis, name='dashboard_inventory'),
+    path('api/cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
+    path('api/cash-flow/detailed/', cash_flow_detailed, name='cash_flow_detailed'),
+    
+    # ==========================================
+    # 🔐 LGPD - CONSENTIMENTO (Rotas principais)
+    # ==========================================
+    path('api/consent/', record_consent, name='record_consent'),
+    path('api/consent/revoke/<str:purpose>/', revoke_consent, name='revoke_consent'),
+    path('api/consent/my/', get_my_consents, name='get_my_consents'),
+    path('api/consent/export/', export_my_data, name='export_my_data'),
+    
+    # ==========================================
+    # 🎨 TEMA (Público e Admin)
+    # ==========================================
+    path('api/public/theme/', ThemeConfigPublicView.as_view(), name='theme_public'),
+    path('api/admin/theme/', ThemeConfigAdminView.as_view(), name='theme_admin'),
+    
+    # ==========================================
+    # 📦 SESSÃO DE CADASTRO
+    # ==========================================
+    path('api/session-control/', SessionControlView.as_view(), name='session_control'),
+    path('api/session-summary/', SessionSummaryView.as_view(), name='session_summary'),
+    
+    # ==========================================
+    # 🌐 ROTAS PÚBLICAS
+    # ==========================================
+    path('api/products/lookup/', lookup_product, name='lookup_product'),
+    path('api/public/storefront/<slug:slug>/', public_storefront, name='public_storefront_slug'),
+    path('api/public/storefront/', public_storefront, name='public_storefront_list'),
+    
+    # ==========================================
+    # 📚 DOCUMENTAÇÃO API (Swagger)
+    # ==========================================
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    
+    # ==========================================
+    # 📦 INVENTORY (Inclusão do app inventory)
+    # ==========================================
+    path('', include('inventory.urls')),
+    path('api/admin/', include('inventory.admin_urls')),
+    
+    # ==========================================
+    # 🤖 AI & PAYMENTS (Outros apps)
+    # ==========================================
+    path('api/chat/', include('ai.urls')),
+    path('api/payments/', include('apps.payments.urls')),
+    
+    # ==========================================
+    # 🛍️ API COMERCIAL (v1)
+    # ==========================================
+    path('api/v1/', include('inventory.api_comercial_urls')),
 ]

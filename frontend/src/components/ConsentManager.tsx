@@ -41,6 +41,10 @@ const LABELS: Record<Purpose, { title: string; desc: string }> = {
     title: "Recursos de inteligência artificial",
     desc: "Análises e sugestões geradas por IA sobre seu estoque.",
   },
+  ai_training: {
+    title: "Treinamento de modelos de IA",
+    desc: "Usar dados de entrada e saída de estoque (produto, quantidade, preço, data) para treinar e melhorar os modelos de IA da plataforma. Não inclui nome de cliente, CPF, RG, endereço ou qualquer outro dado pessoal — só padrões de estoque e vendas.",
+  },
 };
 
 export function ConsentManager({ onComplete, loading }: ConsentManagerProps) {

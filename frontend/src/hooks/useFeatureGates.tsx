@@ -18,6 +18,7 @@ export interface FeatureGatesContextData {
   gates: FeatureGate[];
   loading: boolean;
   isFeatureEnabled: (featureKey: string) => boolean;
+  isLocked: (featureKey: string) => boolean;
   refresh: () => Promise<void>;
 }
 
@@ -107,11 +108,23 @@ export function FeatureGatesProvider({ children }: { children: ReactNode }) {
     await loadGates();
   }, [loadGates]);
 
+  // ✅ Inverso de isFeatureEnabled — existia código em produção (Index.tsx,
+  // AddProduct.tsx) esperando esse método, mas ele nunca foi implementado
+  // aqui. Index.tsx quebrava em runtime (isLocked não era função);
+  // AddProduct.tsx contornava isso apelidando isFeatureEnabled de isLocked,
+  // o que invertia a lógica de bloqueio. Ambos foram corrigidos para usar
+  // este método real.
+  const isLocked = useCallback(
+    (featureKey: string): boolean => !isFeatureEnabled(featureKey),
+    [isFeatureEnabled]
+  );
+
   // ✅ Valor do contexto
   const value: FeatureGatesContextData = {
     gates,
     loading,
     isFeatureEnabled,
+    isLocked,
     refresh,
   };
 

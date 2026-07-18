@@ -49,6 +49,7 @@ from .serializers import (
 )
 
 from .scraper import search_google_shopping
+from .consent_utils import has_consent_for_purpose as _has_consent_for_purpose
 
 User = get_user_model()
 # ============================================================================
@@ -324,15 +325,13 @@ def log_safe(message: str, **context):
 def has_consent_for_purpose(user, purpose: str) -> bool:
     """
     Verifica se usuário consentiu com finalidade específica (LGPD Art. 8º)
+
+    Movida para consent_utils.py (fonte única, compartilhada com
+    admin_views.py e com o módulo de exportação para treino de IA).
+    Mantida como re-export aqui para não quebrar `from inventory.views
+    import has_consent_for_purpose`, já usado em outros lugares (ex: ai/views.py).
     """
-    if not user or not user.is_authenticated:
-        return False
-    
-    return ConsentRecord.objects.filter(
-        user=user,
-        purpose_flags__contains=[purpose],
-        revoked_at__isnull=True
-    ).exists()
+    return _has_consent_for_purpose(user, purpose)
 # ============================================================================
 # 2. CORE BUSINESS (ESTOQUE)
 # ============================================================================
@@ -3769,5 +3768,3 @@ def export_my_data(request):
         "transactions": StockTransactionSerializer(transactions, many=True).data,
         "note": "Dados exportados conforme Art. 18, V da LGPD"
     })
-
-

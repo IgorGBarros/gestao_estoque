@@ -14,6 +14,7 @@ import ProBadge from "../components/ProBadge";
 import UpgradeModal from "../components/UpgradeModal";
 import ProfileCompletionBanner from "../components/ProfileCompletionBanner";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
+import AiTrainingConsentBanner from "@/components/Aitrainingconsentbanner ";
 
 interface Stats {
   investedValue: number;
@@ -148,6 +149,7 @@ export default function Index() {
       {/* ══ MAIN ══ */}
       <main className="mx-auto max-w-6xl px-6 py-8 space-y-6">
         <ProfileCompletionBanner />
+        <AiTrainingConsentBanner />
 
         {/* CARDS FINANCEIROS */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">

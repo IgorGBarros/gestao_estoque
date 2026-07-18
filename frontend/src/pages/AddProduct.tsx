@@ -93,8 +93,7 @@ const createEmptyEntry = (): EntryData => ({
 export default function AddProduct() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  // legacy name `isLocked` used across this file — alias to current hook API
-  const { isFeatureEnabled: isLocked } = useFeatureGates();
+  const { isLocked } = useFeatureGates();
   const { toast } = useToast();
   const { loading, saveEntry } = useStockEntry();
 

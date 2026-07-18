@@ -18,6 +18,7 @@ export const PURPOSES = {
   MARKETING: "marketing",
   BEHAVIOR: "behavior_tracking",
   AI: "ai_features",
+  AI_TRAINING: "ai_training",
 } as const;
 
 export type Purpose = (typeof PURPOSES)[keyof typeof PURPOSES];
@@ -34,6 +35,7 @@ export const OPTIONAL_PURPOSES: Purpose[] = [
   PURPOSES.MARKETING,
   PURPOSES.BEHAVIOR,
   PURPOSES.AI,
+  PURPOSES.AI_TRAINING,
 ];
 
 // ==========================================

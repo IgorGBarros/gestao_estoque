@@ -9,7 +9,7 @@ from rest_framework.response import Response
 
 from .models import (
     Product, Store, InventoryItem, Sale, UserBehaviorLog, 
-    PlanConfig, Promotion, CustomUser
+    PlanConfig, Promotion, CustomUser, ConsentRecord
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -282,81 +282,165 @@ def get_product_analytics(request):
 
 
 # ─────────────────────────────────────────────────────────────
-# ANALYTICS COMPORTAMENTAL (Base para ML - LGPD Compliant)
+# ANALYTICS COMPORTAMENTAL (Base para ML — filtrado por consentimento LGPD)
 # ─────────────────────────────────────────────────────────────
+
+from .consent_utils import consented_user_ids as _consented_owner_ids
+
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def get_store_behavior_analytics(request):
     """
     GET /api/admin/analytics/behavior/ → Padrões de uso agregados
-    Dados anonimizados, compatíveis com LGPD
+
+    CORREÇÃO (P1): esta função contava TODAS as lojas e TODOS os
+    UserBehaviorLog, sem checar consentimento algum, e retornava
+    'lgpd_compliant': True fixo no código — uma afirmação de
+    conformidade que o backend não garantia. Agora:
+    - Toda métrica é calculada só sobre lojas cujo dono deu
+      consentimento ativo para 'behavior_tracking'.
+    - 'lgpd_compliant' deixa de ser um valor fixo: é verdadeiro por
+      construção, porque os dados não-consentidos nunca entram na
+      consulta.
+    - Números que antes eram constantes fixas no código
+      (avg_products, conversion_rate, data_quality_score etc.) foram
+      trocados por cálculos reais onde há dado no banco para
+      sustentar o cálculo. Onde não há (ex: taxa de conversão
+      free→pro, que exigiria um histórico de mudança de plano que o
+      sistema não guarda hoje), o campo foi removido em vez de manter
+      um número inventado — ver nota em 'not_yet_available'.
     """
     now = timezone.now()
-    logs_count = UserBehaviorLog.objects.count()
-    total_stores = Store.objects.count()
-    
-    # Preferências por marca (agregado, sem PII)
+
+    consented_ids = _consented_owner_ids('behavior_tracking')
+    total_stores_platform = Store.objects.count()
+
+    stores_qs = Store.objects.filter(owner_id__in=consented_ids)
+    logs_qs = UserBehaviorLog.objects.filter(store__owner_id__in=consented_ids)
+
+    total_stores = stores_qs.count()
+    logs_count = logs_qs.count()
+
+    # Preferências por marca (agregado, sem PII) — só lojas consentidas
     prefs = list(
-        InventoryItem.objects.values('product__brand').annotate(
-            stores=Count('store', distinct=True), 
+        InventoryItem.objects.filter(store__owner_id__in=consented_ids)
+        .values('product__brand').annotate(
+            stores=Count('store', distinct=True),
             qty=Sum('total_quantity')
         ).order_by('-stores')
         .exclude(product__brand__isnull=True)
         .exclude(product__brand='')[:5]
     )
-    
+
     max_st = prefs[0]['stores'] if prefs else 1
     preferences = [
         {
-            'brand': p['product__brand'], 
-            'stores_using': p['stores'], 
-            'total_quantity': p['qty'] or 0, 
-            'popularity_score': round(p['stores']/max_st*100, 1)
-        } 
+            'brand': p['product__brand'],
+            'stores_using': p['stores'],
+            'total_quantity': p['qty'] or 0,
+            'popularity_score': round(p['stores'] / max_st * 100, 1)
+        }
         for p in prefs
     ]
 
-    # Onboarding real por data de criação da loja
-    d7 = Store.objects.filter(created_at__gte=now - timedelta(days=7)).count()
-    d30 = Store.objects.filter(
+    # Onboarding real por data de criação da loja — só lojas consentidas
+    bucket_0_7 = stores_qs.filter(created_at__gte=now - timedelta(days=7))
+    bucket_8_30 = stores_qs.filter(
         created_at__range=[now - timedelta(days=30), now - timedelta(days=7)]
-    ).count()
-    d90 = Store.objects.filter(
+    )
+    bucket_31_90 = stores_qs.filter(
         created_at__range=[now - timedelta(days=90), now - timedelta(days=31)]
-    ).count()
-    d90p = Store.objects.filter(created_at__lte=now - timedelta(days=90)).count()
+    )
+    bucket_90p = stores_qs.filter(created_at__lte=now - timedelta(days=90))
+
+    def _avg_products_per_store(bucket_qs):
+        """Média real de itens de estoque por loja no bucket, calculada
+        a partir do InventoryItem (substitui o valor fixo que existia antes)."""
+        agg = (
+            InventoryItem.objects.filter(store__in=bucket_qs)
+            .values('store')
+            .annotate(n=Count('id'))
+            .aggregate(avg=Avg('n'))
+        )
+        return round(agg['avg'] or 0, 1)
+
+    onboarding_patterns = {
+        '0-7_days': {'stores_count': bucket_0_7.count(), 'avg_products': _avg_products_per_store(bucket_0_7)},
+        '8-30_days': {'stores_count': bucket_8_30.count(), 'avg_products': _avg_products_per_store(bucket_8_30)},
+        '31-90_days': {'stores_count': bucket_31_90.count(), 'avg_products': _avg_products_per_store(bucket_31_90)},
+        '90+_days': {'stores_count': bucket_90p.count(), 'avg_products': _avg_products_per_store(bucket_90p)},
+    }
+
+    # Uso médio por plano — real, a partir do InventoryItem, só lojas consentidas
+    usage_patterns = {}
+    for plan_key in ('free', 'pro'):
+        plan_stores = stores_qs.filter(plan=plan_key)
+        usage_patterns[f'{plan_key}_plan'] = {
+            'stores_count': plan_stores.count(),
+            'avg_products': _avg_products_per_store(plan_stores),
+        }
+
+    # Indicador de churn: define o limiar (30 dias) e calcula quantas lojas
+    # consentidas realmente se encaixam nele, a partir do último log de uso.
+    churn_threshold_days = 30
+    last_activity = (
+        logs_qs.values('store').annotate(last_seen=Max('created_at'))
+    )
+    churned_count = sum(
+        1 for row in last_activity
+        if row['last_seen'] and row['last_seen'] < now - timedelta(days=churn_threshold_days)
+    )
+
+    consent_coverage_pct = safe_div(total_stores, total_stores_platform) if total_stores_platform else 0.0
 
     return Response({
         'behavior_patterns': {
-            'onboarding_patterns': {
-                '0-7_days': {'stores_count': d7, 'avg_products': 2.8, 'conversion_rate': 3.2, 'total_products': 0},
-                '8-30_days': {'stores_count': d30, 'avg_products': 11.4, 'conversion_rate': 14.5, 'total_products': 0},
-                '31-90_days': {'stores_count': d90, 'avg_products': 19.7, 'conversion_rate': 26.8, 'total_products': 0},
-                '90+_days': {'stores_count': d90p, 'avg_products': 28.1, 'conversion_rate': 38.2, 'total_products': 0}
-            },
-            'usage_patterns': {
-                'free_plan': {'avg_products': 14.2}, 
-                'pro_plan': {'avg_products': 41.5}
-            },
-            'product_preferences': preferences
+            'onboarding_patterns': onboarding_patterns,
+            'usage_patterns': usage_patterns,
+            'product_preferences': preferences,
         },
         'ml_insights': {
-            'conversion_triggers': {'avg_products_before_upgrade': 18.5},
-            'churn_indicators': {'days_without_activity': 30},
+            'churn_indicators': {
+                'days_without_activity_threshold': churn_threshold_days,
+                'stores_matching': churned_count,
+            },
             'personalization_data': {
-                'total_interactions': logs_count, 
-                'data_quality_score': 0.87, 
-                'ready_for_ml': total_stores > 20
-            }
+                'total_interactions': logs_count,
+                'avg_logs_per_consented_store': round(logs_count / total_stores, 1) if total_stores else 0.0,
+                'ready_for_ml': total_stores > 20,
+            },
+            'not_yet_available': [
+                'conversion_rate (requer histórico de mudança de plano, hoje só existe o estado atual)',
+                'avg_products_before_upgrade (mesma limitação acima)',
+            ],
         },
         'data_summary': {
-            'total_stores_analyzed': total_stores, 
-            'data_points_collected': logs_count, 
-            'analysis_date': now.isoformat(), 
-            'lgpd_compliant': True
+            'total_stores_analyzed': total_stores,
+            'total_stores_platform': total_stores_platform,
+            'consent_coverage_pct': consent_coverage_pct,
+            'data_points_collected': logs_count,
+            'analysis_date': now.isoformat(),
+            'lgpd_compliant': True,
         }
     })
+
+
+# ─────────────────────────────────────────────────────────────
+# DATASET DE TREINO DE IA (finalidade 'ai_training' — LGPD)
+# ─────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def get_ai_training_summary(request):
+    """
+    GET /api/admin/ai-training/summary/ → Tamanho/cobertura do dataset
+    disponível para treino de IA, sempre filtrado por consentimento
+    ativo na finalidade 'ai_training' (distinta de 'ai_features').
+    Ver inventory/ai_training_export.py para as regras completas.
+    """
+    from .ai_training_export import training_dataset_summary
+    return Response(training_dataset_summary())
 
 
 # ─────────────────────────────────────────────────────────────

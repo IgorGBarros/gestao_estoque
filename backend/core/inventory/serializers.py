@@ -638,7 +638,7 @@ class ConsentRecordSerializer(serializers.Serializer):
     purposes = serializers.ListField(
         child=serializers.ChoiceField(choices=[
             'essential', 'authentication', 'service_delivery', 'legal_compliance',
-            'analytics', 'marketing', 'behavior_tracking', 'ai_features',
+            'analytics', 'marketing', 'behavior_tracking', 'ai_features', 'ai_training',
         ]),
         required=True,
         allow_empty=False,
@@ -670,7 +670,7 @@ class ConsentRecordSerializer(serializers.Serializer):
         
         valid = [p for p in purposes if p in [
             'essential', 'authentication', 'service_delivery', 'legal_compliance',
-            'analytics', 'marketing', 'behavior_tracking', 'ai_features',
+            'analytics', 'marketing', 'behavior_tracking', 'ai_features', 'ai_training',
         ]]
         
         if not valid:
@@ -776,6 +776,7 @@ class ConsentRevocationSerializer(serializers.Serializer):
             'marketing', 
             'behavior_tracking',
             'ai_features',
+            'ai_training',
         ],
         required=True,
         help_text="Finalidade para a qual o consentimento está sendo revogado"
@@ -838,4 +839,3 @@ class ConsentExportSerializer(serializers.Serializer):
             'data_retention_days': getattr(settings, 'LGPD_CONSENT_RETENTION_DAYS', 730),
             'contact_dpo': 'privacidade@minhaamora.com.br',  # Configurar em settings
         }
-    

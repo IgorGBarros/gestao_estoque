@@ -2030,10 +2030,6 @@ export default function AdminPanel() {
                             <span className="text-muted-foreground">Média Produtos:</span>
                             <span className="font-medium">{data.avg_products}</span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-muted-foreground">Conversão:</span>
-                            <span className="font-medium text-green-600">{data.conversion_rate}%</span>
-                          </div>
                         </div>
                       </div>
                     ))}
@@ -2123,9 +2119,9 @@ export default function AdminPanel() {
                     </div>
                     <div className="p-3 bg-secondary/30 rounded-lg">
                       <p className="text-2xl font-bold text-green-600">
-                        {(behaviorAnalytics.ml_insights.personalization_data.data_quality_score * 100).toFixed(0)}%
+                        {behaviorAnalytics.data_summary.consent_coverage_pct}%
                       </p>
-                      <p className="text-xs text-muted-foreground">Qualidade dos Dados</p>
+                      <p className="text-xs text-muted-foreground">Cobertura de Consentimento</p>
                     </div>
                     <div className="p-3 bg-secondary/30 rounded-lg">
                       <p className="text-2xl font-bold text-amber-600">
@@ -2141,7 +2137,7 @@ export default function AdminPanel() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground mt-4 text-center">
-                    🔒 Dados anonimizados • Consentimento LGPD requerido • Retenção: 24 meses
+                    🔒 {behaviorAnalytics.data_summary.total_stores_analyzed} de {behaviorAnalytics.data_summary.total_stores_platform} lojas consentiram com uso comportamental • Retenção: 24 meses
                   </p>
                 </div>
               </div>
