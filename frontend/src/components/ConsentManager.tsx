@@ -1,8 +1,7 @@
-// src/components/ConsentManager.tsx - VERSÃO FINAL CORRIGIDA
+// src/components/ConsentManager.tsx
 import { useState } from "react";
 import { Button } from "./ui/button";
-import { Checkbox } from "./ui/checkbox";
-// ✅ Importar do use-toast padrão do shadcn
+import { CheckCircle2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { useConsent, type Purpose, ESSENTIAL_PURPOSES, OPTIONAL_PURPOSES } from "@/hooks/useConsent";
 
@@ -11,7 +10,11 @@ interface ConsentManagerProps {
   loading?: boolean;
 }
 
-// ✅ Labels centralizados para evitar repetição
+// Labels centralizados — o texto de cada finalidade continua aqui,
+// detalhado, pra atender à exigência da LGPD (art. 9º) de informar
+// claramente cada finalidade. O que mudou é a interação: em vez de a
+// pessoa marcar uma por uma, é tudo mostrado como informação e há um
+// único botão de aceite.
 const LABELS: Record<Purpose, { title: string; desc: string }> = {
   essential: {
     title: "Funcionamento básico do sistema",
@@ -47,38 +50,21 @@ const LABELS: Record<Purpose, { title: string; desc: string }> = {
   },
 };
 
+const ALL_PURPOSES: Purpose[] = [...ESSENTIAL_PURPOSES, ...OPTIONAL_PURPOSES];
+
 export function ConsentManager({ onComplete, loading }: ConsentManagerProps) {
   const { recordConsent } = useConsent();
-  
   const toast = useToast();
-  
-  const [selectedPurposes, setSelectedPurposes] = useState<Purpose[]>([...ESSENTIAL_PURPOSES]);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleToggle = (purpose: Purpose, checked: boolean) => {
-    if (checked) {
-      setSelectedPurposes(prev => [...prev, purpose]);
-    } else {
-      // ✅ CORREÇÃO #2: Usar 'as any' para evitar erro de tipo estrito no includes
-      if (!ESSENTIAL_PURPOSES.includes(purpose as any)) {
-        setSelectedPurposes(prev => prev.filter(p => p !== purpose));
-      }
-    }
-  };
-
-  const handleSubmit = async () => {
-    console.log("📝 handleSubmit called");
+  const handleAcceptAll = async () => {
     setSubmitting(true);
-    
     try {
       if (onComplete) {
-        const success = await onComplete(selectedPurposes);
-        console.log("✅ onComplete returned:", success);
+        await onComplete(ALL_PURPOSES);
       } else {
-        await recordConsent(selectedPurposes);
+        await recordConsent(ALL_PURPOSES);
       }
-      
-      // ✅ CORREÇÃO #3: Chamar toast.toast() (propriedade do objeto retornado pelo hook)
       toast.toast({
         title: "✅ Consentimento registrado",
         description: "Suas preferências de privacidade foram salvas.",
@@ -95,8 +81,12 @@ export function ConsentManager({ onComplete, loading }: ConsentManagerProps) {
     }
   };
 
+  const handleClose = () => {
+    if (onComplete) onComplete([]);
+  };
+
   return (
-    <div className="space-y-6 py-4">
+    <div className="space-y-5 py-4">
       {/* Finalidades essenciais */}
       <section>
         <h4 className="mb-2 text-sm font-semibold text-foreground">
@@ -104,58 +94,43 @@ export function ConsentManager({ onComplete, loading }: ConsentManagerProps) {
         </h4>
         <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
           {ESSENTIAL_PURPOSES.map((key) => (
-            <label key={key} className="flex items-start gap-3 cursor-not-allowed">
-              <Checkbox checked disabled className="mt-0.5" />
+            <div key={key} className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
               <div className="text-sm">
                 <div className="font-medium text-foreground">{LABELS[key].title}</div>
                 <div className="text-muted-foreground">{LABELS[key].desc}</div>
               </div>
-            </label>
+            </div>
           ))}
         </div>
       </section>
 
-      {/* Finalidades opcionais */}
+      {/* Finalidades opcionais — informativo, sem toggle individual */}
       <section>
         <h4 className="mb-2 text-sm font-semibold text-foreground">
-          Finalidades opcionais
+          Também usamos seus dados para
         </h4>
         <div className="space-y-3 rounded-lg border border-border p-3">
           {OPTIONAL_PURPOSES.map((key) => (
-            <label key={key} className="flex items-start gap-3 cursor-pointer">
-              <Checkbox
-                checked={selectedPurposes.includes(key)}
-                onCheckedChange={(checked) => handleToggle(key, checked === true)}
-                className="mt-0.5"
-              />
-              <div className="text-sm">
-                <div className="font-medium text-foreground">{LABELS[key].title}</div>
-                <div className="text-muted-foreground">{LABELS[key].desc}</div>
-              </div>
-            </label>
+            <div key={key} className="text-sm">
+              <div className="font-medium text-foreground">{LABELS[key].title}</div>
+              <div className="text-muted-foreground">{LABELS[key].desc}</div>
+            </div>
           ))}
         </div>
       </section>
 
-      {/* Info */}
-      <p className="rounded-md bg-muted/40 p-2 text-xs text-muted-foreground">
-        💡 Você pode fechar esta janela e usar o sistema. O consentimento
-        pode ser registrado depois em Configurações.
-      </p>
-
       {/* Botões */}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button 
-          variant="ghost" 
-          onClick={() => {
-            if (onComplete) onComplete([]);
-          }} 
+        <Button
+          variant="ghost"
+          onClick={handleClose}
           disabled={submitting || loading}
         >
-          Fechar
+          Agora não
         </Button>
-        <Button onClick={handleSubmit} disabled={submitting || loading}>
-          {submitting || loading ? "Salvando..." : "Salvar e continuar"}
+        <Button onClick={handleAcceptAll} disabled={submitting || loading}>
+          {submitting || loading ? "Salvando..." : "Aceitar tudo"}
         </Button>
       </div>
     </div>

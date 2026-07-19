@@ -1,5 +1,5 @@
 // src/hooks/useConsent.ts
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { api } from "../services/api";
 import { useAuth } from "./useAuth";
 import { useToast } from "../components/ui/use-toast";
@@ -81,14 +81,24 @@ export function useConsent(): ConsentContextData {
   const [loading, setLoading] = useState(false);
   const [essentialPurposes, setEssentialPurposes] = useState<string[]>([...ESSENTIAL_PURPOSES]);
   const [revocablePurposes, setRevocablePurposes] = useState<string[]>([...OPTIONAL_PURPOSES]);
+  // ⚠️ CORREÇÃO DO LOOP INFINITO: usamos um ref (não state) como guarda de
+  // "já está buscando". Antes, `loading` (state) estava nas deps do
+  // useCallback abaixo — toda vez que loadConsents mudava `loading`, a
+  // própria função ganhava uma nova identidade, o que fazia o useEffect que
+  // depende dela (mais abaixo) disparar de novo, chamando loadConsents outra
+  // vez, pra sempre. Um ref não causa re-render nem muda a identidade da
+  // função, então quebra o loop mantendo a mesma proteção contra chamadas
+  // concorrentes.
+  const loadingRef = useRef(false);
 
   // ✅ Função para carregar consentimentos
   const loadConsents = useCallback(async (forceRefresh = false) => {
     if (!user?.id) return;
     
     // ✅ Evitar chamadas duplicadas se já está carregando (a menos que forceRefresh)
-    if (!forceRefresh && loading) return;
+    if (!forceRefresh && loadingRef.current) return;
     
+    loadingRef.current = true;
     setLoading(true);
     try {
       console.log("🔄 Fetching consents from API...", { forceRefresh, userId: user.id });
@@ -121,9 +131,10 @@ export function useConsent(): ConsentContextData {
         console.error("❌ Erro ao carregar consentimentos:", error);
       }
     } finally {
+      loadingRef.current = false;
       setLoading(false);
     }
-  }, [user?.id, loading]); // ✅ Dependencies corretas
+  }, [user?.id]); // ⚠️ 'loading' removido de propósito — ver comentário acima
 
   // ✅ Carregar consentimentos apenas se usuário estiver autenticado
   useEffect(() => {
@@ -136,7 +147,7 @@ export function useConsent(): ConsentContextData {
       setRevocablePurposes([...OPTIONAL_PURPOSES]);
       setLoading(false);
     }
-  }, [user?.id, loadConsents]); // ✅ Incluir loadConsents nas deps
+  }, [user?.id, loadConsents]); // agora loadConsents só muda quando user?.id muda
 
   // ✅ Registrar consentimento - Suporta usuários autenticados e anônimos
   const recordConsent = useCallback(async (
