@@ -444,6 +444,15 @@ class ProfileSerializer(serializers.ModelSerializer):
     whatsapp_number = serializers.CharField(source='whatsapp', required=False, allow_blank=True)
     store_slug = serializers.CharField(source='slug', read_only=True)
     
+    # ⚠️ CORREÇÃO: o frontend (useAuth.tsx) lê profileData.email e
+    # profileData.is_staff diretamente no nível raiz da resposta — mas esses
+    # campos só existiam aninhados em "user" (e is_staff nem existia ali).
+    # Isso fazia is_staff sempre virar `false` no frontend (derrubando o
+    # controle de acesso do painel admin) e o email chegar undefined
+    # (o que desligava a checagem de consentimento LGPD silenciosamente).
+    email = serializers.EmailField(source='owner.email', read_only=True)
+    is_staff = serializers.BooleanField(source='owner.is_staff', read_only=True)
+    
     # ✅ NOVO: Dados do plano atual
     plan_config = PlanConfigSerializer(read_only=True)
     current_limits = serializers.SerializerMethodField()
@@ -456,13 +465,13 @@ class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Store
         fields = [
-            "id", "user", "display_name", "store_slug", "whatsapp_number", 
+            "id", "user", "email", "is_staff", "display_name", "store_slug", "whatsapp_number", 
             "created_at", "updated_at", "plan", "plan_config", "current_limits",
             "active_promotions", "subscription_status", "stats",
             "payment_provider", "subscription_started_at", "subscription_expires_at"
         ]
         read_only_fields = [
-            "id", "user", "created_at", "updated_at", "store_slug", 
+            "id", "user", "email", "is_staff", "created_at", "updated_at", "store_slug", 
             "plan_config", "subscription_status", "stats"
         ]
     
@@ -802,8 +811,8 @@ class ConsentSummarySerializer(serializers.Serializer):
     Retorna apenas campos seguros para o titular dos dados
     """
     id = serializers.IntegerField(read_only=True)
-    version = serializers.CharField(read_only=True)
-    purposes = serializers.ListField(child=serializers.CharField(), read_only=True)
+    version = serializers.CharField(source='term_version', read_only=True)
+    purposes = serializers.ListField(child=serializers.CharField(), source='purpose_flags', read_only=True)
     accepted_at = serializers.DateTimeField(read_only=True)
     revoked_at = serializers.DateTimeField(read_only=True, allow_null=True)
     is_active = serializers.SerializerMethodField()

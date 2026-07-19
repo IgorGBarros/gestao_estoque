@@ -24,7 +24,7 @@ def create_store_for_new_user(sender, instance, created, **kwargs):
         
         # Cria a Loja vinculada ao novo Usuário
         Store.objects.create(
-            user=instance,
+            owner=instance,
             name=f"Espaço de {base_name.capitalize()}",
             slug=unique_slug,
             whatsapp="", # A consultora preenche depois

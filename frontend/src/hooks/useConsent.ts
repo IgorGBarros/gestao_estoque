@@ -243,7 +243,7 @@ export function useConsent(): ConsentContextData {
 
   // ✅ Verificar se usuário tem consentimento ativo para finalidade
   const hasConsent = useCallback((purpose: Purpose): boolean => {
-    return consents.some(c => c.is_active && c.purposes.includes(purpose));
+    return consents.some(c => c.is_active && Array.isArray(c.purposes) && c.purposes.includes(purpose));
   }, [consents]);
 
   // ✅ NOVO: Verificar se usuário tem consentimento VÁLIDO para a versão atual

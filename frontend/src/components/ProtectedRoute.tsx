@@ -15,7 +15,13 @@ export default function ProtectedRoute({
   const location = useLocation();
   
   // ✅ Rotas que NÃO requerem autenticação
-  const publicRoutes = ['/auth', '/lp', '/', '/admin-panel'];
+  // ⚠️ CORREÇÃO: '/admin-panel' estava aqui por engano (parece ter vindo de
+  // uma cópia da lista neverShowModalRoutes, que é sobre outra coisa — não
+  // mostrar o modal de consentimento). Com '/admin-panel' como rota pública,
+  // o early-return abaixo disparava ANTES da checagem de requireAdmin, então
+  // qualquer pessoa — logada ou não, admin ou não — conseguia acessar o
+  // painel admin e disparar as chamadas de API dele.
+  const publicRoutes = ['/auth', '/lp', '/'];
   const isPublicRoute = publicRoutes.includes(location.pathname);
   
   // ✅ Permitir rotas públicas SEMPRE

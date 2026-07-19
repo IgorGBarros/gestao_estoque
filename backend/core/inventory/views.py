@@ -3611,7 +3611,7 @@ class ThemeConfigAdminView(APIView):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request):
-    store = request.user.store
+    store = ensure_user_has_store(request.user)
     items = InventoryItem.objects.filter(store=store)
     transactions = StockTransaction.objects.filter(store=store)
     
@@ -3629,7 +3629,12 @@ def dashboard_stats(request):
         transaction_type='VENDA'
     )
     month_sales = month_txs.aggregate(total=Sum(F('unit_price') * F('quantity')))['total'] or 0
-    month_profit = month_txs.aggregate(total=Sum(F('profit')))['total'] or 0
+    # ⚠️ CORREÇÃO: StockTransaction não tem campo 'profit' (nunca teve) — o
+    # aggregate anterior (Sum(F('profit'))) sempre lançava FieldError e
+    # derrubava esse endpoint com 500. Lucro = (preço de venda - custo) * quantidade.
+    month_profit = month_txs.aggregate(
+        total=Sum((F('unit_price') - F('unit_cost')) * F('quantity'))
+    )['total'] or 0
     
     return Response({
         "investedValue": float(invested),
