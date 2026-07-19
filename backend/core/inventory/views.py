@@ -15,7 +15,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status, permissions, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -554,7 +554,25 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['product__category']
-    
+
+    # ✅ GET /api/inventory/by-barcode/<code>/ — o frontend (lib/api.ts) já
+    # chamava esta rota, mas ela nunca existiu no backend (Auditoria P0.1).
+    @action(detail=False, methods=['get'], url_path='by-barcode/(?P<barcode>[^/]+)')
+    def by_barcode(self, request, barcode=None):
+        item = self.get_queryset().filter(product__bar_code=barcode).first()
+        if not item:
+            return Response({'detail': 'Produto não encontrado no seu estoque.'},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(item).data)
+
+    # ✅ GET /api/inventory/<id>/batches/ — idem: chamado pelo frontend, sem rota.
+    @action(detail=True, methods=['get'])
+    def batches(self, request, pk=None):
+        from .serializers import InventoryBatchSerializer
+        item = self.get_object()  # get_object usa get_queryset → já filtra por loja
+        qs = item.batches.filter(quantity__gt=0).order_by('expiration_date', 'entry_date')
+        return Response(InventoryBatchSerializer(qs, many=True).data)
+
     def get_queryset(self):
         """Queryset com tratamento de erro robusto"""
         try:
@@ -839,233 +857,11 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
             }, status=500)
 
 
-class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
-    """Extrato de Movimentações da Loja - VERSÃO CORRIGIDA FINAL"""
-    serializer_class = StockTransactionSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['transaction_type']
-    
-    def get_queryset(self):
-        """Queryset com tratamento de erro robusto"""
-        try:
-            store = get_current_store(self.request.user)
-            if not store:
-                return StockTransaction.objects.none()
-                
-            return StockTransaction.objects.filter(
-                store=store
-            ).select_related('product', 'batch').order_by('-created_at')
-        except Exception as e:
-            print(f"❌ Erro no get_queryset StockTransaction: {e}")
-            return StockTransaction.objects.none()
-
-    # ✅ CORREÇÃO: Override do perform_create para garantir store_id
-    def perform_create(self, serializer):
-        """Garantir que store_id seja sempre definido"""
-        try:
-            store = get_current_store(self.request.user)
-            print(f"🏪 Definindo store_id: {store.id}")
-            
-            # ✅ FORÇAR store_id na criação
-            serializer.save(store=store)
-            
-            print(f"✅ StockTransaction criada para store {store.id}")
-            
-        except Exception as e:
-            print(f"❌ Erro ao criar StockTransaction: {e}")
-            raise
-
-    def apply_fifo_withdrawal(self, inventory_item, quantity_to_withdraw):
-        """✅ FIFO automático com correções"""
-        print(f"🎯 Aplicando FIFO: {quantity_to_withdraw} unidades de {inventory_item.product.name}")
-        
-        # Buscar lotes ordenados por validade (FIFO)
-        available_batches = inventory_item.batches.filter(
-            quantity__gt=0
-        ).order_by('expiration_date', 'id')
-        
-        if not available_batches.exists():
-            raise ValueError("Não há lotes disponíveis")
-        
-        total_available = sum(batch.quantity for batch in available_batches)
-        if total_available < quantity_to_withdraw:
-            raise ValueError(f"Estoque insuficiente. Disponível: {total_available}, Solicitado: {quantity_to_withdraw}")
-        
-        # Aplicar baixas nos lotes (FIFO)
-        remaining_to_withdraw = quantity_to_withdraw
-        batches_used = []
-        
-        for batch in available_batches:
-            if remaining_to_withdraw <= 0:
-                break
-            
-            qty_from_batch = min(remaining_to_withdraw, batch.quantity)
-            
-            print(f"📦 Lote {batch.id} (Val: {batch.expiration_date}): {batch.quantity} → {batch.quantity - qty_from_batch}")
-            
-            # Aplicar baixa
-            batch.quantity -= qty_from_batch
-            batch.save()
-            
-            # ✅ CORREÇÃO: Não deletar lotes zerados (manter histórico)
-            # if batch.quantity == 0:
-            #     batch.delete()
-            
-            batches_used.append({
-                'batch_id': batch.id,
-                'quantity_used': qty_from_batch,
-                'expiration_date': batch.expiration_date
-            })
-            
-            remaining_to_withdraw -= qty_from_batch
-        
-        # Recalcular total do inventário
-        total_real = inventory_item.batches.aggregate(
-            total=Sum('quantity')
-        )['total'] or 0
-        
-        inventory_item.total_quantity = total_real
-        inventory_item.save()
-        
-        print(f"📊 Total atualizado: {inventory_item.total_quantity}")
-        
-        return batches_used
-
-    def create(self, request, *args, **kwargs):
-        """✅ VERSÃO CORRIGIDA: Criar transação com validações robustas"""
-        try:
-            store = get_current_store(request.user)
-            if not store:
-                return Response({'error': 'Loja não encontrada para o usuário'}, status=400)
-            
-            data = request.data.copy()
-            print(f"🔄 Criando transação para store {store.id}: {data}")
-            
-            # ✅ VALIDAÇÕES OBRIGATÓRIAS
-            if not data.get('product') and not data.get('product_id'):
-                return Response({'error': 'Campo product ou product_id é obrigatório'}, status=400)
-            
-            if not data.get('quantity'):
-                return Response({'error': 'Campo quantity é obrigatório'}, status=400)
-            
-            if not data.get('transaction_type'):
-                return Response({'error': 'Campo transaction_type é obrigatório'}, status=400)
-            
-            # ✅ BUSCA MELHORADA DO PRODUTO
-            product_id = data.get('product_id') or data.get('product')
-            barcode = data.get('barcode') or data.get('bar_code')
-            
-            product = None
-            
-            # Buscar produto por ID primeiro
-            if product_id:
-                try:
-                    product = Product.objects.get(id=product_id)
-                    print(f"✅ Produto encontrado por ID: {product.name}")
-                except Product.DoesNotExist:
-                    print(f"❌ Produto com ID {product_id} não encontrado")
-            
-            # Se não encontrou por ID, buscar por código de barras
-            if not product and barcode:
-                try:
-                    product = Product.objects.get(bar_code=barcode)
-                    print(f"✅ Produto encontrado por código: {product.name}")
-                except Product.DoesNotExist:
-                    print(f"❌ Produto com código {barcode} não encontrado")
-            
-            if not product:
-                return Response({'error': 'Produto não encontrado no catálogo'}, status=404)
-            
-            # ✅ BUSCAR ITEM NO INVENTÁRIO
-            try:
-                inventory_item = InventoryItem.objects.get(store=store, product=product)
-                print(f"✅ Item encontrado no inventário: {inventory_item.id}")
-            except InventoryItem.DoesNotExist:
-                return Response({
-                    'error': 'Produto não encontrado no seu estoque',
-                    'message': f'O produto "{product.name}" não está no seu estoque.'
-                }, status=404)
-            
-            quantity = abs(int(data.get('quantity', 0)))
-            if quantity <= 0:
-                return Response({'error': 'Quantidade deve ser maior que zero'}, status=400)
-            
-            transaction_type = data.get('transaction_type', '').upper()
-            unit_price = float(data.get('unit_price', 0))
-            
-            # ✅ VERIFICAR SE É SAÍDA E APLICAR FIFO
-            is_exit = transaction_type in ['VENDA', 'USO_PROPRIO', 'PRESENTE', 'BRINDE', 'PERDA', 'SAIDA']
-            
-            if is_exit:
-                # Verificar estoque suficiente
-                if inventory_item.total_quantity < quantity:
-                    return Response({
-                        'error': 'Estoque insuficiente',
-                        'available': inventory_item.total_quantity,
-                        'requested': quantity
-                    }, status=400)
-                
-                # ✅ APLICAR FIFO COM TRANSAÇÃO ATÔMICA
-                with transaction.atomic():
-                    try:
-                        batches_used = self.apply_fifo_withdrawal(inventory_item, quantity)
-                        
-                        # ✅ CRIAR APENAS UMA TRANSAÇÃO CONSOLIDADA
-                        transaction_obj = StockTransaction.objects.create(
-                            store=store,
-                            product=product,
-                            transaction_type=transaction_type,
-                            quantity=-quantity,  # Negativo para saída
-                            unit_price=unit_price,
-                            unit_cost=inventory_item.cost_price,
-                            description=data.get('description', f"{transaction_type} - {product.name}")
-                        )
-                        
-                        print(f"✅ Transação FIFO criada: {transaction_obj.id}")
-                        
-                        serializer = self.get_serializer(transaction_obj)
-                        return Response({
-                            'message': 'Baixa FIFO aplicada com sucesso',
-                            'transaction': serializer.data,
-                            'batches_used': batches_used,
-                            'new_total_quantity': inventory_item.total_quantity
-                        }, status=201)
-                        
-                    except ValueError as ve:
-                        return Response({'error': str(ve)}, status=400)
-            
-            else:
-                # ✅ ENTRADA NORMAL (sem FIFO)
-                transaction_obj = StockTransaction.objects.create(
-                    store=store,
-                    product=product,
-                    transaction_type=transaction_type,
-                    quantity=quantity,  # Positivo para entrada
-                    unit_price=unit_price,
-                    unit_cost=data.get('unit_cost', 0),
-                    description=data.get('description', f"{transaction_type} - {product.name}")
-                )
-                
-                # ✅ CORREÇÃO: Para entradas, não atualizar inventory_item aqui
-                # O estoque deve ser atualizado via StockEntry ou Batch
-                
-                serializer = self.get_serializer(transaction_obj)
-                return Response(serializer.data, status=201)
-            
-        except Exception as e:
-            print(f"❌ Erro geral ao criar transação: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            return Response({
-                'error': 'Erro interno do servidor',
-                'message': str(e)
-            }, status=500)
-# ==========================================
-# 2. OPERAÇÕES COMPLEXAS (ENTRADA E SAÍDA)
-# ==========================================
-
+# NOTA: aqui existia uma segunda definição (morta) de StockTransactionViewSet
+# ('VERSÃO CORRIGIDA FINAL'). Como Python sobrescreve classes redefinidas, a
+# versão que sempre valeu foi a 'VERSÃO COM FIFO FUNCIONAL' (mais abaixo neste
+# arquivo). A duplicata foi removida para que o router DRF registre a classe
+# certa sem ambiguidade. (Auditoria P2.1)
 
 class StockEntryView(APIView):
     permission_classes = [IsAuthenticated]

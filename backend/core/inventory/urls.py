@@ -109,3 +109,22 @@ urlpatterns = [
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
+
+# ==========================================
+# 📦 ESTOQUE & MOVIMENTAÇÕES (Router DRF)
+# ==========================================
+# CORREÇÃO (Auditoria P0.1): InventoryViewSet, StockTransactionViewSet e
+# StockEntryView sempre existiram em views.py, mas nenhum router os
+# registrava — o frontend chamava /api/inventory/ e /api/transactions/ e
+# recebia 404. Este bloco fecha essa lacuna.
+from rest_framework.routers import DefaultRouter
+from inventory.views import InventoryViewSet, StockTransactionViewSet, StockEntryView
+
+router = DefaultRouter()
+router.register(r'api/inventory', InventoryViewSet, basename='inventory')
+router.register(r'api/transactions', StockTransactionViewSet, basename='transactions')
+
+urlpatterns += router.urls
+urlpatterns += [
+    path('api/stock/entry/', StockEntryView.as_view(), name='stock_entry'),
+]
