@@ -738,6 +738,36 @@ class ConsentRecordSerializer(serializers.Serializer):
         # Extrair purposes
         purpose_flags = validated_data.pop('purposes', [])
         
+        # ⚠️ CORREÇÃO (deduplicação): antes, cada "Aceitar" criava um registro
+        # NOVO sem tocar nos anteriores — usuários acumulavam dezenas de
+        # registros ativos idênticos. Agora, se o consentimento ativo mais
+        # recente do titular (mesma versão do termo) já tem exatamente as
+        # mesmas finalidades, reaproveitamos ele em vez de criar outro.
+        # Se as finalidades mudaram, revogamos os ativos antigos e criamos o
+        # novo — mantendo o histórico de mudanças (exigência de auditoria da
+        # LGPD), mas com no máximo UM registro ativo por titular/versão.
+        from django.utils import timezone as dj_timezone
+        holder_filter = {}
+        if validated_data.get('user'):
+            holder_filter['user'] = validated_data['user']
+        elif validated_data.get('email'):
+            holder_filter['email'] = validated_data['email']
+        elif validated_data.get('session_id'):
+            holder_filter['session_id'] = validated_data['session_id']
+        
+        if holder_filter:
+            previous_active = ConsentRecord.objects.filter(
+                **holder_filter,
+                term_version=validated_data.get('term_version'),
+                revoked_at__isnull=True,
+            )
+            latest = previous_active.order_by('-accepted_at').first()
+            if latest and sorted(latest.purpose_flags or []) == sorted(purpose_flags):
+                # Nada mudou — devolve o registro existente, sem duplicar
+                return latest
+            # Finalidades mudaram: revoga os anteriores (supersede)
+            previous_active.update(revoked_at=dj_timezone.now())
+        
         # ✅ validated_data já tem 'term_version' graças ao source='term_version'
         # Criar registro
         consent = ConsentRecord.objects.create(

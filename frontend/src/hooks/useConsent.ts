@@ -55,6 +55,7 @@ export interface ConsentRecord {
 export interface ConsentContextData {
   consents: ConsentRecord[];
   loading: boolean;
+  initialized: boolean;
   essentialPurposes: string[];
   revocablePurposes: string[];
   recordConsent: (purposes: Purpose[], email?: string, sessionId?: string) => Promise<boolean>;
@@ -90,6 +91,12 @@ export function useConsent(): ConsentContextData {
   // função, então quebra o loop mantendo a mesma proteção contra chamadas
   // concorrentes.
   const loadingRef = useRef(false);
+  // ✅ true somente após a PRIMEIRA busca de consentimentos completar.
+  // Sem isso, quem consome o hook não distingue "ainda não buscou"
+  // (consents=[] e loading=false no estado inicial) de "buscou e não tem
+  // nada" — e era exatamente essa ambiguidade que fazia o modal de
+  // consentimento reabrir indevidamente.
+  const [initialized, setInitialized] = useState(false);
 
   // ✅ Função para carregar consentimentos
   const loadConsents = useCallback(async (forceRefresh = false) => {
@@ -133,6 +140,7 @@ export function useConsent(): ConsentContextData {
     } finally {
       loadingRef.current = false;
       setLoading(false);
+      setInitialized(true);
     }
   }, [user?.id]); // ⚠️ 'loading' removido de propósito — ver comentário acima
 
@@ -275,6 +283,7 @@ export function useConsent(): ConsentContextData {
   return {
     consents,
     loading,
+    initialized,
     essentialPurposes,
     revocablePurposes,
     recordConsent,

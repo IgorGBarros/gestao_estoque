@@ -1,7 +1,23 @@
-// src/hooks/useConsentCheck.ts - VERSÃO FINAL COM CORREÇÃO DE PURPOSE_FLAGS
+// src/hooks/useConsentCheck.ts
+// Reescrito para eliminar a condição de corrida que fazia o modal de
+// consentimento reabrir a cada navegação:
+//
+// ANTES: a checagem rodava UMA vez, dentro de um setTimeout(100), guardada
+// por `if (consentLoading) return`. Só que `loading` começa em `false`
+// (a busca ainda nem tinha começado), então a checagem frequentemente rodava
+// com consents=[] — concluía "não tem consentimento válido" e abria o modal,
+// mesmo com 30+ registros no banco. E como era one-shot (hasCheckedRef),
+// nunca se corrigia quando os dados chegavam.
+//
+// AGORA: a checagem é reativa — só roda depois que a primeira busca de
+// consentimentos COMPLETOU (flag `initialized` do useConsent), e re-executa
+// sempre que a lista muda. Se um consentimento válido aparece, o modal
+// fecha sozinho. Se a pessoa fechar sem aceitar ("Agora não"), guardamos
+// isso por usuário no localStorage e não incomodamos de novo — ela pode
+// gerenciar depois em Configurações.
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./useAuth";
-import { useConsent, LGPD_VERSION, PURPOSES, type Purpose, ESSENTIAL_PURPOSES } from "./useConsent";
+import { useConsent, LGPD_VERSION, type Purpose, ESSENTIAL_PURPOSES } from "./useConsent";
 
 export interface ConsentCheckData {
   showModal: boolean;
@@ -12,175 +28,157 @@ export interface ConsentCheckData {
   hasValidConsent: () => boolean;
 }
 
+const dismissKey = (userId: number | string) => `consent_modal_dismissed_${userId}`;
+
 export function useConsentCheck(): ConsentCheckData {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
-  const { 
-    consents, 
+  const {
+    consents,
     essentialPurposes: contextEssentials,
-    recordConsent, 
+    recordConsent,
     loading: consentLoading,
-    refresh 
+    initialized,
+    refresh,
   } = useConsent();
-  
-  const [showModal, setShowModal] = useState(false);
+
+  const [showModal, setShowModalState] = useState(false);
   const [hasChecked, setHasChecked] = useState(false);
-  
-  const hasCheckedRef = useRef(false);
   const consentRegisteredRef = useRef(false);
-  const profileLoadedRef = useRef(false);
-// src/hooks/useConsentCheck.ts - Correção do parse de purpose_flags
 
-const hasValidConsent = useCallback((): boolean => {
-  if (!isAuthenticated || !user?.id) return false;
-  
-  const essentials = contextEssentials.length > 0 
-    ? contextEssentials 
-    : ESSENTIAL_PURPOSES;
-  
-  // ✅ LOG DE DEBUG
-  if (consents.length > 0 && import.meta.env.DEV) {
-    console.log("🔍 hasValidConsent debug:", {
-      consentsCount: consents.length,
-      firstConsent: {
-        purposes: consents[0].purposes,
-        purposesType: typeof consents[0].purposes,
-        isArray: Array.isArray(consents[0].purposes),
-      },
+  // ✅ Normaliza purposes de um registro (array ou string JSON vinda do backend)
+  const parsePurposes = (raw: unknown): string[] => {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === "string") {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return raw
+          .replace(/[\[\]"]/g, "")
+          .split(",")
+          .map((p) => p.trim())
+          .filter(Boolean);
+      }
+    }
+    return [];
+  };
+
+  const hasValidConsent = useCallback((): boolean => {
+    if (!isAuthenticated || !user?.id) return false;
+    const essentials =
+      contextEssentials.length > 0 ? contextEssentials : [...ESSENTIAL_PURPOSES];
+    return consents.some((c) => {
+      const purposes = parsePurposes(c.purposes);
+      return (
+        c.is_active &&
+        c.version === LGPD_VERSION &&
+        essentials.every((p) => purposes.includes(p))
+      );
     });
-  }
-  
-  const valid = consents.some(c => {
-    // ✅ CORREÇÃO: Parse de purpose_flags com cast para evitar erro TypeScript
-    let purposes: string[] = [];
-    
-    if (Array.isArray(c.purposes)) {
-      // Já é array ✅
-      purposes = c.purposes;
-    } else {
-      // ✅ Cast para any para permitir operação em string
-      const purposesValue = c.purposes as any;
-      
-      if (typeof purposesValue === 'string') {
-        // ✅ Parse da string JSON para array
+  }, [isAuthenticated, user?.id, consents, contextEssentials]);
+
+  // ✅ setShowModal exposto: fechar sem aceitar registra a dispensa por
+  // usuário, para não reabrir a cada navegação nesta e nas próximas sessões.
+  const setShowModal = useCallback(
+    (show: boolean) => {
+      setShowModalState(show);
+      if (!show && user?.id && !consentRegisteredRef.current) {
         try {
-          purposes = JSON.parse(purposesValue);
-        } catch (e) {
-          // Fallback: split simples se não for JSON válido
-          purposes = purposesValue
-            .replace(/[\[\]"]/g, '') // Remove [, ], "
-            .split(',')
-            .map((p: string) => p.trim())
-            .filter((p: string) => p.length > 0);
+          localStorage.setItem(dismissKey(user.id), String(Date.now()));
+        } catch {
+          /* localStorage indisponível: sem persistência, mas sem quebrar */
         }
-      } else {
-        // Fallback para qualquer outro tipo
-        purposes = Array.isArray(purposesValue) ? purposesValue : [];
       }
-    }
-    
-    // ✅ Verificar consentimento válido
-    return c.is_active && 
-           c.version === LGPD_VERSION &&
-           essentials.every(p => purposes.includes(p));
-  });
-  
-  if (import.meta.env.DEV) {
-    console.log("✅ hasValidConsent result:", valid);
-  }
-  
-  return valid;
-}, [isAuthenticated, user?.id, consents, contextEssentials]);
+    },
+    [user?.id]
+  );
 
-  // ✅ Efeito: Verificar consentimento APENAS após profile carregado
+  // ✅ Checagem reativa — roda quando os dados REAIS estão prontos e
+  // re-roda quando eles mudam.
   useEffect(() => {
-    // ✅ Guard 1: Já verificou?
-    if (hasCheckedRef.current) return;
-    
-    // ✅ Guard 2: Auth ainda carregando?
-    if (authLoading) return;
-    
-    // ✅ Guard 3: Usuário não autenticado?
-    if (!isAuthenticated || !user?.id) return;
-    
-    // ✅ Guard 4: Consentimentos ainda carregando?
-    if (consentLoading) return;
-    
-    // ✅ Guard 5: Profile ainda não carregou?
-    if (!profileLoadedRef.current && user?.email) {
-      profileLoadedRef.current = true;
-    }
-    
-    // ✅ Marcar como verificado
-    hasCheckedRef.current = true;
-    setHasChecked(true);
-    
-    // ✅ Verificar UMA ÚNICA VEZ após profile carregado
-    setTimeout(() => {
-      const valid = hasValidConsent();
-      console.log("🔍 LGPD Check (post-profile):", { 
-        valid, 
-        consentsCount: consents.length,
-        profileLoaded: profileLoadedRef.current 
-      });
-      
-      // ✅ Só mostrar modal se NÃO tem consentimento válido
-      if (!valid && !consentRegisteredRef.current) {
-        console.log("🔐 Showing consent modal (post-login trigger)");
-        setShowModal(true);
-      }
-    }, 100);
-    
-    // ✅ Cleanup
-    return () => {
-      if (!isAuthenticated) {
-        setShowModal(false);
-        setHasChecked(false);
-        hasCheckedRef.current = false;
-        consentRegisteredRef.current = false;
-        profileLoadedRef.current = false;
-      }
-    };
-  }, [
-    isAuthenticated, 
-    user?.id, 
-    user?.email,
-    authLoading, 
-    consentLoading
-    // ✅ CRÍTICO: SEM hasValidConsent nas deps para evitar loop!
-  ]);
-// src/hooks/useConsentCheck.ts - handleConsentComplete corrigido
+    if (authLoading || !isAuthenticated || !user?.id) return;
+    if (!initialized || consentLoading) return; // espera a 1ª busca completar
 
-const handleConsentComplete = useCallback(async (purposes: Purpose[]): Promise<boolean> => {
-  console.log("📝 handleConsentComplete started with:", purposes);
-  const purposesToRecord = [...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES])];
-  
-  try {
-    const success = await recordConsent(purposesToRecord);
-    console.log("✅ recordConsent returned:", success);
-    
-    if (success) {
-      consentRegisteredRef.current = true;
-      
-      // ✅ AGUARDAR refresh completar ANTES de fechar modal
-      console.log("🔄 Calling refresh()...");
-      await refresh();
-      console.log("✅ refresh() completed, consents updated");
-      
-      // ✅ Pequeno delay para garantir estado atualizado
-      await new Promise(resolve => setTimeout(resolve, 200));
-      
-      // ✅ Fechar modal APÓS refresh completar
-      setShowModal(false);
-      console.log("✅ Modal closed");
-      return true;
+    const valid = hasValidConsent();
+    setHasChecked(true);
+
+    if (import.meta.env.DEV) {
+      console.log("🔍 LGPD Check (reactive):", {
+        valid,
+        consentsCount: consents.length,
+      });
     }
-    
-    return false;
-  } catch (error) {
-    console.error("❌ handleConsentComplete error:", error);
-    return false;
-  }
-}, [recordConsent, refresh]);
+
+    if (valid) {
+      // Consentimento válido: garante modal fechado
+      setShowModalState(false);
+      return;
+    }
+
+    // Sem consentimento válido: só mostra se a pessoa nunca dispensou
+    let dismissed = false;
+    try {
+      dismissed = Boolean(localStorage.getItem(dismissKey(user.id)));
+    } catch {
+      dismissed = false;
+    }
+
+    if (!dismissed && !consentRegisteredRef.current) {
+      setShowModalState(true);
+    }
+  }, [
+    authLoading,
+    isAuthenticated,
+    user?.id,
+    initialized,
+    consentLoading,
+    consents,
+    hasValidConsent,
+  ]);
+
+  // ✅ Limpa estado ao deslogar
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setShowModalState(false);
+      setHasChecked(false);
+      consentRegisteredRef.current = false;
+    }
+  }, [isAuthenticated]);
+
+  const handleConsentComplete = useCallback(
+    async (purposes: Purpose[]): Promise<boolean> => {
+      // "Agora não" chega aqui como lista vazia: não grava nada,
+      // só fecha (a dispensa é registrada pelo setShowModal(false)).
+      if (!purposes || purposes.length === 0) {
+        setShowModal(false);
+        return true;
+      }
+
+      const purposesToRecord = [
+        ...new Set<Purpose>([...purposes, ...ESSENTIAL_PURPOSES]),
+      ];
+
+      try {
+        const success = await recordConsent(purposesToRecord);
+        if (success) {
+          consentRegisteredRef.current = true;
+          try {
+            if (user?.id) localStorage.removeItem(dismissKey(user.id));
+          } catch {
+            /* noop */
+          }
+          await refresh();
+          setShowModalState(false);
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error("❌ handleConsentComplete error:", error);
+        return false;
+      }
+    },
+    [recordConsent, refresh, setShowModal, user?.id]
+  );
 
   return {
     showModal,

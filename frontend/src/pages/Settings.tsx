@@ -8,6 +8,7 @@ import { inventoryApi, movementsApi, InventoryItem, Movement } from "../lib/api"
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
+import PrivacySettings from "../components/PrivacySettings";
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -295,6 +296,11 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        {/* ══════════════════════════════════════════
+            PRIVACIDADE (LGPD)
+            ══════════════════════════════════════════ */}
+        <PrivacySettings />
 
         {/* ══════════════════════════════════════════
             SALVAR
