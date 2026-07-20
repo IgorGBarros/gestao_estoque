@@ -139,6 +139,8 @@ export const clearAppCache = () => {
   inventoryCache = null;
   movementsCache = null;
   cacheTimestamp = {};
+  // stats dependem de estoque/vendas: invalida junto
+  statsApi.invalidate();
 };
 
 function isCacheValid(type: 'inventory' | 'movements'): boolean {
@@ -792,8 +794,38 @@ export interface DashboardStats {
   monthProfit: number;
 }
 
+// ✅ Cache curto das estatísticas: a home (Index.tsx) remonta a cada
+// navegação de volta e disparava GET /stats/dashboard/ toda vez (~10x por
+// sessão nos logs). Mesmo padrão do profileApi: cache de 30s + deduplicação
+// de requisições em voo. `invalidate()` deve ser chamado após operações que
+// mudam os números (venda, entrada de estoque).
+let statsCache: DashboardStats | null = null;
+let statsCacheAt = 0;
+let statsInFlight: Promise<DashboardStats> | null = null;
+const STATS_CACHE_MS = 30_000;
+
 export const statsApi = {
-  getDashboard: () => apiRequest<DashboardStats>("/stats/dashboard/"),
+  getDashboard: async (forceRefresh = false): Promise<DashboardStats> => {
+    const fresh = statsCache && (Date.now() - statsCacheAt) < STATS_CACHE_MS;
+    if (fresh && !forceRefresh) return statsCache as DashboardStats;
+    if (statsInFlight) return statsInFlight;
+
+    statsInFlight = (async () => {
+      try {
+        const data = await apiRequest<DashboardStats>("/stats/dashboard/");
+        statsCache = data;
+        statsCacheAt = Date.now();
+        return data;
+      } finally {
+        statsInFlight = null;
+      }
+    })();
+    return statsInFlight;
+  },
+  invalidate: () => {
+    statsCache = null;
+    statsCacheAt = 0;
+  },
 };
 
 // ==========================================

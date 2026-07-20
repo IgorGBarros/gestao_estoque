@@ -104,12 +104,15 @@ export default function Auth() {
     try {
       await signInWithGoogle();
       
-      // ✅ Para Google Sign-In, registrar consentimento implícito
-      // O backend já deve ter criado o usuário, então registramos o consentimento
-      await recordConsent(
-        [PURPOSES.ESSENTIAL, PURPOSES.AUTH, PURPOSES.SERVICE],
-        email.toLowerCase() // O email vem do Firebase
-      );
+      // ⚠️ CORREÇÃO: antes, este fluxo fazia POST /consent/ com apenas as
+      // finalidades essenciais em TODO login Google ("consentimento
+      // implícito"). Dois problemas: (1) consentimento implícito não existe
+      // na LGPD — precisa ser manifestação ativa; (2) com a deduplicação por
+      // supersede no backend, esse registro "só essenciais" REVOGAVA o
+      // consentimento completo que o usuário já tinha dado (ai_features,
+      // ai_training etc. sumiam a cada login). Quem coleta consentimento
+      // faltante é o PostAuthConsentModal, que aparece sozinho na primeira
+      // vez — aqui não registramos nada.
       
       navigate("/");
     } catch (err: any) {

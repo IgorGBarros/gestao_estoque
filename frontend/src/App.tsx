@@ -85,7 +85,7 @@ function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
     if (isAuthenticated && !authLoading && !isNeverShowRoute) {
       // ✅ Delay para sistema carregar primeiro
       const timer = setTimeout(() => {
-        console.log("✅ System loaded, consent modal can appear if needed");
+        if (import.meta.env.DEV) console.log("✅ System loaded, consent modal can appear if needed");
         setSystemLoaded(true);
       }, 500); // 500ms delay
       
@@ -104,7 +104,7 @@ function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
   }
   
   // ✅ Sistema carregado: renderizar modal discreto
-  console.log("✅ AuthConsentWrapper: Rendering modal (system loaded)");
+  if (import.meta.env.DEV) console.log("✅ AuthConsentWrapper: Rendering modal (system loaded)");
   return (
     <>
       <PostAuthConsentModal />
