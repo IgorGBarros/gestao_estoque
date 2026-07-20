@@ -56,6 +56,18 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
 }
 
 // ── Auth (endpoints sem /api/ duplicado) ──
+
+// ✅ Aceita tanto array puro quanto resposta paginada do DRF ({count, results}).
+// Protege contra mudanças de configuração de paginação no backend e contra
+// cache que tenha guardado o formato antigo.
+function unwrapList<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === "object" && Array.isArray((data as any).results)) {
+    return (data as any).results as T[];
+  }
+  return [];
+}
+
 export interface AuthUser {
   id: number | string;
   email: string;
@@ -197,7 +209,8 @@ export const inventoryApi = {
       return inventoryCache;
     }
     try {
-      const data = await apiRequest<InventoryItem[]>("/inventory/");
+      const raw = await apiRequest<InventoryItem[]>("/inventory/");
+      const data = unwrapList<InventoryItem>(raw);
       inventoryCache = data;
       cacheTimestamp.inventory = Date.now();
       console.log(`✅ Inventário carregado: ${data.length} itens`);
@@ -347,7 +360,8 @@ export const movementsApi = {
       return movementsCache;
     }
     try {
-      const data = await apiRequest<Movement[]>("/transactions/");
+      const raw = await apiRequest<Movement[]>("/transactions/");
+      const data = unwrapList<Movement>(raw);
       movementsCache = data;
       cacheTimestamp.movements = Date.now();
       console.log(`✅ ${data.length} movimentações carregadas`);
@@ -478,30 +492,58 @@ export interface Profile {
 
 // src/lib/api.ts - profileApi CORRIGIDO
 
+// ✅ Cache curto do perfil: /profile/ era chamado por 4+ pontos independentes
+// (useAuth, usePlan, ProfileCompletionBanner, Index) a cada ciclo de render —
+// visível nos logs como dezenas de GET /profile/ repetidos. Um cache de 30s
+// com deduplicação de requisições em voo elimina o excesso sem mudar nenhum
+// consumidor. profileApi.update invalida o cache.
+let profileCache: Profile | null = null;
+let profileCacheAt = 0;
+let profileInFlight: Promise<Profile | null> | null = null;
+const PROFILE_CACHE_MS = 30_000;
+
 export const profileApi = {
-  get: async (retries = 2) => {
+  get: async (retries = 2): Promise<Profile | null> => {
     const token = getToken();
     if (!token) return null;
-    
-    try {
-      return await apiRequest<Profile>("/profile/");
-    } catch (error: any) {
-      // ✅ Retry simples para timeout ou erro de rede
-      if (retries > 0 && (error.code === 'ECONNABORTED' || error.message?.includes('timeout'))) {
-        console.log(`🔄 Retry profileApi.get() (${retries} restantes)`);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Aguarda 1s
-        return profileApi.get(retries - 1);
+
+    const fresh = profileCache && (Date.now() - profileCacheAt) < PROFILE_CACHE_MS;
+    if (fresh) return profileCache;
+    // Deduplica: se já existe uma busca em andamento, aguarda ela
+    if (profileInFlight) return profileInFlight;
+
+    profileInFlight = (async () => {
+      try {
+        const data = await apiRequest<Profile>("/profile/");
+        profileCache = data;
+        profileCacheAt = Date.now();
+        return data;
+      } catch (error: any) {
+        // ✅ Retry simples para timeout ou erro de rede
+        if (retries > 0 && (error.code === 'ECONNABORTED' || error.message?.includes('timeout'))) {
+          console.log(`🔄 Retry profileApi.get() (${retries} restantes)`);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Aguarda 1s
+          profileInFlight = null;
+          return profileApi.get(retries - 1);
+        }
+        throw error;
+      } finally {
+        profileInFlight = null;
       }
-      throw error;
-    }
+    })();
+    return profileInFlight;
   },
   
-  update: (data: Partial<Profile>) => {
+  update: async (data: Partial<Profile>) => {
     if (isDemoMode()) return Promise.resolve({ ...DEMO_PROFILE, ...data } as Profile);
-    return apiRequest<Profile>("/profile/", { 
+    const result = await apiRequest<Profile>("/profile/", { 
       method: "PATCH", 
       body: JSON.stringify(data) 
     });
+    // Invalida o cache: próxima leitura busca o perfil atualizado
+    profileCache = null;
+    profileCacheAt = 0;
+    return result;
   },
 };
 

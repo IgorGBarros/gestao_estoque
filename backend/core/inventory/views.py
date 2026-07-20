@@ -554,6 +554,11 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['product__category']
+    # ✅ O frontend inteiro espera um ARRAY puro desta rota (data.length,
+    # .map, .filter). A paginação global do DRF (settings) embrulhava em
+    # {count, results} e quebrava a tela de estoque. Estoques de consultora
+    # são pequenos (dezenas de itens), então resposta sem paginação é ok.
+    pagination_class = None
 
     # ✅ GET /api/inventory/by-barcode/<code>/ — o frontend (lib/api.ts) já
     # chamava esta rota, mas ela nunca existiu no backend (Auditoria P0.1).
@@ -2474,6 +2479,8 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['transaction_type']
+    # ✅ Mesmo motivo do InventoryViewSet: o frontend espera array puro.
+    pagination_class = None
     
     def get_queryset(self):
         """Queryset com tratamento de erro robusto"""

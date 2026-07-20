@@ -1,5 +1,5 @@
 // src/hooks/useConsent.ts
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, createElement, createContext, useContext, type ReactNode } from "react";
 import { api } from "../services/api";
 import { useAuth } from "./useAuth";
 import { useToast } from "../components/ui/use-toast";
@@ -68,7 +68,7 @@ export interface ConsentContextData {
 // ==========================================
 // ✅ HOOK PRINCIPAL
 // ==========================================
-export function useConsent(): ConsentContextData {
+function useConsentStandalone(): ConsentContextData {
   const { user } = useAuth();
   const toastHook = useToast();
   
@@ -292,4 +292,30 @@ export function useConsent(): ConsentContextData {
     hasValidConsent,
     refresh,
   };
+}
+
+// ==========================================
+// ✅ CONTEXT PROVIDER (fonte única)
+// ==========================================
+// CORREÇÃO (Auditoria P2.4): antes, cada componente que chamava useConsent()
+// criava um estado independente e disparava seu PRÓPRIO fetch de
+// /consent/my/ — nos logs isso aparecia como dezenas de "Fetching consents"
+// repetidos a cada navegação/re-render. Com o Provider, existe UMA instância:
+// um fetch por sessão (mais os refresh explícitos), compartilhado por todos.
+const ConsentContext = createContext<ConsentContextData | null>(null);
+
+export function ConsentProvider({ children }: { children: ReactNode }) {
+  const value = useConsentStandalone();
+  return <ConsentContext.Provider value={value}>{children}</ConsentContext.Provider>;
+}
+
+export function useConsent(): ConsentContextData {
+  const ctx = useContext(ConsentContext);
+  if (!ctx) {
+    // Regras de hooks impedem um fallback condicional para a versão
+    // standalone (o hook interno seria chamado condicionalmente). Exigir o
+    // Provider é o comportamento correto: App.tsx já envolve a árvore.
+    throw new Error("useConsent deve ser usado dentro de <ConsentProvider> (ver App.tsx).");
+  }
+  return ctx;
 }

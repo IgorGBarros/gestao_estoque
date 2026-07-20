@@ -8,6 +8,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { PlanProvider } from "./hooks/usePlan";
 import { FeatureGatesProvider } from "./hooks/useFeatureGates";
+import { ConsentProvider } from "./hooks/useConsent";
 import { ThemeProvider } from "./hooks/useTheme";
 
 // Components
@@ -126,6 +127,7 @@ const App = () => {
             <CookieConsentBanner />
             
             <AuthProvider>
+             <ConsentProvider>
               {/* ✅ 2. Wrapper que só renderiza modal discreto APÓS auth em rotas protegidas */}
               <AuthConsentWrapper>
                 <PlanProvider>
@@ -263,6 +265,7 @@ const App = () => {
                   </FeatureGatesProvider>
                 </PlanProvider>
               </AuthConsentWrapper>
+             </ConsentProvider>
             </AuthProvider>
           </BrowserRouter>
           
