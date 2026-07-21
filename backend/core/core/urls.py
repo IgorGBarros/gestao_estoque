@@ -108,6 +108,18 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+
+    # ==========================================
+    # ⚠️ INCLUDES DE APPS — NÃO REMOVER
+    # ==========================================
+    # Estas 4 linhas já se perderam VÁRIAS vezes em sobrescritas deste
+    # arquivo. Sem elas: /api/admin/* (painel), /api/payments/* (Asaas) e
+    # /api/chat/* (Amorinha) caem TODOS em 404. Se for editar este arquivo,
+    # mantenha este bloco.
+    path('', include('inventory.urls')),
+    path('api/admin/', include('inventory.admin_urls')),
+    path('api/chat/', include('ai.urls')),
+    path('api/payments/', include('apps.payments.urls')),
 ]
 
 # ==========================================
