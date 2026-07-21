@@ -9,7 +9,7 @@ from rest_framework.response import Response
 
 from .models import (
     Product, Store, InventoryItem, Sale, UserBehaviorLog, 
-    PlanConfig, Promotion, CustomUser, ConsentRecord
+    PlanConfig, Promotion, CustomUser, ConsentRecord, StockTransaction
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -227,13 +227,21 @@ def get_system_stats(request):
     ).aggregate(avg=Avg('_n_items'))['avg'] or 0
     
     # Receita: total e mensal (apenas vendas)
-    total_revenue = Sale.objects.filter(transaction_type='VENDA').aggregate(
-        s=Sum('total_amount')
-    )['s'] or Decimal('0')
-    
-    monthly_revenue = Sale.objects.filter(
+    # ⚠️ CORREÇÃO (tudo zerado no painel): o admin lia de Sale.total_amount,
+    # mas a maioria dos fluxos de venda do sistema grava só em
+    # StockTransaction (VENDA) — Sale quase nunca é populada. Todo o resto
+    # (dashboards, cash-flow, cost analysis) já calcula receita a partir de
+    # StockTransaction. Alinhamos o admin à mesma fonte canônica: receita =
+    # soma de (unit_price * quantidade vendida). Como quantity de VENDA é
+    # negativa (baixa de estoque), usamos o valor absoluto via -quantity.
+    revenue_expr = Sum(F('unit_price') * (F('quantity') * -1))
+    total_revenue = StockTransaction.objects.filter(
+        transaction_type='VENDA'
+    ).aggregate(s=revenue_expr)['s'] or Decimal('0')
+
+    monthly_revenue = StockTransaction.objects.filter(
         transaction_type='VENDA', created_at__gte=month_start
-    ).aggregate(s=Sum('total_amount'))['s'] or Decimal('0')
+    ).aggregate(s=revenue_expr)['s'] or Decimal('0')
     
     # Conversão: lojas que viraram PRO nos últimos 30 dias
     recent_upgrades = Store.objects.filter(
@@ -580,20 +588,22 @@ def monitor_api_usage(request):
     # ─────────────────────────────────────────────────────────────
     
     # Total de "requisições" = ações registradas em UserBehaviorLog + Vendas
+    # ⚠️ Alinhado a StockTransaction (fonte canônica de vendas); Sale quase
+    # nunca é populada, o que deixava estas métricas sempre em zero.
+    sales_qs = StockTransaction.objects.filter(
+        transaction_type='VENDA', created_at__gte=month_ago
+    )
     total_requests_30d = (
         UserBehaviorLog.objects.filter(created_at__gte=month_ago).count() +
-        Sale.objects.filter(created_at__gte=month_ago).count() * 5  # Cada venda = ~5 "requests"
+        sales_qs.count() * 5  # Cada venda = ~5 "requests"
     )
-    
+
     # Taxa de sucesso de webhooks = % de vendas com status válido
-    total_sales = Sale.objects.filter(created_at__gte=month_ago).count()
-    successful_sales = Sale.objects.filter(
-        created_at__gte=month_ago,
-        transaction_type='VENDA'
-    ).count()
-    
+    total_sales = sales_qs.count()
+    successful_sales = total_sales  # toda VENDA registrada é considerada válida
+
     webhook_success_rate = round((successful_sales / total_sales * 100), 1) if total_sales > 0 else 100.0
-    
+
     # Webhooks "configurados" = lojas com vitrine + WhatsApp (prontas para notificações)
     webhooks_data = []
     stores_with_webhook = Store.objects.filter(
@@ -610,8 +620,9 @@ def monitor_api_usage(request):
             'active': True,
             'events': ['product.updated', 'price.changed', 'stock.low'],
             'stats': {
-                'delivered_24h': Sale.objects.filter(
+                'delivered_24h': StockTransaction.objects.filter(
                     store=store,
+                    transaction_type='VENDA',
                     created_at__gte=now - timedelta(days=1)
                 ).count(),
                 'failed_24h': 0,  # Placeholder - implementar retry logic depois
