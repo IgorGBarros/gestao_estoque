@@ -6,7 +6,7 @@ import {
   ArrowDownCircle, Settings, PieChart, Store, History, User, Bell, CheckCircle2
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { profileApi, statsApi } from "../lib/api"; // ✅ Nova importação
+import { statsApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import { ChatAssistant } from "../components/ChatAssistant";
@@ -44,32 +44,30 @@ export default function Index() {
   useEffect(() => {
     if (!user) return;
 
-    // Carrega slug da loja em paralelo com stats
+    // ✅ store_slug já vem no objeto `user` do useAuth (o login espalha o
+    // profile inteiro nele) — não precisa de outra chamada a /profile/.
+    // Era esta busca extra que disparava GET /profile/ toda vez que se
+    // voltava para a home.
+    setStoreSlug((user as any).store_slug ?? null);
+
     const fetchData = async () => {
       try {
-        const [profileRes, statsRes] = await Promise.allSettled([
-          profileApi.get(),
-          statsApi.getDashboard() // ✅ Chama endpoint seguro do backend
-        ]);
-
-        if (profileRes.status === 'fulfilled') {
-          setStoreSlug(profileRes.value.store_slug ?? null);
-        }
-
-        if (statsRes.status === 'fulfilled') {
-          setStats(statsRes.value);
-        } else {
-          console.error("Erro ao carregar estatísticas:", statsRes.reason);
-        }
+        // statsApi.getDashboard() tem cache de 30s + deduplicação — voltar
+        // pra home dentro da janela não gera requisição de rede.
+        const statsRes = await statsApi.getDashboard();
+        setStats(statsRes);
       } catch (err) {
-        console.error("Erro inesperado:", err);
+        console.error("Erro ao carregar estatísticas:", err);
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-  }, [user]);
+    // ✅ Depender de user?.id (primitivo), não do objeto inteiro: o useAuth
+    // recria o objeto em vários momentos e isso re-disparava este efeito.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const fmt = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
 

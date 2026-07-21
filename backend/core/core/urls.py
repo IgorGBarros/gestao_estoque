@@ -116,6 +116,10 @@ urlpatterns = [
     # 📦 INVENTORY (Inclusão do app inventory)
     # ==========================================
     path('', include('inventory.urls')),
+    # ⚠️ NÃO REMOVER: sem este include, TODO o painel admin (/api/admin/*)
+    # cai em 404 — inclusive rotas já corrigidas antes. Esta linha já foi
+    # perdida uma vez num merge/sobrescrita de arquivo.
+    path('api/admin/', include('inventory.admin_urls')),
     
     # ==========================================
     # 🤖 AI & PAYMENTS (Outros apps)

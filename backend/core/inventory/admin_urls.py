@@ -1,23 +1,43 @@
 # backend/core/inventory/admin_urls.py
 """
-Rotas do painel admin (inventory/admin_views.py).
+Rotas do painel admin (inventory/admin_views.py), montadas sob /api/admin/
+pelo core/urls.py.
 
-NOTA: admin_views.py define bem mais funções do que as roteadas aqui
-(list_plan_configs, list_promotions, monitor_api_usage, product analytics
-etc.) — nenhuma delas tinha rota registrada em lugar nenhum do projeto até
-agora. Este arquivo, por ora, só liga os dois endpoints tocados na
-correção de consentimento LGPD (P1: analytics comportamental; P2: resumo
-do dataset de treino de IA). O restante de admin_views.py continua sem
-rota — se for pra usar, precisa ser registrado aqui também.
+CORREÇÃO (Auditoria P0.1, fechamento): antes só 2 dos 11 endpoints tinham
+rota — o AdminPanel chamava /admin/users/, /admin/stats/, /admin/plan-configs/
+etc. e recebia 404. Este arquivo agora cobre TODAS as funções de
+admin_views.py que o frontend consome. Todas exigem IsAdminUser (decorado
+nas próprias views).
 """
 from django.urls import path
 
 from .admin_views import (
+    list_plan_configs,
+    list_promotions,
+    list_users,
+    get_system_stats,
+    get_product_analytics,
     get_store_behavior_analytics,
     get_ai_training_summary,
+    monitor_api_usage,
+    update_plan,
+    update_subscription,
 )
 
 urlpatterns = [
+    # Gestão de usuários
+    path('users/', list_users, name='admin_list_users'),
+    path('users/<int:user_id>/plan/', update_plan, name='admin_update_plan'),
+    path('users/<int:user_id>/subscription/', update_subscription, name='admin_update_subscription'),
+
+    # Visão geral / configuração
+    path('stats/', get_system_stats, name='admin_system_stats'),
+    path('plan-configs/', list_plan_configs, name='admin_plan_configs'),
+    path('promotions/', list_promotions, name='admin_promotions'),
+    path('api-monitor/', monitor_api_usage, name='admin_api_monitor'),
+
+    # Analytics (filtrado por consentimento LGPD — ver admin_views.py)
+    path('analytics/products/', get_product_analytics, name='admin_product_analytics'),
     path('analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
     path('ai-training/summary/', get_ai_training_summary, name='admin_ai_training_summary'),
 ]
