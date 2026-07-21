@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { profileApi, adminApi } from "../lib/api";
+import { useAuth } from "../hooks/useAuth";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { Badge } from "../components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
@@ -19,7 +20,8 @@ import React from "react";
 import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
 import ApiManagementTab from "../components/admin/ApiManagementTab";
 
-const ADMIN_SECRET = "natura2024admin";
+// Acesso ao painel é por email autorizado (is_staff, definido pelo backend
+// via ADMIN_EMAILS). Não há mais senha no frontend.
 
 // ==========================================
 // INTERFACES E TIPOS
@@ -543,10 +545,15 @@ const SkeletonCard = () => (
 export default function AdminPanel() {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth();
 
-  // Estados de autenticação
-  const [authenticated, setAuthenticated] = useState(false);
-  const [secret, setSecret] = useState("");
+  // Acesso ao painel: o usuário precisa ser admin (is_staff). Isso é
+  // controlado no backend pela lista ADMIN_EMAILS — o frontend apenas
+  // reflete. A rota já usa <ProtectedRoute requireAdmin>, então esta é uma
+  // segunda barreira de UX, não a proteção real (que é o IsAdminUser da API).
+  const authenticated = user?.is_staff === true;
+
+  // Estado de senha REMOVIDO (era hardcoded no bundle).
 
   // Estados de dados
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -1004,45 +1011,36 @@ export default function AdminPanel() {
   };
 
   // ==========================================
-  // TELA DE LOGIN
+  // ACESSO NEGADO / CARREGANDO
   // ==========================================
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+        <p className="text-sm text-muted-foreground">Verificando acesso...</p>
+      </div>
+    );
+  }
 
   if (!authenticated) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-4">
-        <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10">
-              <Shield className="h-5 w-5 text-destructive" />
-            </div>
-            <div>
-              <h1 className="font-display text-lg font-bold text-foreground">Admin Panel</h1>
-              <p className="text-xs text-muted-foreground">Sistema de Gestão</p>
+        <div className="w-full max-w-sm rounded-xl border border-border bg-card p-6 space-y-4 text-center">
+          <div className="flex justify-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-destructive/10">
+              <Shield className="h-6 w-6 text-destructive" />
             </div>
           </div>
-          <input
-            type="password"
-            value={secret}
-            onChange={(e) => setSecret(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && secret === ADMIN_SECRET) {
-                setAuthenticated(true);
-              }
-            }}
-            placeholder="Senha de administrador"
-            className="w-full rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-primary"
-          />
+          <h1 className="font-display text-lg font-bold text-foreground">Acesso restrito</h1>
+          <p className="text-sm text-muted-foreground">
+            Esta área é exclusiva para administradores do sistema. Sua conta
+            não tem permissão de acesso.
+          </p>
           <button
-            onClick={() => {
-              if (secret === ADMIN_SECRET) {
-                setAuthenticated(true);
-              } else {
-                toast({ title: "Senha incorreta", variant: "destructive" });
-              }
-            }}
+            onClick={() => navigate("/")}
             className="w-full bg-primary text-white py-2 rounded-lg font-bold hover:bg-primary/90 transition-colors"
           >
-            Acessar Sistema
+            Voltar ao início
           </button>
         </div>
       </div>

@@ -4,6 +4,8 @@ __pycache__/
 .env
 .env.*
 *.key
+firebase_credentials.json
+firebase_minified.txt
 !*.example
 db.sqlite3
 *.pyc

@@ -491,6 +491,20 @@ LGPD_ESSENTIAL_PURPOSES = ["essential", "authentication", "legal_compliance", "s
 LGPD_CONSENT_VERSION = "v1.0_2026-05"
 
 # ==========================================
+# 🔐 ADMINISTRADORES DO SISTEMA (acesso ao painel)
+# ==========================================
+# Lista de emails autorizados a acessar o /admin-panel. Definida por variável
+# de ambiente (separada por vírgula), NUNCA no código. Um signal sincroniza
+# is_staff com esta lista: email na lista → vira admin ao logar; email fora
+# da lista → perde is_staff automaticamente (mesmo se marcado no banco).
+# Ex.: ADMIN_EMAILS="igor@exemplo.com,socia@exemplo.com"
+ADMIN_EMAILS = [
+    e.strip().lower()
+    for e in os.getenv("ADMIN_EMAILS", "").split(",")
+    if e.strip()
+]
+
+# ==========================================
 # 🚀 STARTUP LOGS
 # ==========================================
 
