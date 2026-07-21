@@ -50,9 +50,6 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, Sp
 
 urlpatterns = [
     
-    # Admin Django
-    path('admin/', admin.site.urls),
-    
     # ==========================================
     # 🔐 AUTHENTICATION (Rotas principais)
     # ==========================================
@@ -111,24 +108,47 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
-    
-    # ==========================================
-    # 📦 INVENTORY (Inclusão do app inventory)
-    # ==========================================
-    path('', include('inventory.urls')),
-    # ⚠️ NÃO REMOVER: sem este include, TODO o painel admin (/api/admin/*)
-    # cai em 404 — inclusive rotas já corrigidas antes. Esta linha já foi
-    # perdida uma vez num merge/sobrescrita de arquivo.
-    path('api/admin/', include('inventory.admin_urls')),
-    
-    # ==========================================
-    # 🤖 AI & PAYMENTS (Outros apps)
-    # ==========================================
-    path('api/chat/', include('ai.urls')),
-    path('api/payments/', include('apps.payments.urls')),
-    
-    # ==========================================
-    # 🛍️ API COMERCIAL (v1)
-    # ==========================================
-    path('api/v1/', include('inventory.api_comercial_urls')),
+]
+
+# ==========================================
+# 📦 ESTOQUE & MOVIMENTAÇÕES (Router DRF)
+# ==========================================
+# CORREÇÃO (Auditoria P0.1): InventoryViewSet, StockTransactionViewSet e
+# StockEntryView sempre existiram em views.py, mas nenhum router os
+# registrava — o frontend chamava /api/inventory/ e /api/transactions/ e
+# recebia 404. Este bloco fecha essa lacuna.
+from rest_framework.routers import DefaultRouter
+from inventory.views import InventoryViewSet, StockTransactionViewSet, StockEntryView
+
+router = DefaultRouter()
+router.register(r'api/inventory', InventoryViewSet, basename='inventory')
+router.register(r'api/transactions', StockTransactionViewSet, basename='transactions')
+
+urlpatterns += router.urls
+urlpatterns += [
+    path('api/stock/entry/', StockEntryView.as_view(), name='stock_entry'),
+]
+
+# ==========================================
+# 💳 PLANOS PÚBLICOS (preços reais do PlanConfig)
+# ==========================================
+# Plans.tsx fixava R$ 39,90 / R$ 399,00 no código; agora lê daqui, e o preço
+# vem do mesmo PlanConfig que o admin edita e que o checkout do Asaas usa.
+from inventory.models import PlanConfig as _PlanConfig
+from inventory.serializers import PlanConfigSerializer as _PlanConfigSerializer
+from rest_framework.decorators import api_view as _api_view, permission_classes as _permission_classes
+from rest_framework.permissions import AllowAny as _AllowAny
+from rest_framework.response import Response as _Response
+
+
+@_api_view(['GET'])
+@_permission_classes([_AllowAny])
+def public_plans_view(request):
+    """GET /api/plans/ → planos visíveis com preços reais (público)."""
+    plans = _PlanConfig.objects.filter(is_visible=True).order_by('sort_order')
+    return _Response(_PlanConfigSerializer(plans, many=True).data)
+
+
+urlpatterns += [
+    path('api/plans/', public_plans_view, name='public_plans'),
 ]

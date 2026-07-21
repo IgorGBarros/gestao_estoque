@@ -13,6 +13,7 @@ from django.urls import path
 
 from .admin_views import (
     list_plan_configs,
+    update_plan_config,
     list_promotions,
     list_users,
     get_system_stats,
@@ -33,6 +34,7 @@ urlpatterns = [
     # Visão geral / configuração
     path('stats/', get_system_stats, name='admin_system_stats'),
     path('plan-configs/', list_plan_configs, name='admin_plan_configs'),
+    path('plan-configs/<str:plan_type>/', update_plan_config, name='admin_update_plan_config'),
     path('promotions/', list_promotions, name='admin_promotions'),
     path('api-monitor/', monitor_api_usage, name='admin_api_monitor'),
 

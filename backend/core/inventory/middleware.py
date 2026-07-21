@@ -31,10 +31,17 @@ class ApiKeyMiddleware(MiddlewareMixin):
         r'^/api/vitrine/',
         r'^/api/health/',
         r'^/api/theme/',
-        
+        r'^/api/plans/',        # ✅ preços públicos (PlanConfig)
+
         # Profile (usa JWT, não API Key)
         r'^/api/profile/',
-        
+
+        # Painel admin e pagamentos: autenticam por JWT (IsAdminUser /
+        # IsAuthenticated), não pela API Key comercial. Sem estas linhas o
+        # middleware bloqueava o painel inteiro e o checkout do Asaas.
+        r'^/api/admin/',
+        r'^/api/payments/',
+
         # Feature gates (usa JWT)
         r'^/api/admin/feature-gates/',
     ]

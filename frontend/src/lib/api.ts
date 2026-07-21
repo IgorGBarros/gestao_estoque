@@ -464,6 +464,11 @@ export const adminApi = {
   getBehaviorAnalytics: () => apiRequest<any>("/admin/analytics/behavior/"),
   getMlInsights: () => apiRequest<any>("/admin/analytics/ml-insights/"),
   listPlanConfigs: () => apiRequest<any[]>("/admin/plan-configs/"),
+  updatePlanConfig: (planType: string, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/plan-configs/${planType}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
   listPromotions: () => apiRequest<any[]>("/admin/promotions/"),
   getSystemStats: () => apiRequest<any>("/admin/stats/"),
   getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
@@ -803,6 +808,11 @@ let statsCache: DashboardStats | null = null;
 let statsCacheAt = 0;
 let statsInFlight: Promise<DashboardStats> | null = null;
 const STATS_CACHE_MS = 30_000;
+
+// ✅ Planos públicos (preços reais do PlanConfig, mesma fonte do checkout).
+export const plansApi = {
+  list: () => apiRequest<any[]>("/plans/"),
+};
 
 export const statsApi = {
   getDashboard: async (forceRefresh = false): Promise<DashboardStats> => {

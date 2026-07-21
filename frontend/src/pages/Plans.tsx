@@ -1,5 +1,5 @@
 // pages/Plans.tsx — VERSÃO REFATORADA COM TEMA DINÂMICO
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Crown, Check, X, Sparkles,
@@ -7,14 +7,16 @@ import {
 } from "lucide-react";
 import { usePlan } from "../hooks/usePlan";
 import { useAuth } from "../hooks/useAuth";
+import { plansApi } from "../lib/api";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 
 type BillingCycle = "monthly" | "yearly";
 type PaymentMethod = "stripe" | "link" | "pix" | "whatsapp";
 
-const MONTHLY_PRICE = 39.9;
-const YEARLY_PRICE = 399.0;
-const YEARLY_SAVINGS = (MONTHLY_PRICE * 12 - YEARLY_PRICE).toFixed(2).replace(".", ",");
+// ✅ Fallback caso a API de planos não responda. Os valores REAIS vêm de
+// /api/plans/ (PlanConfig) — mesmos que o admin edita e que o Asaas cobra.
+const DEFAULT_MONTHLY_PRICE = 39.9;
+const DEFAULT_YEARLY_PRICE = 399.0;
 
 const FREE_FEATURES = [
   { text: "Até 50 produtos", included: true },
@@ -52,9 +54,29 @@ export default function Plans() {
   const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [processing, setProcessing] = useState(false);
 
-  const currentPrice = billing === "monthly" ? MONTHLY_PRICE : YEARLY_PRICE;
+  // ✅ Preços dinâmicos do PlanConfig (via /api/plans/). Enquanto carrega,
+  // usa os defaults; se a API responder, substitui pelos valores reais.
+  const [monthlyPrice, setMonthlyPrice] = useState(DEFAULT_MONTHLY_PRICE);
+  const [yearlyPrice, setYearlyPrice] = useState(DEFAULT_YEARLY_PRICE);
+
+  useEffect(() => {
+    plansApi.list()
+      .then((plans) => {
+        const pro = Array.isArray(plans) ? plans.find((p: any) => p.plan_type === "pro") : null;
+        if (pro) {
+          if (typeof pro.monthly_price === "number") setMonthlyPrice(pro.monthly_price);
+          else if (pro.monthly_price) setMonthlyPrice(parseFloat(pro.monthly_price));
+          if (typeof pro.yearly_price === "number") setYearlyPrice(pro.yearly_price);
+          else if (pro.yearly_price) setYearlyPrice(parseFloat(pro.yearly_price));
+        }
+      })
+      .catch(() => { /* mantém defaults */ });
+  }, []);
+
+  const yearlySavings = (monthlyPrice * 12 - yearlyPrice).toFixed(2).replace(".", ",");
+  const currentPrice = billing === "monthly" ? monthlyPrice : yearlyPrice;
   const priceDisplay = currentPrice.toFixed(2).replace(".", ",");
-  const perMonthYearly = (YEARLY_PRICE / 12).toFixed(2).replace(".", ",");
+  const perMonthYearly = (yearlyPrice / 12).toFixed(2).replace(".", ",");
 
   const handlePayment = async (method: PaymentMethod) => {
     setSelectedMethod(method);
@@ -246,7 +268,7 @@ export default function Plans() {
                     <strong className="text-foreground">R$ {priceDisplay}/ano</strong>
                   </p>
                   <p className="text-xs text-brand font-semibold">
-                    Economia de R$ {YEARLY_SAVINGS}
+                    Economia de R$ {yearlySavings}
                   </p>
                 </div>
               )}

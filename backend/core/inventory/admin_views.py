@@ -30,7 +30,12 @@ def safe_div(a, b, default=0.0):
 def list_plan_configs(request):
     """GET /api/admin/plan-configs/ → Lista configurações de planos"""
     configs = PlanConfig.objects.all().order_by('sort_order')
-    return Response([{
+    return Response([_serialize_plan_config(c) for c in configs])
+
+
+def _serialize_plan_config(c):
+    """Forma única de serializar um PlanConfig (usada no list e no update)."""
+    return {
         'plan_type': c.plan_type,
         'display_name': c.display_name,
         'description': c.description,
@@ -45,8 +50,61 @@ def list_plan_configs(request):
         'highlight_color': c.highlight_color,
         'is_popular': c.is_popular,
         'is_visible': c.is_visible,
-        'sort_order': c.sort_order
-    } for c in configs])
+        'sort_order': c.sort_order,
+    }
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAdminUser])
+def update_plan_config(request, plan_type):
+    """
+    PATCH /api/admin/plan-configs/<plan_type>/ → Edita um plano.
+
+    Este é o elo que conecta o painel admin ao resto do sistema: ao mudar
+    aqui monthly_price/yearly_price, o preço passa a valer no checkout do
+    Asaas (asaas_service._get_pro_price), no Plans.tsx e no /profile/
+    (current_limits) — tudo lendo do mesmo PlanConfig. Limites e flags de
+    recurso editados aqui também refletem imediatamente nos feature gates.
+    """
+    config = PlanConfig.objects.filter(plan_type=plan_type).first()
+    if not config:
+        return Response({'error': f"Plano '{plan_type}' não encontrado."}, status=404)
+
+    # Só campos permitidos; ignora o resto do payload por segurança.
+    editable_decimal = {'monthly_price', 'yearly_price'}
+    editable_int = {'max_products', 'sort_order', 'yearly_discount_percent', 'max_storage_mb'}
+    editable_bool = {
+        'can_use_scanner', 'can_use_storefront', 'can_use_alerts',
+        'can_use_ai_assistant', 'can_use_analytics', 'can_export_data',
+        'can_use_api', 'is_popular', 'is_visible',
+    }
+    editable_str = {'display_name', 'description', 'highlight_color'}
+
+    data = request.data or {}
+    errors = {}
+    for field, value in data.items():
+        try:
+            if field in editable_decimal:
+                dec = Decimal(str(value))
+                if dec < 0:
+                    errors[field] = 'não pode ser negativo'
+                    continue
+                setattr(config, field, dec)
+            elif field in editable_int:
+                setattr(config, field, None if value is None else int(value))
+            elif field in editable_bool:
+                setattr(config, field, bool(value))
+            elif field in editable_str:
+                setattr(config, field, str(value))
+            # campos fora da allowlist são silenciosamente ignorados
+        except (ValueError, TypeError, ArithmeticError):
+            errors[field] = 'valor inválido'
+
+    if errors:
+        return Response({'error': 'Campos inválidos', 'details': errors}, status=400)
+
+    config.save()
+    return Response(_serialize_plan_config(config))
 
 
 @api_view(['GET'])

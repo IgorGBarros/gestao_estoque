@@ -145,10 +145,15 @@ class AsaasService:
         """Cria link de pagamento (checkout hospedado pelo Asaas)"""
         self.get_or_create_customer(store)
 
-        value = 39.90 if billing_cycle == 'monthly' else 399.00
+        # ✅ Preço vem do PlanConfig (fonte única de verdade), não mais
+        # hardcoded. O admin altera o preço no painel → reflete aqui, no
+        # Plans.tsx e no /profile/ automaticamente. Fallback para os valores
+        # antigos caso o PlanConfig 'pro' não exista.
+        value = self._get_pro_price(billing_cycle)
 
+        cycle_label = "Mensal" if billing_cycle == "monthly" else "Anual"
         link_data = {
-            'name': f'Minha Amora PRO - {"Mensal" if billing_cycle == "monthly" else "Anual"}',
+            'name': f'Minha Amora PRO - {cycle_label}',
             'description': f'Assinatura PRO para {store.name}',
             'endDate': (timezone.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
             'value': float(value),
@@ -162,6 +167,21 @@ class AsaasService:
         result = self._request('POST', 'paymentLinks', data=link_data)
         logger.info(f"[ASAAS] Payment link: {result.get('url')}")
         return result
+
+    @staticmethod
+    def _get_pro_price(billing_cycle: str = 'monthly') -> float:
+        """Preço do plano PRO a partir do PlanConfig, com fallback seguro."""
+        try:
+            from inventory.models import PlanConfig
+            cfg = PlanConfig.objects.filter(plan_type='pro').first()
+            if cfg:
+                price = cfg.yearly_price if billing_cycle == 'yearly' else cfg.monthly_price
+                if price and float(price) > 0:
+                    return float(price)
+        except Exception as e:
+            logger.warning(f"[ASAAS] Não foi possível ler preço do PlanConfig: {e}")
+        # Fallback: valores históricos
+        return 399.00 if billing_cycle == 'yearly' else 39.90
 
     # ─── WEBHOOK PROCESSING ──────────────────────────────
 
