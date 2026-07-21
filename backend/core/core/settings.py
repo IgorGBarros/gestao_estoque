@@ -130,6 +130,10 @@ INSTALLED_APPS = [
     'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',
+    # ✅ P0.3: BLACKLIST_AFTER_ROTATION=True em SIMPLE_JWT exige esta app,
+    # senão a rotação de refresh tokens não invalida os antigos (um token
+    # vazado continuava válido por 7 dias). Requer `manage.py migrate`.
+    'rest_framework_simplejwt.token_blacklist',
     'django_filters',
     'inventory',
     'ai',
