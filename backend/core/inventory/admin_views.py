@@ -161,7 +161,12 @@ def get_system_stats(request):
     
     # Produtos no catálogo global
     total_products = Product.objects.count()
-    avg_products = Store.objects.aggregate(avg=Avg('items__count'))['items__count__avg'] or 0
+    # ⚠️ CORREÇÃO (FieldError → 500): Avg('items__count') não é um lookup
+    # válido — não existe o campo 'count'. Para a média de itens por loja é
+    # preciso anotar a contagem por loja primeiro e então tirar a média.
+    avg_products = Store.objects.annotate(
+        _n_items=Count('items')
+    ).aggregate(avg=Avg('_n_items'))['avg'] or 0
     
     # Receita: total e mensal (apenas vendas)
     total_revenue = Sale.objects.filter(transaction_type='VENDA').aggregate(
@@ -466,9 +471,15 @@ def monitor_api_usage(request):
     # ─────────────────────────────────────────────────────────────
     
     # Receita MRR: lojas PRO com assinatura ativa
+    # ⚠️ CORREÇÃO (FieldError → 500): subscription_status é uma @property
+    # calculada em Python (não uma coluna), então não pode entrar num
+    # .filter(). Replicamos a mesma regra da property com campos reais:
+    # plano PRO e (sem data de expiração OU expiração ainda no futuro).
     pro_stores_active = Store.objects.filter(
-        plan='pro',
-        subscription_status='active'  # Usa a property do model
+        Q(plan='pro') & (
+            Q(subscription_expires_at__isnull=True) |
+            Q(subscription_expires_at__gt=now)
+        )
     )
     
     # Calcula MRR baseado no preço do plano (ou valor fixo se não tiver configuração)

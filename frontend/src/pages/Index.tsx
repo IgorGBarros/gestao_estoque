@@ -27,7 +27,7 @@ interface Stats {
 export default function Index() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isLocked } = useFeatureGates();
+  const { isLocked, loading: gatesLoading } = useFeatureGates();
   const [stats, setStats] = useState<Stats>({
     investedValue: 0,
     potentialValue: 0,
@@ -170,7 +170,7 @@ export default function Index() {
           <ActionBtn onClick={() => navigate("/withdraw")} icon={ArrowDownCircle} label="Baixa" desc="Registrar saída" />
           <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" />
           <ActionBtn onClick={() => navigate("/history")} icon={History} label="Extrato" desc="Movimentações" />
-          <ActionBtn onClick={() => navigate("/dashboard")} icon={PieChart} label="Dashboard" desc="Gráficos e análises" proBadge={isLocked("dashboard_charts")} />
+          <ActionBtn onClick={() => navigate("/dashboard")} icon={PieChart} label="Dashboard" desc="Gráficos e análises" proBadge={isLocked("dashboard_charts")} proBadgeLoading={gatesLoading} />
           <ActionBtn
             onClick={() => {
               if (isLocked("storefront")) {
@@ -186,11 +186,17 @@ export default function Index() {
             label="Vitrine"
             desc="Sua loja online"
             proBadge={isLocked("storefront")}
+            proBadgeLoading={gatesLoading}
           />
         </div>
 
         <div className="mt-10 text-center text-sm text-muted-foreground bg-brand-soft p-4 rounded-xl border border-brand/10">
-          {!isLocked("chat_assistant") ? (
+          {gatesLoading ? (
+            <div className="flex items-center justify-center gap-2 animate-pulse">
+              <div className="h-6 w-6 rounded-full bg-brand/15" />
+              <span className="h-3 w-48 rounded bg-brand/15" />
+            </div>
+          ) : !isLocked("chat_assistant") ? (
             <div className="flex items-center justify-center gap-2">
               <div className="h-6 w-6 rounded-full overflow-hidden border border-brand/20">
                 <img src={amorinhaAvatar} alt="Amorinha" className="h-full w-full object-cover" />
@@ -205,7 +211,7 @@ export default function Index() {
         </div>
       </main>
 
-      {!isLocked("chat_assistant") && <ChatAssistant />}
+      {!gatesLoading && !isLocked("chat_assistant") && <ChatAssistant />}
       <UpgradeModal
         isOpen={showUpgrade}
         onClose={() => setShowUpgrade(false)}
@@ -224,6 +230,7 @@ function ActionBtn({
   desc,
   primary,
   proBadge,
+  proBadgeLoading,
 }: {
   onClick: () => void;
   icon: typeof Package;
@@ -231,6 +238,7 @@ function ActionBtn({
   desc: string;
   primary?: boolean;
   proBadge?: boolean;
+  proBadgeLoading?: boolean;
 }) {
   return (
     <button
@@ -247,7 +255,11 @@ function ActionBtn({
       <div className="min-w-0">
         <p className={`text-sm font-bold flex items-center gap-1.5 ${primary ? "text-white" : "text-foreground"}`}>
           {label}
-          {proBadge && <ProBadge />}
+          {proBadgeLoading ? (
+            <span className="inline-block h-4 w-8 rounded-full bg-brand/15 animate-pulse" />
+          ) : (
+            proBadge && <ProBadge />
+          )}
         </p>
         <p className={`text-xs truncate mt-0.5 ${primary ? "text-white/80" : "text-muted-foreground"}`}>
           {desc}
