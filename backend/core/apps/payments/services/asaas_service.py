@@ -18,8 +18,14 @@ class AsaasAPIError(Exception):
 
 
 def _get_store_model():
-    """Helper para obter o modelo Store de forma segura, sem importação direta."""
-    return apps.get_model('stores', 'Store')
+    """
+    Helper para obter o modelo Store de forma segura, sem importação direta.
+
+    ⚠️ CORREÇÃO: apontava para o app 'stores', que NÃO EXISTE neste projeto
+    (o model Store fica em `inventory`). Isso levantava LookupError e
+    derrubava o webhook: o cliente pagava e a loja nunca virava PRO.
+    """
+    return apps.get_model('inventory', 'Store')
 
 
 class AsaasService:
@@ -220,18 +226,51 @@ class AsaasService:
 
         return None
 
+    @staticmethod
+    def _days_for_payment(paid_value) -> int:
+        """
+        Quantos dias de PRO liberar, a partir do valor pago.
+
+        Compara o valor com os preços de mensal/anual do PlanConfig e escolhe
+        o ciclo mais próximo. Assim funciona mesmo se o admin mudar o preço.
+        """
+        try:
+            if paid_value is None:
+                return 30
+            value = float(paid_value)
+            monthly = AsaasService._get_pro_price('monthly')
+            yearly = AsaasService._get_pro_price('yearly')
+            if abs(value - yearly) < abs(value - monthly):
+                return 365
+        except (TypeError, ValueError):
+            pass
+        return 30
+
     def _on_payment_received(self, payload: dict) -> dict:
         store = self._find_store_from_payload(payload)
         if not store:
             return {'status': 'error', 'message': 'Store not found'}
 
+        payment = payload.get('payment', {}) or {}
+        # ⚠️ CORREÇÃO: antes liberava sempre 30 dias — quem pagasse o plano
+        # ANUAL recebia só um mês de PRO. Agora o período vem do valor pago.
+        days = self._days_for_payment(payment.get('value'))
+
+        now = timezone.now()
+        # ⚠️ CORREÇÃO: em renovação, estender a partir do vencimento atual
+        # (se ainda válido), senão o cliente que renova antes do fim perde
+        # os dias restantes.
+        current_expiry = store.subscription_expires_at
+        base = current_expiry if (current_expiry and current_expiry > now) else now
+
         store.plan = 'pro'
-        store.subscription_started_at = timezone.now()
-        store.subscription_expires_at = timezone.now() + timedelta(days=30)
+        if not store.subscription_started_at:
+            store.subscription_started_at = now
+        store.subscription_expires_at = base + timedelta(days=days)
         store.save(update_fields=['plan', 'subscription_started_at', 'subscription_expires_at'])
 
-        logger.info(f"[ASAAS WEBHOOK] Store {store.id} → PRO")
-        return {'status': 'success', 'store_id': str(store.id)}
+        logger.info(f"[ASAAS WEBHOOK] Store {store.id} → PRO por {days} dias (até {store.subscription_expires_at})")
+        return {'status': 'success', 'store_id': str(store.id), 'days_granted': days}
 
     def _on_payment_overdue(self, payload: dict) -> dict:
         store = self._find_store_from_payload(payload)

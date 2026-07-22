@@ -21,7 +21,8 @@ def _get_store(request):
 
     # Fallback: busca pelo owner
     try:
-        Store = apps.get_model('stores', 'Store')
+        # ⚠️ CORREÇÃO: era get_model('stores', ...) — app inexistente.
+        Store = apps.get_model('inventory', 'Store')
         return Store.objects.get(owner=request.user)
     except Exception:
         return None
