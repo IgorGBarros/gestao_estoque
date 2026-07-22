@@ -173,6 +173,12 @@ class AsaasService:
             'value': float(value),
             'billingType': 'UNDEFINED',
             'chargeType': 'RECURRENT',
+            # ⚠️ Obrigatório quando o link aceita boleto (billingType
+            # UNDEFINED permite): dias ÚTEIS que o pagador tem para quitar o
+            # boleto depois de gerado. Sem este campo o Asaas recusa a
+            # criação do link com "É necessário informar a quantidade de
+            # dias úteis para vencimento da cobrança."
+            'dueDateLimitDays': 5,
             'subscriptionCycle': 'MONTHLY' if billing_cycle == 'monthly' else 'YEARLY',
             'notificationEnabled': True,
             'externalReference': str(store.id),

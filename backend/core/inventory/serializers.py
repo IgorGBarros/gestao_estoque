@@ -486,9 +486,17 @@ class ProfileSerializer(serializers.ModelSerializer):
         }
     
     def get_active_promotions(self, obj):
-        """Promoções ativas para esta loja"""
-        promotions = obj.get_active_promotions()
-        return PromotionSerializer(promotions, many=True, context={'store': obj}).data
+        """
+        Promoções ativas para esta loja.
+
+        ⚠️ CORREÇÃO (500 no /profile/): Store.get_active_promotions() já
+        devolve dicionários prontos (id/title/message/discount_percent), com
+        o filtro de vigência e público-alvo aplicado. Passá-los de novo pelo
+        PromotionSerializer fazia o DRF chamar `obj.is_valid` num dict →
+        AttributeError → o perfil INTEIRO retornava 500. Só lojas com
+        promoção ativa eram afetadas, por isso o erro parecia aleatório.
+        """
+        return obj.get_active_promotions()
     
     def get_subscription_status(self, obj):
         """Status da assinatura"""
