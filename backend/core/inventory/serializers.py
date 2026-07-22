@@ -443,6 +443,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     display_name = serializers.CharField(source='name', required=False, allow_blank=True)
     whatsapp_number = serializers.CharField(source='whatsapp', required=False, allow_blank=True)
     store_slug = serializers.CharField(source='slug', read_only=True)
+
     
     # ⚠️ CORREÇÃO: o frontend (useAuth.tsx) lê profileData.email e
     # profileData.is_staff diretamente no nível raiz da resposta — mas esses

@@ -148,9 +148,17 @@ class AsaasService:
         return result
 
     def create_payment_link(self, store, billing_cycle: str = 'monthly') -> dict:
-        """Cria link de pagamento (checkout hospedado pelo Asaas)"""
-        self.get_or_create_customer(store)
+        """
+        Cria link de pagamento (checkout hospedado pelo Asaas).
 
+        ⚠️ NÃO criamos "customer" aqui de propósito. Antes havia uma chamada a
+        get_or_create_customer() cujo retorno era DESCARTADO (o link não usa
+        campo `customer`), e que exigia CPF/CNPJ — travando o checkout com
+        "CPF/CNPJ é obrigatório". O Asaas cadastra o pagador na própria página
+        de checkout, onde ele informa o documento. Assim o Minha Amora não
+        precisa coletar nem armazenar CPF (menos dado pessoal sob nossa
+        guarda = menos exposição na LGPD).
+        """
         # ✅ Preço vem do PlanConfig (fonte única de verdade), não mais
         # hardcoded. O admin altera o preço no painel → reflete aqui, no
         # Plans.tsx e no /profile/ automaticamente. Fallback para os valores
@@ -171,6 +179,19 @@ class AsaasService:
         }
 
         result = self._request('POST', 'paymentLinks', data=link_data)
+
+        # Guardamos o ID do link para identificar a loja quando o webhook
+        # chegar: a cobrança gerada traz o campo `paymentLink`. É um segundo
+        # caminho de identificação além do externalReference.
+        link_id = result.get('id')
+        if link_id:
+            try:
+                store.payment_external_id = link_id
+                store.payment_provider = 'asaas'
+                store.save(update_fields=['payment_external_id', 'payment_provider'])
+            except Exception as e:
+                logger.warning(f"[ASAAS] Não foi possível salvar o link na loja: {e}")
+
         logger.info(f"[ASAAS] Payment link: {result.get('url')}")
         return result
 
@@ -206,24 +227,48 @@ class AsaasService:
         return handler(payload)
 
     def _find_store_from_payload(self, payload: dict):
+        """
+        Descobre a loja dona da cobrança, tentando três caminhos.
+
+        Como não criamos "customer" (o pagador é cadastrado pelo Asaas na
+        página de checkout), a identificação principal é o externalReference
+        e o ID do link de pagamento — não o cliente.
+        """
         Store = _get_store_model()
 
-        payment = payload.get('payment', {})
-        external_ref = payment.get('externalReference')
+        payment = payload.get('payment', {}) or {}
 
+        # 1) externalReference: gravamos o ID da loja ao criar o link
+        external_ref = payment.get('externalReference')
         if external_ref:
             try:
                 return Store.objects.get(id=external_ref)
-            except Store.DoesNotExist:
+            except (Store.DoesNotExist, ValueError, TypeError):
                 pass
 
+        # 2) paymentLink: a cobrança traz o link que a originou, e guardamos
+        #    esse ID na loja em create_payment_link()
+        payment_link = payment.get('paymentLink')
+        if payment_link:
+            store = Store.objects.filter(
+                payment_external_id=payment_link, payment_provider='asaas'
+            ).first()
+            if store:
+                return store
+
+        # 3) customer: caminho legado (lojas que já tinham customer salvo)
         customer_id = payment.get('customer')
         if customer_id:
-            try:
-                return Store.objects.get(payment_external_id=customer_id, payment_provider='asaas')
-            except Store.DoesNotExist:
-                pass
+            store = Store.objects.filter(
+                payment_external_id=customer_id, payment_provider='asaas'
+            ).first()
+            if store:
+                return store
 
+        logger.warning(
+            "[ASAAS WEBHOOK] Não foi possível identificar a loja da cobrança "
+            f"(externalReference={external_ref}, paymentLink={payment_link})"
+        )
         return None
 
     @staticmethod
