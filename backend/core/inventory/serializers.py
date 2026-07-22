@@ -503,7 +503,12 @@ class ProfileSerializer(serializers.ModelSerializer):
         return {
             'status': obj.subscription_status,
             'days_until_expiry': obj.days_until_expiry,
-            'is_active': obj.plan == 'pro' and obj.subscription_status == 'active'
+            'is_active': obj.plan == 'pro' and obj.subscription_status == 'active',
+            # ✅ Data de vencimento: `days_until_expiry` é limitado a zero
+            # (max(0, ...)), então sozinho ele não distingue "vence hoje" de
+            # "venceu semana passada". Quem precisa avisar sobre renovação usa
+            # `status` ('expired') e esta data.
+            'expires_at': obj.subscription_expires_at,
         }
     
     def get_stats(self, obj):
