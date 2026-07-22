@@ -2107,13 +2107,17 @@ def profile_view(request):
             )
         
     except Exception as e:
-        # ✅ Log seguro em produção
-        if settings.DEBUG:
-            logger.error(f"❌ Erro no profile_view: {e}", exc_info=True)
-        else:
-            user_id = user.id if user.is_authenticated else 'anon'
-            logger.error(f"❌ Erro no profile_view para user {user_id}")
-        
+        # ✅ Traceback COMPLETO no log do servidor, inclusive em produção.
+        # Antes, com DEBUG=False, só era registrado "Erro no profile_view para
+        # user X" — sem stack trace —, o que tornava impossível diagnosticar
+        # o 500 pelos logs do Render. O traceback fica só no servidor; a
+        # resposta ao cliente continua sem detalhes internos.
+        user_id = user.id if user.is_authenticated else 'anon'
+        logger.error(
+            f"❌ Erro no profile_view para user {user_id}: {type(e).__name__}: {e}",
+            exc_info=True,
+        )
+
         # ✅ Sempre retorna Response DRF, nunca raise
         return Response(
             {

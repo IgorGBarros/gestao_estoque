@@ -500,28 +500,34 @@ class ProfileSerializer(serializers.ModelSerializer):
     def get_stats(self, obj):
         """Estatísticas da loja"""
         items = obj.items.select_related('product').prefetch_related('batches')
-        
+
         total_products = items.count()
+        # ⚠️ Blindagem contra dados legados com NULL: uma única linha com
+        # cost_price/total_quantity/min_quantity nulo levantava TypeError
+        # aqui e derrubava o /profile/ inteiro com 500 (o app não abre).
         total_value = sum(
-            (item.cost_price or 0) * item.total_quantity 
+            (item.cost_price or 0) * (item.total_quantity or 0)
             for item in items
         )
-        
+
         expired_count = 0
         near_expiry_count = 0
         low_stock_count = 0
-        
+        hoje = timezone.now().date()
+
         for item in items:
-            if item.total_quantity <= item.min_quantity:
+            qtd = item.total_quantity or 0
+            minimo = item.min_quantity if item.min_quantity is not None else 0
+            if qtd <= minimo:
                 low_stock_count += 1
-            
+
             for batch in item.batches.all():
                 if batch.expiration_date:
-                    if batch.expiration_date < timezone.now().date():
+                    if batch.expiration_date < hoje:
                         expired_count += 1
-                    elif (batch.expiration_date - timezone.now().date()).days <= 30:
+                    elif (batch.expiration_date - hoje).days <= 30:
                         near_expiry_count += 1
-        
+
         return {
             'total_products': total_products,
             'total_value': total_value,
