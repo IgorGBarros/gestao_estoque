@@ -214,6 +214,12 @@ class AsaasService:
 
     def process_webhook(self, event: str, payload: dict) -> dict:
         handlers = {
+            # ⚠️ PAYMENT_CONFIRMED é essencial: no cartão de crédito o Asaas
+            # só envia PAYMENT_RECEIVED ~32 dias depois (quando o dinheiro é
+            # liberado). Tratando apenas RECEIVED, quem pagasse no cartão
+            # esperaria um mês pelo PRO. CONFIRMED significa "pagamento
+            # efetuado" — é nele que liberamos o acesso.
+            'PAYMENT_CONFIRMED': self._on_payment_received,
             'PAYMENT_RECEIVED': self._on_payment_received,
             'PAYMENT_OVERDUE': self._on_payment_overdue,
             'SUBSCRIPTION_CANCELED': self._on_subscription_canceled,
@@ -224,7 +230,7 @@ class AsaasService:
             return {'status': 'ignored', 'event': event}
 
         logger.info(f"[ASAAS WEBHOOK] Processando: {event}")
-        return handler(payload)
+        return handler(payload, event=event)
 
     def _find_store_from_payload(self, payload: dict):
         """
@@ -291,12 +297,26 @@ class AsaasService:
             pass
         return 30
 
-    def _on_payment_received(self, payload: dict) -> dict:
+    def _on_payment_received(self, payload: dict, event: str = '') -> dict:
         store = self._find_store_from_payload(payload)
         if not store:
             return {'status': 'error', 'message': 'Store not found'}
 
         payment = payload.get('payment', {}) or {}
+
+        # ⚠️ IDEMPOTÊNCIA: o Asaas entrega webhooks "at least once" e a mesma
+        # cobrança gera CONFIRMED e depois RECEIVED. Sem este guarda, a mesma
+        # cobrança somaria 30 dias a cada entrega.
+        payment_id = payment.get('id')
+        if payment_id:
+            from inventory.models import ProcessedPaymentEvent
+            if ProcessedPaymentEvent.objects.filter(payment_id=payment_id).exists():
+                logger.info(f"[ASAAS WEBHOOK] Cobrança {payment_id} já processada — ignorando")
+                return {
+                    'status': 'duplicate',
+                    'payment_id': payment_id,
+                    'store_id': str(store.id),
+                }
         # ⚠️ CORREÇÃO: antes liberava sempre 30 dias — quem pagasse o plano
         # ANUAL recebia só um mês de PRO. Agora o período vem do valor pago.
         days = self._days_for_payment(payment.get('value'))
@@ -314,16 +334,29 @@ class AsaasService:
         store.subscription_expires_at = base + timedelta(days=days)
         store.save(update_fields=['plan', 'subscription_started_at', 'subscription_expires_at'])
 
+        # Marca a cobrança como processada (idempotência)
+        if payment_id:
+            from inventory.models import ProcessedPaymentEvent
+            try:
+                ProcessedPaymentEvent.objects.create(
+                    payment_id=payment_id, store=store,
+                    event=event or '', days_granted=days,
+                )
+            except Exception as e:
+                # Corrida entre duas entregas simultâneas: a constraint UNIQUE
+                # já protege o essencial, então só registramos.
+                logger.warning(f"[ASAAS WEBHOOK] Não registrou idempotência de {payment_id}: {e}")
+
         logger.info(f"[ASAAS WEBHOOK] Store {store.id} → PRO por {days} dias (até {store.subscription_expires_at})")
         return {'status': 'success', 'store_id': str(store.id), 'days_granted': days}
 
-    def _on_payment_overdue(self, payload: dict) -> dict:
+    def _on_payment_overdue(self, payload: dict, event: str = '') -> dict:
         store = self._find_store_from_payload(payload)
         if store:
             logger.warning(f"[ASAAS WEBHOOK] Pagamento atrasado: store {store.id}")
         return {'status': 'warning'}
 
-    def _on_subscription_canceled(self, payload: dict) -> dict:
+    def _on_subscription_canceled(self, payload: dict, event: str = '') -> dict:
         Store = _get_store_model()
 
         subscription = payload.get('subscription', {})

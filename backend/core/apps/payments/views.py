@@ -106,7 +106,7 @@ def asaas_webhook(request):
     if not event:
         return Response({'error': 'Event required'}, status=status.HTTP_400_BAD_REQUEST)
 
-    supported = ['PAYMENT_RECEIVED', 'PAYMENT_OVERDUE', 'SUBSCRIPTION_CANCELED']
+    supported = ['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED', 'PAYMENT_OVERDUE', 'SUBSCRIPTION_CANCELED']
     if event not in supported:
         return Response({'status': 'ignored', 'event': event})
 

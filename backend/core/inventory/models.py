@@ -985,3 +985,38 @@ class ConsentRecord(models.Model):
             term_version=version,
             revoked_at__isnull=True
         ).order_by('-accepted_at').first()
+
+class ProcessedPaymentEvent(models.Model):
+    """
+    Registro de cobranças já processadas pelo webhook de pagamento.
+
+    Existe por dois motivos, ambos documentados pelo Asaas:
+
+    1. Os webhooks são entregues "at least once" — o mesmo evento pode chegar
+       repetido. Sem este controle, cada reentrega somaria mais 30 dias de
+       assinatura à loja.
+    2. Uma mesma cobrança dispara eventos em sequência (cartão:
+       PAYMENT_CONFIRMED e, ~32 dias depois, PAYMENT_RECEIVED). Como tratamos
+       os dois para liberar o PRO na hora do pagamento, precisamos garantir
+       que a MESMA cobrança seja contabilizada uma vez só.
+
+    A chave é o id da cobrança no Asaas (`payment.id`), único por cobrança.
+    """
+    payment_id = models.CharField(
+        max_length=100, unique=True, db_index=True,
+        help_text="ID da cobrança no Asaas (ex.: pay_080225913252)"
+    )
+    store = models.ForeignKey(
+        Store, on_delete=models.CASCADE, related_name='processed_payments'
+    )
+    event = models.CharField(max_length=50, blank=True)
+    days_granted = models.IntegerField(default=0)
+    processed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Cobrança processada"
+        verbose_name_plural = "Cobranças processadas"
+        ordering = ['-processed_at']
+
+    def __str__(self):
+        return f"{self.payment_id} → loja {self.store_id} (+{self.days_granted}d)"
