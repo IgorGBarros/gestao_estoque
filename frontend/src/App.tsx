@@ -13,7 +13,6 @@ import { ThemeProvider } from "./hooks/useTheme";
 
 // Components
 import ProtectedRoute from "./components/ProtectedRoute";
-import { SessionHeader } from "./components/SessionHeader";
 // ✅ ErrorBoundary REMOVIDO
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
@@ -61,9 +60,11 @@ const queryClient = new QueryClient({
 });
 
 // ✅ Layout Wrapper para Rotas Protegidas
+// Nota: o <SessionHeader /> global foi REMOVIDO daqui. A sessão de cadastro
+// pertence ao fluxo do AddProduct (que já tem indicador próprio de "Sessão
+// Ativa" e o resumo ao finalizar), e não ao app inteiro.
 const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
   <div className="min-h-screen bg-background flex flex-col">
-    <SessionHeader />
     <main className="flex-1">{children}</main>
   </div>
 );
