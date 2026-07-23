@@ -31,6 +31,11 @@ ALLOWED_HOSTS = [
     'gestao-estoque-one.vercel.app',
     'gestao-estoque-k5vy.onrender.com',
     'dev-brih.onrender.com',
+    # ⚠️ Domínios de PRODUÇÃO — vieram da main. Sem eles o Django recusa
+    # requisições do site oficial com DisallowedHost. NÃO REMOVER.
+    'minhaamora.com.br',
+    'www.minhaamora.com.br',
+    'api.minhaamora.com.br',
     '.vercel.app', 
     '.onrender.com',  # ✅ Permite todos os subdomínios do Render
     '.herokuapp.com',
@@ -229,53 +234,8 @@ TIME_ZONE = 'America/Sao_Paulo'
 USE_I18N = True
 USE_TZ = True
 
-<<<<<<< HEAD
-ALLOWED_HOSTS = [
-    'localhost', '127.0.0.1', '0.0.0.0',
-    'gestao-estoque-one.vercel.app',
-    'gestao-estoque-k5vy.onrender.com',
-    '.vercel.app', '.herokuapp.com',    
-    'minhaamora.com.br',
-    'www.minhaamora.com.br',
-]
-
-# ✅ CORREÇÃO: Apps completos com JWT
-INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    
-    # ✅ Libs essenciais na ordem correta
-    'corsheaders',
-    'rest_framework',
-    'rest_framework_simplejwt',  # ✅ ADICIONADO
-    'django_filters',
-    
-    # Apps do projeto
-    'inventory',
-    'ai',
-]
-
-# ✅ CORREÇÃO: CORS primeiro no middleware
-MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',  # ✅ PRIMEIRO
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
-]
-
-ROOT_URLCONF = 'core.urls'
-=======
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
->>>>>>> dev
 
 # ✅ Configuração base de templates (funciona em dev e produção)
 TEMPLATES = [
@@ -294,42 +254,6 @@ TEMPLATES = [
     },
 ]
 
-<<<<<<< HEAD
-# ✅ CORS corrigido para Firebase
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://gestao-estoque-one.vercel.app",
-    "https://gestao-estoque-k5vy.onrender.com",
-    "https://minhaamora.com.br",
-    "https://www.minhaamora.com.br",
-]
-
-CORS_ALLOWED_ORIGIN_REGEXES = [
-    r"^https://.*\.vercel\.app$",
-    r"^http://localhost:\d+$",
-    r"^http://127\.0\.0\.1:\d+$",
-]
-
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = False
-
-# ✅ CORREÇÃO CRÍTICA: Configuração para Firebase popup
-SECURE_CROSS_ORIGIN_OPENER_POLICY = None  # ✅ Permite popups do Firebase
-
-CSRF_TRUSTED_ORIGINS = [
-    "https://gestao-estoque-one.vercel.app",
-    "https://gestao-estoque-k5vy.onrender.com",    
-    "https://minhaamora.com.br",
-    "https://www.minhaamora.com.br",
-]
-
-WSGI_APPLICATION = 'core.wsgi.application'
-
-# ✅ JWT Configuration
-=======
 # ✅ Em produção, ativar cache de templates (modificando após definição)
 if not DEBUG:
     for template_config in TEMPLATES:
@@ -357,7 +281,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
->>>>>>> dev
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
