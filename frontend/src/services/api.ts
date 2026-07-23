@@ -1,5 +1,5 @@
 // src/services/api.ts - CONFIGURAÇÃO BASE OTIMIZADA + LGPD FIX
-import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+import axios, { AxiosError, AxiosRequestHeaders, InternalAxiosRequestConfig } from "axios";
 
 // ✅ Base URL com fallback seguro
 const rawBaseUrl = (import.meta as any).env?.VITE_API_BASE_URL || "https://dev-brih.onrender.com";
@@ -20,6 +20,54 @@ export function clearToken() {
   localStorage.removeItem("refresh_token");
   localStorage.removeItem("auth_user");
   delete api.defaults.headers.common["Authorization"];
+}
+
+export function getRefreshToken(): string | null {
+  return localStorage.getItem("refresh_token");
+}
+
+export function setRefreshToken(token: string) {
+  localStorage.setItem("refresh_token", token);
+}
+
+// ⚠️ Renovação automática do token de acesso.
+// O access token dura 60 minutos; o refresh dura 7 dias. Antes, qualquer 401
+// limpava a sessão e mandava a pessoa para /auth — ou seja, depois de 1 hora
+// de uso a consultora era DESLOGADA no meio do trabalho, sem ter pedido.
+// Agora tentamos renovar com o refresh token e repetir a requisição; só
+// deslogamos se a renovação também falhar (refresh expirado ou revogado).
+let refreshEmAndamento: Promise<string | null> | null = null;
+
+async function renovarToken(): Promise<string | null> {
+  // Se já existe uma renovação em curso, todas as requisições que falharam
+  // ao mesmo tempo aguardam a MESMA renovação (evita várias chamadas e o
+  // consumo indevido do refresh token, que é rotacionado a cada uso).
+  if (refreshEmAndamento) return refreshEmAndamento;
+
+  const refresh = getRefreshToken();
+  if (!refresh) return null;
+
+  refreshEmAndamento = (async () => {
+    try {
+      // axios "cru" de propósito: usar a instância `api` dispararia os
+      // interceptors de novo e criaria recursão.
+      const resp = await axios.post(`${finalBaseUrl}/auth/refresh/`, { refresh });
+      const novoAccess = resp.data?.access;
+      if (!novoAccess) return null;
+
+      setToken(novoAccess);
+      // ROTATE_REFRESH_TOKENS=True: o servidor devolve um refresh novo e
+      // invalida o anterior (blacklist). Precisamos guardar o novo.
+      if (resp.data?.refresh) setRefreshToken(resp.data.refresh);
+      return novoAccess;
+    } catch {
+      return null;
+    } finally {
+      refreshEmAndamento = null;
+    }
+  })();
+
+  return refreshEmAndamento;
 }
 
 // 🚀 Instância principal do Axios
@@ -123,12 +171,26 @@ api.interceptors.response.use(
     if (status === 401) {
       const isAuthRoute = url.includes('/auth/');
       const isConsentRoute = url.includes('/consent/');
-      
-      // ✅ NÃO limpar token em rotas de auth ou consentimento (pode ser validação de dados)
+      const original = error.config as (InternalAxiosRequestConfig & { _jaTentouRenovar?: boolean }) | undefined;
+
       if (!isAuthRoute && !isConsentRoute && getToken()) {
-        console.warn("🔒 Sessão expirada ou inválida. Limpando dados locais.");
+        // 1ª tentativa: renovar o token e repetir a requisição original.
+        // A flag evita laço infinito caso o request renovado falhe de novo.
+        if (original && !original._jaTentouRenovar) {
+          original._jaTentouRenovar = true;
+          const novoToken = await renovarToken();
+
+          if (novoToken) {
+            original.headers = original.headers || ({} as AxiosRequestHeaders);
+            (original.headers as any).Authorization = `Bearer ${novoToken}`;
+            return api.request(original);
+          }
+        }
+
+        // Renovação falhou (refresh expirado/revogado): aí sim encerra.
+        console.warn("🔒 Sessão expirada. Faça login novamente.");
         clearToken();
-        
+
         if (!window.location.pathname.includes('/auth')) {
           setTimeout(() => {
             window.location.href = '/auth';

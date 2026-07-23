@@ -172,11 +172,20 @@ function useConsentStandalone(): ConsentContextData {
         accepted_at: new Date().toISOString(),
       });
       
-      // Atualizar estado local
-      setConsents(prev => {
-        const filtered = prev.filter(c => c.id !== data.id);
-        return [data, ...filtered];
-      });
+      // ⚠️ CORREÇÃO DO BUG "salvou mas não salvou":
+      // Antes, a resposta do POST /consent/ era inserida direto na lista de
+      // consentimentos. Mas essa resposta tem OUTRO formato:
+      //   { status, consent_id, version, purposes_granted, can_revoke }
+      // e a lista espera objetos com { id, is_active, purposes }.
+      // Resultado: o objeto entrava sem `is_active` nem `purposes`, então
+      // hasConsent() devolvia FALSE logo após salvar — o banner reaparecia e
+      // o toggle continuava desligado, mesmo com o registro gravado no banco.
+      // Além disso, os registros antigos (que o backend acabou de revogar por
+      // supersede) continuavam na lista como ativos, deixando o estado local
+      // divergente do servidor.
+      //
+      // Agora recarregamos do servidor, que é a fonte de verdade.
+      await loadConsents(true);
       
       // ✅ Mostrar toast apenas se for função
       if (typeof toast === 'function') {
@@ -209,7 +218,7 @@ function useConsentStandalone(): ConsentContextData {
       
       return false;
     }
-  }, [user?.email, toast]);
+  }, [user?.email, toast, loadConsents]);
 
   // ✅ Revogar consentimento para finalidade específica
   const revokeConsent = useCallback(async (purpose: Purpose): Promise<boolean> => {
@@ -228,14 +237,11 @@ function useConsentStandalone(): ConsentContextData {
     try {
       await api.delete(`/consent/revoke/${purpose}/`);
       
-      // Atualizar lista local: marcar como revogado
-      setConsents(prev => 
-        prev.map(c => 
-          c.purposes.includes(purpose) && c.is_active
-            ? { ...c, is_active: false, revoked_at: new Date().toISOString() }
-            : c
-        )
-      );
+      // Recarrega do servidor em vez de deduzir o novo estado localmente.
+      // A revogação no backend pode afetar mais de um registro (supersede),
+      // e adivinhar isso no cliente gera divergência entre o que a tela
+      // mostra e o que está gravado.
+      await loadConsents(true);
       
       if (typeof toast === 'function') {
         toast({
@@ -258,7 +264,7 @@ function useConsentStandalone(): ConsentContextData {
       
       return false;
     }
-  }, [essentialPurposes, toast]);
+  }, [essentialPurposes, toast, loadConsents]);
 
   // ✅ Verificar se usuário tem consentimento ativo para finalidade
   const hasConsent = useCallback((purpose: Purpose): boolean => {
