@@ -29,3 +29,5 @@ dist-ssr
 downloaded_files/
 *.dump
 .env.local
+firebase_minified.txt
+firebase_credentials.json
