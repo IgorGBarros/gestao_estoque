@@ -19,7 +19,7 @@ import {
   Loader2,
   Crown,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { useNavigate } from "react-router-dom";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import MeicashFlow from "./Meicashflow";  
