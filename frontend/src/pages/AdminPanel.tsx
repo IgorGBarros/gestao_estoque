@@ -263,7 +263,7 @@ const PlanConfigModal = ({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Máx. Produtos</label>
               <input
@@ -319,7 +319,7 @@ const PlanConfigModal = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Cor de Destaque</label>
               <input
@@ -1355,7 +1355,7 @@ export default function AdminPanel() {
             </div>
 
             {/* Tabela de Usuários com PAGINAÇÃO */}
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <Table>
                 <TableHeader className="bg-secondary/20">
                   <TableRow>

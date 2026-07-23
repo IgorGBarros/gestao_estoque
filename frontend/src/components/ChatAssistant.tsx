@@ -144,7 +144,7 @@ export const ChatAssistant: React.FC = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed bottom-6 right-6 z-50 flex h-[520px] w-[380px] flex-col overflow-hidden rounded-2xl border border-brand/20 bg-card shadow-2xl"
+            className="fixed bottom-4 right-4 left-4 z-50 flex h-[70vh] max-h-[520px] flex-col overflow-hidden rounded-2xl border border-brand/20 bg-card shadow-2xl sm:left-auto sm:bottom-6 sm:right-6 sm:h-[520px] sm:w-[380px]"
           >
             {/* ── Cabeçalho ── */}
             <div className="flex items-center justify-between bg-gradient-to-r from-brand to-brand-hover px-4 py-3">

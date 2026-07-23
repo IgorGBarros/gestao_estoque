@@ -1355,6 +1355,33 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 
 
+def _require_pro_feature(store, feature_key):
+    """
+    Verifica no BACKEND se a loja tem direito a um recurso pago.
+
+    O bloqueio no frontend é só de interface: qualquer pessoa pode chamar a
+    API direto (curl, DevTools) e obter os dados. Recurso pago precisa ser
+    barrado aqui também.
+
+    Retorna None se pode usar, ou um Response 403 se não pode.
+    """
+    try:
+        permitido = store.can_use_feature.get(feature_key, False)
+    except Exception:
+        permitido = False
+
+    if not permitido:
+        return Response(
+            {
+                'error': 'Recurso exclusivo do plano PRO',
+                'code': 'PRO_REQUIRED',
+                'feature': feature_key,
+            },
+            status=403,
+        )
+    return None
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_overview(request):
@@ -1363,6 +1390,11 @@ def dashboard_overview(request):
         store = ensure_user_has_store(request.user)
         if not store:
             return Response({'error': 'Loja não encontrada'}, status=400)
+
+        # 🔒 Recurso pago: valida o plano no servidor, não só na interface.
+        bloqueio = _require_pro_feature(store, 'analytics')
+        if bloqueio:
+            return bloqueio
 
         # ✅ PERÍODO CONFIGURÁVEL COM VALIDAÇÃO
         period = request.GET.get('period', '30d')
@@ -3203,7 +3235,12 @@ def cash_flow_detailed(request):
     """Fluxo de caixa detalhado com todas as transações"""
     try:
         store = ensure_user_has_store(request.user)
-        
+
+        # 🔒 Recurso pago: valida o plano no servidor, não só na interface.
+        bloqueio = _require_pro_feature(store, 'analytics')
+        if bloqueio:
+            return bloqueio
+
         # Filtros
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')

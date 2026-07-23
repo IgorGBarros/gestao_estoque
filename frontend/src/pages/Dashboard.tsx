@@ -17,8 +17,11 @@ import {
   Activity,
   Zap,
   Loader2,
+  Crown,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { useNavigate } from "react-router-dom";
+import { useFeatureGates } from "../hooks/useFeatureGates";
 import {
   BarChart,
   Bar,
@@ -190,6 +193,13 @@ interface CashFlowData {
 // COMPONENTE PRINCIPAL
 // ══════════════════════════════════════════
 export default function Dashboard() {
+  const navigate = useNavigate();
+  // ⚠️ Esta página é um recurso PRO, mas não tinha NENHUMA verificação de
+  // plano: bastava digitar /dashboard na URL para uma conta free ver todos
+  // os gráficos. O selo "PRO" no Index era só decorativo.
+  const { isLocked, loading: gatesLoading } = useFeatureGates();
+  const bloqueado = !gatesLoading && isLocked("dashboard_charts");
+
   const [data, setData] = useState<DashboardData | null>(null);
   const [cashFlowData, setCashFlowData] = useState<CashFlowData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -197,9 +207,11 @@ export default function Dashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState<"7d" | "30d" | "90d" | "180d">("30d");
 
   useEffect(() => {
+    // Não busca dados se o plano não dá direito ao recurso.
+    if (gatesLoading || bloqueado) return;
     loadDashboardData();
     loadCashFlowData();
-  }, [selectedPeriod]);
+  }, [selectedPeriod, gatesLoading, bloqueado]);
 
   const loadDashboardData = async () => {
     try {
@@ -225,6 +237,45 @@ export default function Dashboard() {
       console.error("❌ Erro ao carregar fluxo de caixa:", err);
     }
   };
+
+  // ── Verificando plano ──
+  if (gatesLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-brand" />
+      </div>
+    );
+  }
+
+  // ── Recurso exclusivo do PRO ──
+  if (bloqueado) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-12 text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10">
+          <Crown className="h-7 w-7 text-brand" />
+        </div>
+        <h1 className="font-display text-lg font-bold text-foreground">
+          Dashboard é um recurso PRO
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Acompanhe lucro real, fluxo de caixa e os gráficos de vendas
+          assinando o plano PRO.
+        </p>
+        <button
+          onClick={() => navigate("/plans")}
+          className="mt-6 w-full rounded-xl bg-brand py-3 text-sm font-bold text-white hover:opacity-90 transition-opacity"
+        >
+          Ver planos
+        </button>
+        <button
+          onClick={() => navigate("/")}
+          className="mt-3 w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Voltar ao início
+        </button>
+      </div>
+    );
+  }
 
   // ── Loading State ──
   if (loading) {

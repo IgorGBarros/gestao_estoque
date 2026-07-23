@@ -461,7 +461,7 @@ export default function WithdrawProduct() {
 
                 <div>
                   <label className="text-sm font-medium text-foreground">Classificação da Transação</label>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
+                  <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {SALE_TYPES.slice(0, 3).map((t) => (
                       <button
                         key={t.value}

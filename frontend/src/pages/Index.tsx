@@ -170,7 +170,23 @@ export default function Index() {
           <ActionBtn onClick={() => navigate("/withdraw")} icon={ArrowDownCircle} label="Baixa" desc="Registrar saída" />
           <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" />
           <ActionBtn onClick={() => navigate("/history")} icon={History} label="Extrato" desc="Movimentações" />
-          <ActionBtn onClick={() => navigate("/dashboard")} icon={PieChart} label="Dashboard" desc="Gráficos e análises" proBadge={isLocked("dashboard_charts")} proBadgeLoading={gatesLoading} />
+          <ActionBtn
+            onClick={() => {
+              // Bloqueado: oferece o upgrade em vez de levar a uma tela que
+              // vai negar o acesso.
+              if (isLocked("dashboard_charts")) {
+                setUpgradeCtx({ feature: "Dashboard", description: "Veja lucro real, fluxo de caixa e gráficos das suas vendas." });
+                setShowUpgrade(true);
+              } else {
+                navigate("/dashboard");
+              }
+            }}
+            icon={PieChart}
+            label="Dashboard"
+            desc="Gráficos e análises"
+            proBadge={isLocked("dashboard_charts")}
+            proBadgeLoading={gatesLoading}
+          />
           <ActionBtn
             onClick={() => {
               if (isLocked("storefront")) {

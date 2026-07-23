@@ -124,7 +124,7 @@ export default function CRM() {
 
       <main className="mx-auto max-w-6xl space-y-4 px-4 py-6">
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <StatCard icon={Users} label="Total" value={leads.length} />
           <StatCard icon={CheckCircle2} label="Opt-in WhatsApp" value={optInCount} />
           <StatCard icon={XCircle} label="Anonimizados" value={leads.filter((l) => l.anonymized_at).length} />
@@ -182,8 +182,8 @@ export default function CRM() {
             Nenhum lead encontrado.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-border bg-card">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-xl border border-border bg-card">
+            <table className="w-full min-w-[520px] text-sm">
               <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 text-left">Nome</th>

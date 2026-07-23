@@ -154,7 +154,7 @@ export default function Settings() {
           <h2 className="font-display text-sm font-semibold text-foreground flex items-center gap-2">
             <Sun className="h-4 w-4 text-brand" /> Aparência
           </h2>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {themeOptions.map((opt) => (
               <button
                 key={opt.value}

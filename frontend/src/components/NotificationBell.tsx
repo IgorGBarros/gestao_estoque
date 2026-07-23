@@ -51,9 +51,13 @@ export default function NotificationBell() {
 
   if (totalCount === 0) {
     return (
-      <button className="relative rounded-lg p-2 text-muted-foreground hover:bg-brand-soft hover:text-brand transition-colors">
+      <div
+        className="relative rounded-lg p-2 text-muted-foreground/60"
+        title="Nenhuma notificação no momento"
+        aria-label="Nenhuma notificação"
+      >
         <Bell className="h-5 w-5" />
-      </button>
+      </div>
     );
   }
 
@@ -89,7 +93,7 @@ export default function NotificationBell() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-12 z-50 w-[340px] rounded-xl border border-brand/15 bg-card shadow-xl"
+            className="absolute right-0 top-12 z-50 w-[calc(100vw-2rem)] max-w-[340px] rounded-xl border border-brand/15 bg-card shadow-xl"
           >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-brand-peach/30 px-4 py-3">

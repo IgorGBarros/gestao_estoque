@@ -338,7 +338,7 @@ export default function Profile() {
 
           {!isPro && (
             <button
-              onClick={() => navigate("/admin-panel")}
+              onClick={() => navigate("/plans")}
               className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90"
             >
               <Crown className="h-4 w-4" /> Fazer Upgrade para PRO
