@@ -22,7 +22,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { useNavigate } from "react-router-dom";
 import { useFeatureGates } from "../hooks/useFeatureGates";
-import MeiCashFlow from "../components/Meicashflow";
+import MeiCashFlow from "../components/Meicashflow"; 
 import {
   BarChart,
   Bar,
