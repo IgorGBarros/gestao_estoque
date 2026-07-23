@@ -49,6 +49,7 @@ from .serializers import (
 
 from .scraper import search_google_shopping
 from .consent_utils import has_consent_for_purpose as _has_consent_for_purpose
+from decimal import Decimal  # usado no fluxo de caixa MEI
 
 User = get_user_model()
 # ============================================================================
@@ -3616,3 +3617,203 @@ def export_my_data(request):
         "transactions": StockTransactionSerializer(transactions, many=True).data,
         "note": "Dados exportados conforme Art. 18, V da LGPD"
     })
+
+# ==========================================
+# 💰 FLUXO DE CAIXA SIMPLIFICADO (MEI)
+# ==========================================
+# Princípio de design: "se não é produto cadastrado, não gera movimento
+# financeiro". A consultora nunca lança despesa manualmente — o caixa é um
+# subproduto automático da gestão de estoque. Isso elimina o erro de
+# "esqueci de lançar" e mantém a adoção alta.
+#
+# Entradas  = vendas          (quantidade × preço de venda)
+# Saídas    = compras de estoque (quantidade × custo)
+# Sobra     = entradas − saídas
+#
+# ⚠️ Os números são estimativas de gestão baseadas no que foi registrado no
+# sistema. Não substituem contabilidade: vendas feitas fora do app, taxas de
+# maquininha e outras despesas não aparecem aqui.
+
+# Teto de receita bruta anual do MEI. Em vigor desde 2018, mantido em 2026.
+# Se a lei mudar, basta atualizar esta constante.
+MEI_LIMITE_ANUAL = Decimal('81000.00')
+# Acima de 20% de excesso o desenquadramento é retroativo ao início do ano.
+MEI_TOLERANCIA_20 = MEI_LIMITE_ANUAL * Decimal('1.20')
+
+
+def _receita_periodo(store, inicio=None, fim=None):
+    """Receita bruta (vendas) no período. Quantidade de VENDA é negativa."""
+    qs = StockTransaction.objects.filter(store=store, transaction_type='VENDA')
+    if inicio:
+        qs = qs.filter(created_at__gte=inicio)
+    if fim:
+        qs = qs.filter(created_at__lt=fim)
+    total = qs.aggregate(
+        s=Sum(F('unit_price') * (F('quantity') * -1))
+    )['s']
+    return Decimal(total or 0)
+
+
+def _compras_periodo(store, inicio=None, fim=None):
+    """Saída de caixa: compras de estoque (ENTRADA), quantidade positiva."""
+    qs = StockTransaction.objects.filter(store=store, transaction_type='ENTRADA')
+    if inicio:
+        qs = qs.filter(created_at__gte=inicio)
+    if fim:
+        qs = qs.filter(created_at__lt=fim)
+    total = qs.aggregate(s=Sum(F('unit_cost') * F('quantity')))['s']
+    return Decimal(total or 0)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def mei_summary(request):
+    """
+    GET /api/mei/summary/ → Fluxo de caixa simplificado + controle do teto MEI.
+
+    Parâmetro opcional `year` (padrão: ano corrente).
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    agora = timezone.localtime()
+    try:
+        ano = int(request.GET.get('year', agora.year))
+    except (TypeError, ValueError):
+        ano = agora.year
+
+    # ── Mês corrente ──
+    inicio_mes = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    entradas_mes = _receita_periodo(store, inicio_mes)
+    saidas_mes = _compras_periodo(store, inicio_mes)
+
+    # ── Ano ──
+    inicio_ano = agora.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    if ano != agora.year:
+        inicio_ano = inicio_ano.replace(year=ano)
+    fim_ano = inicio_ano.replace(year=ano + 1)
+
+    receita_ano = _receita_periodo(store, inicio_ano, fim_ano)
+    compras_ano = _compras_periodo(store, inicio_ano, fim_ano)
+
+    # ── Detalhamento mês a mês (base do Relatório Mensal de Receitas) ──
+    meses = []
+    for m in range(1, 13):
+        ini = inicio_ano.replace(month=m)
+        fim = ini.replace(year=ano + 1, month=1) if m == 12 else ini.replace(month=m + 1)
+        if ini > agora:
+            break
+        meses.append({
+            'mes': m,
+            'entradas': float(_receita_periodo(store, ini, fim)),
+            'saidas': float(_compras_periodo(store, ini, fim)),
+        })
+
+    # ── Situação frente ao teto ──
+    percentual = float(receita_ano / MEI_LIMITE_ANUAL * 100) if MEI_LIMITE_ANUAL else 0.0
+    if receita_ano > MEI_TOLERANCIA_20:
+        situacao = 'excedido_grave'
+    elif receita_ano > MEI_LIMITE_ANUAL:
+        situacao = 'excedido'
+    elif percentual >= 80:
+        situacao = 'atencao'
+    else:
+        situacao = 'ok'
+
+    return Response({
+        'ano': ano,
+        'mes_atual': {
+            'entradas': float(entradas_mes),
+            'saidas': float(saidas_mes),
+            'sobra': float(entradas_mes - saidas_mes),
+        },
+        'ano_atual': {
+            'receita_bruta': float(receita_ano),
+            'compras': float(compras_ano),
+            'sobra': float(receita_ano - compras_ano),
+        },
+        'mei': {
+            'limite': float(MEI_LIMITE_ANUAL),
+            'percentual_usado': round(percentual, 1),
+            'restante': float(max(MEI_LIMITE_ANUAL - receita_ano, Decimal('0'))),
+            'situacao': situacao,
+        },
+        'meses': meses,
+        'aviso': (
+            'Valores calculados a partir das movimentações registradas no '
+            'sistema. São estimativas de gestão e não substituem orientação '
+            'contábil.'
+        ),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def mei_report_csv(request):
+    """
+    GET /api/mei/report/?year=2026 → Relatório para o contador (CSV).
+
+    Formato CSV de propósito: abre no Excel e no Google Sheets, é aceito por
+    qualquer contador e não depende de biblioteca de PDF no servidor.
+    """
+    import csv
+    from django.http import HttpResponse
+
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    agora = timezone.localtime()
+    try:
+        ano = int(request.GET.get('year', agora.year))
+    except (TypeError, ValueError):
+        ano = agora.year
+
+    inicio_ano = agora.replace(year=ano, month=1, day=1, hour=0, minute=0,
+                               second=0, microsecond=0)
+    fim_ano = inicio_ano.replace(year=ano + 1)
+
+    receita_ano = _receita_periodo(store, inicio_ano, fim_ano)
+    compras_ano = _compras_periodo(store, inicio_ano, fim_ano)
+
+    resp = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    resp['Content-Disposition'] = f'attachment; filename="relatorio-mei-{ano}.csv"'
+    w = csv.writer(resp, delimiter=';')  # ; abre direto no Excel em pt-BR
+
+    nome = getattr(store, 'name', '') or ''
+    email = getattr(getattr(store, 'owner', None), 'email', '') or ''
+
+    w.writerow([f'Relatório de Receitas — {ano}'])
+    w.writerow(['Consultora', nome])
+    w.writerow(['E-mail', email])
+    w.writerow(['Gerado em', agora.strftime('%d/%m/%Y %H:%M')])
+    w.writerow([])
+    w.writerow(['RECEITA BRUTA ANUAL (valor da DASN-SIMEI)',
+                f'{receita_ano:.2f}'.replace('.', ',')])
+    w.writerow(['Compras de estoque no ano', f'{compras_ano:.2f}'.replace('.', ',')])
+    w.writerow(['Sobra (receita - compras)',
+                f'{(receita_ano - compras_ano):.2f}'.replace('.', ',')])
+    w.writerow([])
+    w.writerow(['Mês', 'Entradas (vendas)', 'Saídas (compras de estoque)', 'Sobra'])
+
+    nomes_meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+    for m in range(1, 13):
+        ini = inicio_ano.replace(month=m)
+        fim = fim_ano if m == 12 else inicio_ano.replace(month=m + 1)
+        ent = _receita_periodo(store, ini, fim)
+        sai = _compras_periodo(store, ini, fim)
+        w.writerow([
+            nomes_meses[m - 1],
+            f'{ent:.2f}'.replace('.', ','),
+            f'{sai:.2f}'.replace('.', ','),
+            f'{(ent - sai):.2f}'.replace('.', ','),
+        ])
+
+    w.writerow([])
+    w.writerow(['Observação: este relatório reflete apenas movimentações de '
+                'produtos cadastrados no sistema. Vendas fora do aplicativo, '
+                'taxas e outras despesas não estão incluídas.'])
+    w.writerow(['Não substitui orientação contábil.'])
+    return resp

@@ -814,6 +814,45 @@ export const plansApi = {
   list: () => apiRequest<any[]>("/plans/"),
 };
 
+// ── Fluxo de caixa simplificado (MEI) ──
+export interface MeiSummary {
+  ano: number;
+  mes_atual: { entradas: number; saidas: number; sobra: number };
+  ano_atual: { receita_bruta: number; compras: number; sobra: number };
+  mei: {
+    limite: number;
+    percentual_usado: number;
+    restante: number;
+    situacao: "ok" | "atencao" | "excedido" | "excedido_grave";
+  };
+  meses: { mes: number; entradas: number; saidas: number }[];
+  aviso: string;
+}
+
+export const meiApi = {
+  getSummary: (year?: number) =>
+    apiRequest<MeiSummary>(`/mei/summary/${year ? `?year=${year}` : ""}`),
+
+  /**
+   * Baixa o relatório CSV para o contador.
+   * Precisa passar pelo axios (e não por um <a href>) porque o endpoint exige
+   * o token JWT — um link simples não envia o cabeçalho Authorization.
+   */
+  downloadReport: async (year?: number) => {
+    const resp = await api.get(`/mei/report/${year ? `?year=${year}` : ""}`, {
+      responseType: "blob",
+    });
+    const url = window.URL.createObjectURL(new Blob([resp.data]));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio-mei-${year || new Date().getFullYear()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+};
+
 export const statsApi = {
   getDashboard: async (forceRefresh = false): Promise<DashboardStats> => {
     const fresh = statsCache && (Date.now() - statsCacheAt) < STATS_CACHE_MS;

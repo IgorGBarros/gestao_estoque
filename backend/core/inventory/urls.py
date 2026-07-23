@@ -13,6 +13,8 @@ from inventory.views import (
     FirebaseLoginView,
   
     profile_view,
+    mei_summary,
+    mei_report_csv,
 )
 
 # Views de consentimento LGPD
@@ -73,6 +75,9 @@ urlpatterns = [
     path('api/dashboard/financial/', dashboard_financial_summary, name='dashboard_financial'),
     path('api/dashboard/inventory/', dashboard_inventory_analysis, name='dashboard_inventory'),
     path('api/cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
+    # 💰 Fluxo de caixa simplificado (MEI)
+    path('api/mei/summary/', mei_summary, name='mei_summary'),
+    path('api/mei/report/', mei_report_csv, name='mei_report'),
     path('api/cash-flow/detailed/', cash_flow_detailed, name='cash_flow_detailed'),
     
     # ==========================================
