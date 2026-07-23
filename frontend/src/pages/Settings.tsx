@@ -7,7 +7,8 @@ import {
 import { inventoryApi, movementsApi, InventoryItem, Movement } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
+import PrivacySettings from "../components/PrivacySettings";
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -153,7 +154,7 @@ export default function Settings() {
           <h2 className="font-display text-sm font-semibold text-foreground flex items-center gap-2">
             <Sun className="h-4 w-4 text-brand" /> Aparência
           </h2>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {themeOptions.map((opt) => (
               <button
                 key={opt.value}
@@ -295,6 +296,11 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        {/* ══════════════════════════════════════════
+            PRIVACIDADE (LGPD)
+            ══════════════════════════════════════════ */}
+        <PrivacySettings />
 
         {/* ══════════════════════════════════════════
             SALVAR

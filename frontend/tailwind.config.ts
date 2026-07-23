@@ -32,6 +32,11 @@ export default {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
         },
+        api: {
+          primary: '#871745',    // Cor da marca
+          success: '#2E8B57',     // Verde para sucesso
+          warning: '#F59E0B',     // Âmbar para alertas
+        },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",

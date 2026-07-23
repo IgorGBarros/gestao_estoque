@@ -1,79 +1,73 @@
-// lib/api.ts - VERSÃO FINAL CORRIGIDA
+// src/lib/api.ts - VERSÃO FINAL CONSOLIDADA
 import {
   isDemoMode, DEMO_INVENTORY, DEMO_MOVEMENTS,
   DEMO_PROFILE, DEMO_BATCHES
 } from "./demoData";
-import { api } from "../services/api";
+// ✅ Importar instância Axios E helpers de token da configuração global
+import { api, getToken, setToken, clearToken } from "../services/api";
 
 // ✅ CORREÇÃO: Base URL limpa (services/api.ts já adiciona /api/)
-const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || "https://gestao-estoque-k5vy.onrender.com")
+const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || "https://dev-brih.onrender.com")
   .replace(/\/$/, "");
-    
-function getToken(): string | null {
-  return localStorage.getItem("auth_token");
-}
 
-export function setToken(token: string) {
-  localStorage.setItem("auth_token", token);
-}
+// ✅ REMOVIDO: getToken, setToken, clearToken duplicados
+// Agora importados de "@/services/api" para consistência
 
-export function clearToken() {
-  localStorage.removeItem("auth_token");
-}
-
-// ✅ CORREÇÃO: Função apiRequest SEM duplicar /api/
+// ✅ CORREÇÃO: Função apiRequest usando Axios (consistente com services/api.ts)
 async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getToken();
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  };
+  // ✅ CORREÇÃO: Não duplicar /api/ - services/api.ts já adiciona
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  
-  // ✅ CORREÇÃO: Usar API_BASE_URL + /api/ + endpoint (sem duplicação)
-  const fullUrl = `${API_BASE_URL}/api${endpoint}`;
-  console.log(`🔄 API Request: ${options.method || 'GET'} ${fullUrl}`);
+  console.log(`🔄 API Request: ${options.method || 'GET'} ${cleanEndpoint}`);
   
   try {
-    const response = await fetch(fullUrl, { ...options, headers });
+    // ✅ Usa instância Axios configurada (com interceptors, timeout, etc.)
+    const response = await api({
+      url: cleanEndpoint,
+      method: options.method || 'GET',
+      data: options.body ? JSON.parse(options.body as string) : undefined,
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers as Record<string, string>),
+      },
+    });
     
-    console.log(`📊 Response Status: ${response.status} for ${endpoint}`);
+    console.log(`📊 Response Status: ${response.status} for ${cleanEndpoint}`);
     
-    if (response.status === 401) {
-      console.log("🔐 Token expirado, redirecionando para login");
-      clearToken();
-      clearAppCache();
-      window.location.href = "/auth";
-      throw new Error("Sessão expirada");
-    }
-    
-    if (!response.ok) {
-      let errorMessage = `Erro ${response.status}`;
-      try {
-        const body = await response.json();
-        errorMessage = body.detail || body.error || errorMessage;
-      } catch {
-        errorMessage = `${errorMessage}: ${response.statusText}`;
-      }
-      
-      console.error(`❌ API Error ${response.status}:`, errorMessage);
-      throw new Error(errorMessage);
-    }
-    
+    // ✅ Tratamento de 401: deixar services/api.ts gerenciar (já tem lógica mais robusta)
     if (response.status === 204) return null as T;
     
-    const data = await response.json();
-    console.log(`✅ API Success: ${endpoint}`, data);
-    return data;
+    console.log(`✅ API Success: ${cleanEndpoint}`, response.data);
+    return response.data as T;
     
-  } catch (error) {
-    console.error(`❌ API Request Failed: ${endpoint}`, error);
+  } catch (error: any) {
+    console.error(`❌ API Request Failed: ${endpoint}`, {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data
+    });
+    
+    // ✅ Propaga erro formatado para o caller
+    if (error.response?.data?.error || error.response?.data?.detail) {
+      throw new Error(error.response.data.error || error.response.data.detail);
+    }
     throw error;
   }
 }
 
 // ── Auth (endpoints sem /api/ duplicado) ──
+
+// ✅ Aceita tanto array puro quanto resposta paginada do DRF ({count, results}).
+// Protege contra mudanças de configuração de paginação no backend e contra
+// cache que tenha guardado o formato antigo.
+function unwrapList<T>(data: unknown): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === "object" && Array.isArray((data as any).results)) {
+    return (data as any).results as T[];
+  }
+  return [];
+}
+
 export interface AuthUser {
   id: number | string;
   email: string;
@@ -87,7 +81,7 @@ export const authApi = {
       body: JSON.stringify({ email, password }),
     }),
   register: (email: string, password: string, name: string) =>
-    apiRequest<{ token: string; user: AuthUser }>("/auth/register/", {
+    apiRequest<{ access: string; refresh: string; user?: AuthUser }>("/auth/register/", {
       method: "POST",
       body: JSON.stringify({ email, password, name }),
     }),
@@ -125,9 +119,7 @@ export interface LookupResult {
 export const productLookupApi = {
   lookup: (barcodeOrName: string | null) => {
     const query = barcodeOrName ?? "";
-    return apiRequest<LookupResult>(
-      `/products/lookup/?q=${encodeURIComponent(query)}`
-    );
+    return apiRequest<LookupResult>(`/products/lookup/?q=${encodeURIComponent(query)}`);
   },
   confirmMatch: (barcode: string, productId: number) =>
     apiRequest<GlobalProduct>("/products/confirm-match/", {
@@ -147,28 +139,26 @@ export const clearAppCache = () => {
   inventoryCache = null;
   movementsCache = null;
   cacheTimestamp = {};
+  // stats dependem de estoque/vendas: invalida junto
+  statsApi.invalidate();
 };
 
 function isCacheValid(type: 'inventory' | 'movements'): boolean {
   const timestamp = cacheTimestamp[type];
   if (!timestamp) return false;
-  
   const isValid = Date.now() - timestamp < CACHE_DURATION;
-  if (!isValid) {
-    console.log(`⏰ Cache ${type} expirado`);
-  }
+  if (!isValid) console.log(`⏰ Cache ${type} expirado`);
   return isValid;
 }
 
-// ── Inventory (endpoints corrigidos) ──
+// ── Inventory ──
 export interface InventoryItem {
-  product_id: string | number | undefined;
+  product_id?: string | number;
   id: string;
   total_quantity?: number;
   min_quantity?: number;
   cost_price: number;
   sale_price: number | null;
-  
   product?: {
     id: number | string;
     name: string;
@@ -179,7 +169,6 @@ export interface InventoryItem {
     official_price: number;
     brand?: string;
   };
-  
   batches?: InventoryBatch[];
   quantity?: number;
   barcode?: string;
@@ -213,88 +202,62 @@ export const stockApi = {
 export const inventoryApi = {
   list: async (forceRefresh = false) => {
     console.log(`📦 Carregando inventário (forceRefresh: ${forceRefresh})`);
-    
     if (isDemoMode()) {
-      console.log("🎭 Modo demo ativo - retornando dados mock");
+      console.log("🎭 Modo demo ativo");
       return DEMO_INVENTORY;
     }
-    
-    // ✅ Usar cache se válido e não forçar refresh
     if (!forceRefresh && isCacheValid('inventory') && inventoryCache) {
       console.log("⚡ Usando cache do inventário");
       return inventoryCache;
     }
-    
     try {
-      const data = await apiRequest<InventoryItem[]>("/inventory/");
-      
-      // ✅ Atualizar cache
+      const raw = await apiRequest<InventoryItem[]>("/inventory/");
+      const data = unwrapList<InventoryItem>(raw);
       inventoryCache = data;
       cacheTimestamp.inventory = Date.now();
-      
       console.log(`✅ Inventário carregado: ${data.length} itens`);
       return data;
     } catch (error) {
       console.error("❌ Erro ao carregar inventário:", error);
-      
-      // ✅ Fallback para cache se houver erro
-      if (inventoryCache) {
+      if (inventoryCache && (error as any).response?.status !== 401) {
         console.log("🔄 Usando cache como fallback");
         return inventoryCache;
       }
-      
       throw error;
     }
   },
 
-  // ✅ CORREÇÃO: Busca por código de barras melhorada
   getByBarcode: async (barcode: string): Promise<InventoryItem | null> => {
     console.log(`🔍 Buscando produto por código: ${barcode}`);
-    
     if (isDemoMode()) {
       const found = DEMO_INVENTORY.find(item => 
-        item.product?.bar_code === barcode || 
-        item.barcode === barcode
+        item.product?.bar_code === barcode || item.barcode === barcode
       );
-      console.log(found ? "✅ Produto encontrado no demo" : "❌ Produto não encontrado no demo");
       return found || null;
     }
-    
     try {
-      // ✅ CORREÇÃO: Endpoint correto para busca por código
       const data = await apiRequest<InventoryItem>(`/inventory/by-barcode/${encodeURIComponent(barcode)}/`);
       console.log("✅ Produto encontrado:", data);
       return data;
     } catch (error: any) {
       console.error(`❌ Erro ao buscar produto ${barcode}:`, error);
-      
-      // ✅ Se erro 404, retornar null em vez de lançar erro
-      if (error.message?.includes('404') || error.message?.includes('Não encontrado')) {
+      if (error.response?.status === 404 || error.message?.includes('404')) {
         console.log("📝 Produto não encontrado no estoque (404)");
         return null;
       }
-      
       throw error;
     }
   },
 
   update: async (id: string, data: Partial<InventoryItem>) => {
     console.log(`📝 Atualizando item ${id}:`, data);
-    
-    if (isDemoMode()) {
-      console.log("🎭 Modo demo - simulando atualização");
-      return { ...DEMO_INVENTORY[0], ...data };
-    }
-    
+    if (isDemoMode()) return { ...DEMO_INVENTORY[0], ...data };
     try {
       const result = await apiRequest<InventoryItem>(`/inventory/${id}/`, {
         method: "PATCH",
         body: JSON.stringify(data),
       });
-      
-      // ✅ Limpar cache após atualização
       clearAppCache();
-      
       console.log("✅ Item atualizado:", result);
       return result;
     } catch (error) {
@@ -305,20 +268,10 @@ export const inventoryApi = {
 
   delete: async (id: string) => {
     console.log(`🗑️ Removendo item ${id}`);
-    
-    if (isDemoMode()) {
-      console.log("🎭 Modo demo - simulando remoção");
-      return;
-    }
-    
+    if (isDemoMode()) return;
     try {
-      await apiRequest<void>(`/inventory/${id}/`, {
-        method: "DELETE",
-      });
-      
-      // ✅ Limpar cache após remoção
+      await apiRequest<void>(`/inventory/${id}/`, { method: "DELETE" });
       clearAppCache();
-      
       console.log("✅ Item removido");
     } catch (error) {
       console.error(`❌ Erro ao remover item ${id}:`, error);
@@ -327,7 +280,7 @@ export const inventoryApi = {
   },
 };
 
-// ✅ API FIFO para baixas automáticas
+// ✅ API FIFO
 export const fifoApi = {
   applyWithdrawal: async (data: {
     product_id: string;
@@ -339,27 +292,18 @@ export const fifoApi = {
   }) => {
     try {
       console.log('🎯 Aplicando baixa FIFO:', data);
-      
       const response = await apiRequest<{
         message: string;
         product_name: string;
         quantity_withdrawn: number;
         new_total_quantity: number;
-        batches_used: Array<{
-          batch_id: number;
-          quantity_used: number;
-          expiration_date: string;
-        }>;
+        batches_used: Array<{ batch_id: number; quantity_used: number; expiration_date: string }>;
       }>('/fifo-withdrawal/', {
         method: 'POST',
         body: JSON.stringify(data)
       });
-      
       console.log('✅ FIFO aplicado com sucesso:', response);
-      
-      // ✅ Limpar cache após baixa
       clearAppCache();
-      
       return response;
     } catch (error) {
       console.error('❌ Erro ao aplicar FIFO:', error);
@@ -370,34 +314,32 @@ export const fifoApi = {
 
 // ── Batches ──
 export interface InventoryBatch {
-  expiry_date(expiry_date: any): import("react").ReactNode;
-  id: string; // ✅ CORREÇÃO: Mudar de number para string
+  id: string;
+  batch_code: string;
   quantity: number;
   cost_price: number;
   expiration_date: string | null;
   created_at: string;
   updated_at?: string;
 }
+
 export const batchApi = {
   listByItem: async (inventoryItemId: string): Promise<InventoryBatch[]> => {
     console.log(`📦 Carregando lotes para item ${inventoryItemId}`);
-    
-
-    
+    if (isDemoMode()) return DEMO_BATCHES[inventoryItemId] || [];
     try {
       const data = await apiRequest<InventoryBatch[]>(`/inventory/${inventoryItemId}/batches/`);
       console.log(`✅ ${data.length} lotes carregados`);
       return data;
     } catch (error) {
       console.error(`❌ Erro ao carregar lotes:`, error);
-      return []; // ✅ Fallback para array vazio
+      return [];
     }
   },
 };
 
 // ── Movements ──
 export interface Movement {
-  movement_type: string;
   id: string;
   product_name: string;
   transaction_type: string;
@@ -406,6 +348,7 @@ export interface Movement {
   created_at: string;
   description?: string;
   notes?: string;
+  movement_type?: string;
 }
 
 export type TransactionType = "venda" | "presente" | "brinde" | "perda" | "uso_proprio";
@@ -413,56 +356,37 @@ export type TransactionType = "venda" | "presente" | "brinde" | "perda" | "uso_p
 export const movementsApi = {
   list: async (forceRefresh = false) => {
     console.log(`📊 Carregando movimentações (forceRefresh: ${forceRefresh})`);
-    
-    if (isDemoMode()) {
-      return DEMO_MOVEMENTS;
-    }
-    
-    // ✅ Usar cache se válido
+    if (isDemoMode()) return DEMO_MOVEMENTS;
     if (!forceRefresh && isCacheValid('movements') && movementsCache) {
       console.log("⚡ Usando cache das movimentações");
       return movementsCache;
     }
-    
     try {
-      const data = await apiRequest<Movement[]>("/transactions/");
-      
-      // ✅ Atualizar cache
+      const raw = await apiRequest<Movement[]>("/transactions/");
+      const data = unwrapList<Movement>(raw);
       movementsCache = data;
       cacheTimestamp.movements = Date.now();
-      
       console.log(`✅ ${data.length} movimentações carregadas`);
       return data;
     } catch (error) {
       console.error("❌ Erro ao carregar movimentações:", error);
-      
-      // ✅ Fallback para cache
-      if (movementsCache) {
+      if (movementsCache && (error as any).response?.status !== 401) {
         console.log("🔄 Usando cache como fallback");
         return movementsCache;
       }
-      
       throw error;
     }
   },
 
   create: async (data: any) => {
     console.log("📝 Criando movimentação:", data);
-    
-    if (isDemoMode()) {
-      console.log("🎭 Modo demo - simulando criação");
-      return { ...data, id: Date.now().toString() };
-    }
-    
+    if (isDemoMode()) return { ...data, id: Date.now().toString() };
     try {
       const result = await apiRequest<Movement>("/transactions/", {
         method: "POST",
         body: JSON.stringify(data),
       });
-      
-      // ✅ Limpar cache após criação
       clearAppCache();
-      
       console.log("✅ Movimentação criada:", result);
       return result;
     } catch (error) {
@@ -472,43 +396,89 @@ export const movementsApi = {
   },
 };
 
-// ── Admin ──
-export const adminApi = {
-  // ✅ Existentes (sem alteração)
-  listUsers: () => apiRequest<any[]>("/admin/users/"),
+// ── Payments ──
+export interface CheckoutResponse {
+  checkout_url: string;
+  payment_link_id: string;
+  billing_cycle: string;
+  status: string;
+}
+export interface SubscriptionStatus {
+  plan: string;
+  is_active: boolean;
+  payment_provider: string | null;
+  subscription_started_at: string | null;
+  subscription_expires_at: string | null;
+  days_remaining: number;
+}
+export interface AsaasConfig {
+  environment: string;
+  base_url: string;
+  has_api_key: boolean;
+  has_webhook_token: boolean;
+  webhook_url: string;
+}
+export interface AsaasConnectionTest {
+  status: "connected" | "error";
+  balance?: number;
+  environment?: string;
+  message?: string;
+}
 
+export const paymentsApi = {
+  createCheckout: (billingCycle: "monthly" | "yearly") =>
+    apiRequest<CheckoutResponse>("/payments/asaas/checkout/", {
+      method: "POST",
+      body: JSON.stringify({ billing_cycle: billingCycle }),
+    }),
+  getSubscriptionStatus: () =>
+    apiRequest<SubscriptionStatus>("/payments/asaas/status/"),
+  cancelSubscription: () =>
+    apiRequest<{ status: string; message: string }>("/payments/asaas/cancel/", {
+      method: "POST",
+    }),
+};
+
+export const adminPaymentsApi = {
+  getAsaasConfig: () =>
+    apiRequest<AsaasConfig>("/admin/payments/asaas/config/"),
+  testAsaasConnection: () =>
+    apiRequest<AsaasConnectionTest>("/admin/payments/asaas/test/", {
+      method: "POST",
+    }),
+};
+
+export const adminApi = {
+  listUsers: () => apiRequest<any[]>("/admin/users/"),
   updatePlan: (id: string | number, plan: "free" | "pro") =>
     apiRequest<{ message: string; plan: string }>(`/admin/users/${id}/plan/`, {
       method: "PATCH",
       body: JSON.stringify({ plan }),
     }),
-
   updateSubscription: (id: string | number, data: any) =>
     apiRequest<{ message: string }>(`/admin/users/${id}/subscription/`, {
       method: "PATCH",
       body: JSON.stringify(data),
     }),
-
-  // ✅ NOVOS — Dados reais do backend (sem mock)
-  getProductAnalytics: () =>
-    apiRequest<any>("/admin/analytics/products/"),
-
-  getBehaviorAnalytics: () =>
-    apiRequest<any>("/admin/analytics/behavior/"),
-
-  getMlInsights: () =>
-    apiRequest<any>("/admin/analytics/ml-insights/"),
-
-  // ✅ NOVOS — Planos, Promoções, Stats (dados reais)
-  listPlanConfigs: () =>
-    apiRequest<any[]>("/admin/plan-configs/"),
-
-  listPromotions: () =>
-    apiRequest<any[]>("/admin/promotions/"),
-
-  getSystemStats: () =>
-    apiRequest<any>("/admin/stats/"),
+  getProductAnalytics: () => apiRequest<any>("/admin/analytics/products/"),
+  getBehaviorAnalytics: () => apiRequest<any>("/admin/analytics/behavior/"),
+  getMlInsights: () => apiRequest<any>("/admin/analytics/ml-insights/"),
+  listPlanConfigs: () => apiRequest<any[]>("/admin/plan-configs/"),
+  updatePlanConfig: (planType: string, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/plan-configs/${planType}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  listPromotions: () => apiRequest<any[]>("/admin/promotions/"),
+  getSystemStats: () => apiRequest<any>("/admin/stats/"),
+  getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
+  getAsaasConfig: () => apiRequest<AsaasConfig>("/payments/asaas/config/"),
+  testAsaasConnection: () =>
+    apiRequest<AsaasConnectionTest>("/payments/asaas/test/", {
+      method: "POST",
+    }),
 };
+
 // ── Profile ──
 export interface Profile {
   id: string;
@@ -517,16 +487,74 @@ export interface Profile {
   storefront_enabled: boolean;
   store_slug: string | null;
   plan: "free" | "pro";
+  user?: { id: number; email: string; name?: string };
+  stats?: {
+    total_products: number;
+    total_value: number;
+    expired_products: number;
+    near_expiry_products: number;
+    low_stock_products: number;
+  };
 }
 
+// src/lib/api.ts - profileApi CORRIGIDO
+
+// ✅ Cache curto do perfil: /profile/ era chamado por 4+ pontos independentes
+// (useAuth, usePlan, ProfileCompletionBanner, Index) a cada ciclo de render —
+// visível nos logs como dezenas de GET /profile/ repetidos. Um cache de 30s
+// com deduplicação de requisições em voo elimina o excesso sem mudar nenhum
+// consumidor. profileApi.update invalida o cache.
+let profileCache: Profile | null = null;
+let profileCacheAt = 0;
+let profileInFlight: Promise<Profile | null> | null = null;
+const PROFILE_CACHE_MS = 30_000;
+
 export const profileApi = {
-  get: () => (isDemoMode() ? Promise.resolve(DEMO_PROFILE) : apiRequest<Profile>("/profile/")),
-  update: (data: Partial<Profile>) => (isDemoMode() ? Promise.resolve({ ...DEMO_PROFILE, ...data } as Profile) : apiRequest<Profile>("/profile/", { method: "PATCH", body: JSON.stringify(data) })),
+  get: async (retries = 2): Promise<Profile | null> => {
+    const token = getToken();
+    if (!token) return null;
+
+    const fresh = profileCache && (Date.now() - profileCacheAt) < PROFILE_CACHE_MS;
+    if (fresh) return profileCache;
+    // Deduplica: se já existe uma busca em andamento, aguarda ela
+    if (profileInFlight) return profileInFlight;
+
+    profileInFlight = (async () => {
+      try {
+        const data = await apiRequest<Profile>("/profile/");
+        profileCache = data;
+        profileCacheAt = Date.now();
+        return data;
+      } catch (error: any) {
+        // ✅ Retry simples para timeout ou erro de rede
+        if (retries > 0 && (error.code === 'ECONNABORTED' || error.message?.includes('timeout'))) {
+          console.log(`🔄 Retry profileApi.get() (${retries} restantes)`);
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Aguarda 1s
+          profileInFlight = null;
+          return profileApi.get(retries - 1);
+        }
+        throw error;
+      } finally {
+        profileInFlight = null;
+      }
+    })();
+    return profileInFlight;
+  },
+  
+  update: async (data: Partial<Profile>) => {
+    if (isDemoMode()) return Promise.resolve({ ...DEMO_PROFILE, ...data } as Profile);
+    const result = await apiRequest<Profile>("/profile/", { 
+      method: "PATCH", 
+      body: JSON.stringify(data) 
+    });
+    // Invalida o cache: próxima leitura busca o perfil atualizado
+    profileCache = null;
+    profileCacheAt = 0;
+    return result;
+  },
 };
 
-
-
-// ── Storefront (public) - URLs completas mantidas ──
+// ── Storefront ──
 export interface StorefrontItem {
   id: string;
   product_name?: string;
@@ -543,7 +571,6 @@ export interface StorefrontItem {
   user_id?: string;
   image_url?: string | null;
   store_slug?: string | null;
-  
   product?: {
     id: number | string;
     name: string;
@@ -554,7 +581,6 @@ export interface StorefrontItem {
     image_url?: string;
     official_price?: number;
   };
-  
   stock_info?: {
     quantity: number;
     is_urgent: boolean;
@@ -562,73 +588,29 @@ export interface StorefrontItem {
   };
 }
 
-// ✅ API pública mantém URL completa (endpoints públicos)
 export const publicStorefrontApi = {
   listBySlug: async (slug: string) => {
     try {
       console.log(`🔍 Buscando vitrine por slug: ${slug}`);
-      
-      // ✅ URL completa para endpoint público (sem mudanças)
-      const response = await fetch(`${API_BASE_URL}/api/public/storefront/${slug}/`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      const response = await api.get(`/public/storefront/${slug}/`, {
+        headers: { 'Content-Type': 'application/json' }
       });
-      
-      console.log(`📊 Status da resposta: ${response.status}`);
-      
-      if (!response.ok) {
-        let errorMessage = `Erro ${response.status}: ${response.statusText}`;
-        
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch (parseError) {
-          console.warn('Não foi possível fazer parse do erro:', parseError);
-        }
-        
-        console.error(`❌ Erro ${response.status}:`, errorMessage);
-        throw new Error(errorMessage);
-      }
-      
-      const data = await response.json();
-      console.log('✅ Dados recebidos:', data);
-      return data;
+      console.log('✅ Dados recebidos:', response.data);
+      return response.data;
     } catch (error) {
       console.error('❌ Erro na API publicStorefront:', error);
       throw error;
     }
   },
-  
   listById: async (sellerId: string) => {
     try {
       console.log(`🔍 Buscando vitrine por ID: ${sellerId}`);
-      
-      // ✅ URL completa para endpoint público (sem mudanças)
-      const response = await fetch(`${API_BASE_URL}/api/public/storefront/?seller=${sellerId}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json'
-        }
+      const response = await api.get('/public/storefront/', {
+        params: { seller: sellerId },
+        headers: { 'Content-Type': 'application/json' }
       });
-      
-      if (!response.ok) {
-        let errorMessage = `Erro ${response.status}: ${response.statusText}`;
-        
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.message || errorMessage;
-        } catch (parseError) {
-          console.warn('Não foi possível fazer parse do erro:', parseError);
-        }
-        
-        throw new Error(errorMessage);
-      }
-      
-      const data = await response.json();
-      console.log('✅ Dados recebidos:', data);
-      return data;
+      console.log('✅ Dados recebidos:', response.data);
+      return response.data;
     } catch (error) {
       console.error('❌ Erro na API publicStorefront:', error);
       throw error;
@@ -643,7 +625,7 @@ export const storefrontApi = {
         d1: "/products/kaiak.jpg", d2: "/products/luna.jpg", d3: "/products/tododia.jpg",
         d4: "/products/chronos.jpg", d6: "/products/batom.jpg", d7: "/products/ekos.jpg",
       };
-      const demoItems: StorefrontItem[] = DEMO_INVENTORY
+      return Promise.resolve(DEMO_INVENTORY
         .filter((i) => i.is_available_storefront && (i.quantity ?? 0) > 0)
         .map((i) => ({
           id: i.id, 
@@ -661,24 +643,18 @@ export const storefrontApi = {
           user_id: "demo",
           image_url: imageMap[i.id] || i.product?.image_url || i.image_url || null, 
           store_slug: DEMO_PROFILE.store_slug,
-        }));
-      return Promise.resolve(demoItems);
+        })));
     }
-    
-    if (sellerId) {
-      return publicStorefrontApi.listById(sellerId);
-    }
-    
-    // ✅ CORREÇÃO: Endpoint interno sem /api/ duplicado
+    if (sellerId) return publicStorefrontApi.listById(sellerId);
     return apiRequest<StorefrontItem[]>("/storefront/");
   },
-  
   listBySlug: (slug: string) => {
     if (slug === "demo") return storefrontApi.list("demo");
     return publicStorefrontApi.listBySlug(slug);
   },
 };
 
+// ── Outros serviços ──
 // ── Outros serviços ──
 export { productService } from "./productService";
 
@@ -687,13 +663,13 @@ export const ocrApi = {
     const token = getToken();
     const formData = new FormData();
     formData.append("image", file);
-    const response = await fetch(`${API_BASE_URL}/api/ocr-expiry/`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
+    const response = await api.post("/ocr-expiry/", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
-    if (!response.ok) throw new Error("Erro ao processar imagem");
-    return response.json();
+    return response.data;
   },
 };
 
@@ -712,19 +688,11 @@ export const salesApi = {
 
 // ✅ FUNÇÕES HELPER
 export function getProductBrand(item: any): string | null {
-  return item.product?.brand ||
-         item.brand ||
-         null;
+  return item.product?.brand || item.brand || null;
 }
-
 export function getProductDisplayName(item: any): string {
-  return item.product?.name ||
-         item.display_name ||
-         item.product_name ||
-         item.custom_name ||
-         "Produto sem nome";
+  return item.product?.name || item.display_name || item.product_name || item.custom_name || "Produto sem nome";
 }
-
 export function getProductQuantity(item: any): number {
   return item.total_quantity ?? item.quantity ?? 0;
 }
@@ -732,13 +700,12 @@ export function getProductQuantity(item: any): number {
 export const debugApi = {
   checkHealth: async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/health/`);
-      return { status: response.status, ok: response.ok };
-    } catch (error) {
-      return { status: 0, ok: false, error };
+      const response = await api.get('/health/');
+      return { status: response.status, ok: response.status === 200 };
+    } catch (error: any) {
+      return { status: error.response?.status || 0, ok: false, error: error.message };
     }
   },
-  
   clearAllCache: () => {
     clearAppCache();
     localStorage.removeItem('demo_mode');
@@ -746,7 +713,7 @@ export const debugApi = {
   }
 };
 
-// ✅ Session Control (usando Axios para consistência)
+// ── Session Control ──
 export interface SessionStatus {
   has_session: boolean;
   products_count?: number;
@@ -754,7 +721,6 @@ export interface SessionStatus {
   total_estimated_cost?: number;
   session_id?: number;
 }
-
 export interface SessionSummary {
   products_count: number;
   total_estimated_cost: number;
@@ -762,50 +728,34 @@ export interface SessionSummary {
   session_id: number;
 }
 
-// ✅ CORREÇÃO: SessionApi usando Axios (consistente com o resto da app) [1]
 export const sessionApi = {
   getStatus: async (): Promise<SessionStatus> => {
     try {
-      console.log('🔍 Verificando status da sessão...');
       const response = await api.get('/session-control/');
-      console.log('✅ Status da sessão:', response.data);
       return response.data;
-    } catch (error: any) {
-      console.error('❌ Erro ao verificar sessão:', error);
-      if (error.response?.status === 404) {
-        return { has_session: false };
-      }
+    } catch (error) {
       return { has_session: false };
     }
   },
-
   startSession: async () => {
     const response = await api.post('/session-control/', { action: 'start' });
     return response.data;
   },
-
   finishSession: async () => {
     const response = await api.post('/session-control/', { action: 'finish' });
     return response.data;
   },
-
   getSummary: async () => {
     const response = await api.get('/session-summary/');
     return response.data;
   },
-
-  // ✅ ADICIONAR
   confirmInvestment: async (sessionId: number, data: any) => {
-    const response = await api.post('/session-summary/', {
-      session_id: sessionId,
-      ...data
-    });
+    const response = await api.post('/session-summary/', { session_id: sessionId, ...data });
     return response.data;
   }
 };
 
-// lib/api.ts (adicionar)
-
+// ── Theme Config ──
 export interface ThemeConfig {
   color_primary: string;
   color_primary_light: string;
@@ -822,16 +772,15 @@ export interface ThemeConfig {
   updated_at: string;
 }
 
-// Público — sem auth (para landing page e carregamento inicial)
 export const themeApi = {
   get: async (): Promise<ThemeConfig> => {
-    const response = await fetch(`${API_BASE_URL}/api/public/theme/`);
-    if (!response.ok) throw new Error('Erro ao carregar tema');
-    return response.json();
+    const response = await api.get('/public/theme/', {
+      headers: { 'Content-Type': 'application/json' }
+    });
+    return response.data;
   },
 };
 
-// Admin — com auth
 export const adminThemeApi = {
   get: () => apiRequest<ThemeConfig>('/admin/theme/'),
   update: (data: Partial<ThemeConfig>) =>
@@ -839,4 +788,170 @@ export const adminThemeApi = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+};
+
+// ── Dashboard Stats ──
+export interface DashboardStats {
+  investedValue: number;
+  potentialValue: number;
+  projectedProfit: number;
+  monthSales: number;
+  monthProfit: number;
+}
+
+// ✅ Cache curto das estatísticas: a home (Index.tsx) remonta a cada
+// navegação de volta e disparava GET /stats/dashboard/ toda vez (~10x por
+// sessão nos logs). Mesmo padrão do profileApi: cache de 30s + deduplicação
+// de requisições em voo. `invalidate()` deve ser chamado após operações que
+// mudam os números (venda, entrada de estoque).
+let statsCache: DashboardStats | null = null;
+let statsCacheAt = 0;
+let statsInFlight: Promise<DashboardStats> | null = null;
+const STATS_CACHE_MS = 30_000;
+
+// ✅ Planos públicos (preços reais do PlanConfig, mesma fonte do checkout).
+export const plansApi = {
+  list: () => apiRequest<any[]>("/plans/"),
+};
+
+export const statsApi = {
+  getDashboard: async (forceRefresh = false): Promise<DashboardStats> => {
+    const fresh = statsCache && (Date.now() - statsCacheAt) < STATS_CACHE_MS;
+    if (fresh && !forceRefresh) return statsCache as DashboardStats;
+    if (statsInFlight) return statsInFlight;
+
+    statsInFlight = (async () => {
+      try {
+        const data = await apiRequest<DashboardStats>("/stats/dashboard/");
+        statsCache = data;
+        statsCacheAt = Date.now();
+        return data;
+      } finally {
+        statsInFlight = null;
+      }
+    })();
+    return statsInFlight;
+  },
+  invalidate: () => {
+    statsCache = null;
+    statsCacheAt = 0;
+  },
+};
+
+// ==========================================
+// CONSENTIMENTO LGPD (Art. 8º) - ✅ JÁ CORRETO
+// ==========================================
+
+export interface ConsentRecord {
+  id: number;
+  version: string;
+  purposes: string[];  // ✅ Deve ser ARRAY
+  accepted_at: string;
+  revoked_at: string | null;
+  is_active: boolean;
+  purposes_granted?: string[];
+  can_revoke?: string[];
+}
+
+export interface ConsentRequest {
+  email?: string;
+  session_id?: string;
+  version: string;
+  purposes: string[];
+  accepted_at: string;
+}
+
+// ✅ FUNÇÃO AUXILIAR: Normaliza purpose_flags que pode vir como string JSON
+function normalizeConsentRecord(raw: any): ConsentRecord {
+  let purposes: string[] = [];
+  
+  if (Array.isArray(raw.purposes)) {
+    purposes = raw.purposes;
+  } else if (typeof raw.purposes === 'string') {
+    try {
+      purposes = JSON.parse(raw.purposes);
+    } catch {
+      purposes = raw.purposes.replace(/[\[\]"]/g, '').split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+    }
+  } else if (Array.isArray(raw.purpose_flags)) {
+    purposes = raw.purpose_flags;
+  } else if (typeof raw.purpose_flags === 'string') {
+    try {
+      purposes = JSON.parse(raw.purpose_flags);
+    } catch {
+      purposes = raw.purpose_flags.replace(/[\[\]"]/g, '').split(',').map((p: string) => p.trim()).filter((p: string) => p.length > 0);
+    }
+  }
+  
+  return {
+    id: raw.id,
+    version: raw.version || raw.term_version || '',
+    purposes,  // ✅ Sempre array
+    accepted_at: raw.accepted_at,
+    revoked_at: raw.revoked_at ?? null,
+    is_active: raw.is_active ?? (raw.revoked_at === null),
+    purposes_granted: raw.purposes_granted || purposes,
+    can_revoke: raw.can_revoke,
+  };
+}
+
+export const consentApi = {
+  record: async (data: ConsentRequest): Promise<ConsentRecord> => {
+    const response = await apiRequest<ConsentRecord>("/consent/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return normalizeConsentRecord(response);
+  },
+
+  revoke: async (purpose: string): Promise<{ status: string; purpose: string }> => {
+    return apiRequest(`/consent/revoke/${purpose}/`, { method: "DELETE" });
+  },
+
+  getMyConsents: async (): Promise<{
+    consents: ConsentRecord[];
+    essential_purposes: string[];
+    revocable_purposes: string[];
+    current_version: string;
+  }> => {
+    const raw = await apiRequest<any>("/consent/my/");
+    
+    let consentsRaw: any[] = [];
+    if (Array.isArray(raw)) {
+      consentsRaw = raw;
+    } else if (raw?.consents && Array.isArray(raw.consents)) {
+      consentsRaw = raw.consents;  // ← Seu backend retorna assim
+    } else if (raw?.results && Array.isArray(raw.results)) {
+      consentsRaw = raw.results;
+    }
+    
+    const consents = consentsRaw.map(normalizeConsentRecord);
+    
+    return {
+      consents,
+      essential_purposes: raw.essential_purposes || [],
+      revocable_purposes: raw.revocable_purposes || [],
+      current_version: raw.current_version || raw.version || "v1.0_2026-05",
+    };
+  },
+
+  hasConsent: async (purpose: string): Promise<boolean> => {
+    try {
+      const { consents } = await consentApi.getMyConsents();
+      return consents.some((c) => c.is_active && c.purposes.includes(purpose));
+    } catch {
+      return false;
+    }
+  },
+  
+  hasValidConsent: (
+    consents: ConsentRecord[], 
+    version: string = "v1.0_2026-05",
+    essentialPurposes: string[] = ["essential", "authentication", "service_delivery"]
+  ): boolean => {
+    const active = consents.filter(c => c.is_active && c.version === version);
+    if (active.length === 0) return false;
+    const granted = new Set(active.flatMap(c => c.purposes));
+    return essentialPurposes.every(p => granted.has(p));
+  },
 };

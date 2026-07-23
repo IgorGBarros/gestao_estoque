@@ -1,6 +1,13 @@
-// components/UpgradeModal.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
+// components/UpgradeModal.tsx — CHECKOUT ASAAS INTEGRADO
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Lock, Zap, X, ScanBarcode, Camera, Store, MessageCircle, BarChart3, Package } from "lucide-react";
+import {
+  Lock, Zap, X, ScanBarcode, Camera, Store, MessageCircle,
+  BarChart3, Package, Loader2, ShieldCheck,
+} from "lucide-react";
+import { paymentsApi, plansApi } from "../lib/api";
+import { useToast } from "./ui/use-toast";
 
 interface UpgradeModalProps {
   isOpen: boolean;
@@ -18,7 +25,69 @@ const PRO_FEATURES = [
   { icon: Package, label: "Produtos Ilimitados" },
 ];
 
+// Fallback enquanto o preço real (PlanConfig) não chega da API.
+const DEFAULT_MONTHLY_PRICE = 39.9;
+
 export default function UpgradeModal({ isOpen, onClose, feature, description }: UpgradeModalProps) {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const [processing, setProcessing] = useState(false);
+  const [monthlyPrice, setMonthlyPrice] = useState(DEFAULT_MONTHLY_PRICE);
+
+  // ✅ Preço vem do PlanConfig (mesma fonte que o checkout do Asaas cobra).
+  // Antes estava fixo "R$ 39,90" no texto do botão — se o admin mudasse o
+  // preço, o modal anunciava um valor e a cobrança vinha outro.
+  useEffect(() => {
+    if (!isOpen) return;
+    plansApi.list()
+      .then((plans) => {
+        const pro = Array.isArray(plans) ? plans.find((p: any) => p.plan_type === "pro") : null;
+        const price = pro?.monthly_price;
+        if (price != null) {
+          const parsed = typeof price === "number" ? price : parseFloat(price);
+          if (!Number.isNaN(parsed)) setMonthlyPrice(parsed);
+        }
+      })
+      .catch(() => { /* mantém o fallback */ });
+  }, [isOpen]);
+
+  const priceLabel = monthlyPrice.toFixed(2).replace(".", ",");
+
+  const handleSubscribe = async () => {
+    setProcessing(true);
+    try {
+      const result = await paymentsApi.createCheckout("monthly");
+
+      if (!result?.checkout_url) {
+        throw new Error("Não recebemos o link de pagamento.");
+      }
+
+      // Redireciona para o checkout hospedado do Asaas. Usamos
+      // window.location (e não window.open) porque popup de pagamento
+      // costuma ser bloqueado pelo navegador.
+      window.location.href = result.checkout_url;
+    } catch (error: any) {
+      const msg: string = error?.message || "";
+
+      // Caso a loja já seja PRO (o backend responde 400 nesse cenário)
+      if (msg.toLowerCase().includes("já possui")) {
+        toast({
+          title: "Você já é PRO 💜",
+          description: "Sua assinatura já está ativa. Aproveite os recursos!",
+        });
+        onClose();
+        return;
+      }
+
+      toast({
+        title: "Não foi possível abrir o pagamento",
+        description: msg || "Tente novamente em alguns instantes.",
+        variant: "destructive",
+      });
+      setProcessing(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -27,7 +96,7 @@ export default function UpgradeModal({ isOpen, onClose, feature, description }: 
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-4"
-          onClick={onClose}
+          onClick={processing ? undefined : onClose}
         >
           <motion.div
             initial={{ y: 100, opacity: 0 }}
@@ -40,7 +109,8 @@ export default function UpgradeModal({ isOpen, onClose, feature, description }: 
             <div className="relative bg-gradient-to-br from-brand to-brand-hover px-6 py-8 text-center">
               <button
                 onClick={onClose}
-                className="absolute right-3 top-3 rounded-full bg-white/20 p-1.5 text-white hover:bg-white/30"
+                disabled={processing}
+                className="absolute right-3 top-3 rounded-full bg-white/20 p-1.5 text-white hover:bg-white/30 disabled:opacity-50"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -76,21 +146,41 @@ export default function UpgradeModal({ isOpen, onClose, feature, description }: 
             {/* CTA */}
             <div className="px-6 pb-6 space-y-3">
               <button
-                onClick={() => {
-                  window.open(
-                    "https://wa.me/5571999772054?text=Quero%20assinar%20o%20PRO!",
-                    "_blank"
-                  );
-                  onClose();
-                }}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3.5 text-sm font-bold text-white shadow-lg shadow-brand/25 hover:opacity-90 transition-opacity"
+                onClick={handleSubscribe}
+                disabled={processing}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3.5 text-sm font-bold text-white shadow-lg shadow-brand/25 hover:opacity-90 transition-opacity disabled:opacity-70"
               >
-                <Zap className="h-4 w-4" />
-                Assinar PRO — R$ 39,90/mês
+                {processing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Abrindo pagamento...
+                  </>
+                ) : (
+                  <>
+                    <Zap className="h-4 w-4" />
+                    Assinar PRO — R$ {priceLabel}/mês
+                  </>
+                )}
               </button>
+
+              {/* Sinal de confiança + opção anual */}
+              <div className="flex items-center justify-center gap-1.5 text-[11px] text-brand-rose/60">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>Pagamento seguro via Asaas · Pix, cartão ou boleto</span>
+              </div>
+
+              <button
+                onClick={() => { onClose(); navigate("/plans"); }}
+                disabled={processing}
+                className="w-full text-center text-xs font-medium text-brand hover:underline disabled:opacity-50"
+              >
+                Ver plano anual (economize)
+              </button>
+
               <button
                 onClick={onClose}
-                className="w-full text-center text-xs text-brand-rose/60 hover:text-foreground transition-colors"
+                disabled={processing}
+                className="w-full text-center text-xs text-brand-rose/60 hover:text-foreground transition-colors disabled:opacity-50"
               >
                 Continuar no plano gratuito
               </button>

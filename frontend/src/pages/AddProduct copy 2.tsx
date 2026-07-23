@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import { api } from "../services/api";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from '../components/ui/use-toast';
 import { productService } from "../lib/productService";
 import { processImageForData } from "../lib/ocrService";
 // Certifique-se de que este componente existe em src/components/ProductSearchModal.tsx

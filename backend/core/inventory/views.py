@@ -1,51 +1,56 @@
+# ==========================================
+# IMPORTS GERAIS - CORRIGIDOS
+# ==========================================
 from time import time
+from django.db import models, transaction
+from django.db.models import Q, Count, Sum, F, Prefetch
+from django.utils import timezone
+from django.utils.crypto import get_random_string  # ✅ IMPORT CORRETO
+from django.utils.text import slugify
+from django.conf import settings  # ✅ IMPORT CORRETO
+from django.shortcuts import get_object_or_404
+from django.core.paginator import Paginator
+from django_filters.rest_framework import DjangoFilterBackend
 
-from aiohttp import request
-from django.db import models
-from django.db import transaction
-from pydantic_core import ValidationError
-from rest_framework import viewsets,status, permissions, generics
+from rest_framework import viewsets, status, permissions, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
-from django.db.models import Q, Count, Sum, F
-from django.utils import timezone
-from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.exceptions import ValidationError
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+
 import re
+import hashlib  # ✅ Para hash de dados sensíveis
+import traceback
 
 # Imports do Django Auth
-from rest_framework_simplejwt.views import TokenObtainPairView
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model, login
+from django.core.cache import cache  
 
-from rest_framework_simplejwt.views import TokenObtainPairView,TokenRefreshView
-from rest_framework_simplejwt.tokens import RefreshToken
-from .serializers import CustomTokenObtainPairSerializer, CustomUserSerializer, ProfileSerializer
-from .models import CustomUser, RegistrationSession
+# Imports dos seus modelos
+from .models import (
+    CustomUser, RegistrationSession, ThemeConfig,
+    Product, Store, InventoryItem, InventoryBatch,
+    Sale, SaleItem, PriceHistory, StockTransaction,
+    PlanConfig, Promotion, ConsentRecord  # ✅ Novo modelo LGPD
+)
 
+# Imports dos seus serializers
+from .serializers import (
+    CustomTokenObtainPairSerializer, CustomUserSerializer,
+    ProfileSerializer, ThemeConfigSerializer,
+    ProductSerializer, InventoryItemSerializer,
+    StockEntrySerializer, SaleSerializer, StockTransactionSerializer,
+    ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer  # ✅ Novos serializers LGPD
+)
 
-# Imports do seu Projeto
-from .models import Product, InventoryItem, InventoryBatch, Store, Sale, SaleItem, PriceHistory
-# OBS: Removi 'CustomUserSerializer' e 'CustomTokenObtainPairSerializer' pois eles dependem do CustomUser
-from .serializers import InventoryItemSerializer, ProductSerializer, StockEntrySerializer, SaleSerializer
 from .scraper import search_google_shopping
-import re
-from django.contrib.auth import login
-
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import get_user_model
-
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework import generics, status
-from rest_framework.permissions import AllowAny
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from django.contrib.auth import login, get_user_model
-
+from .consent_utils import has_consent_for_purpose as _has_consent_for_purpose
 
 User = get_user_model()
-
 # ============================================================================
 # 1. AUTHENTICATION VIEWS
 # ============================================================================
@@ -53,37 +58,279 @@ User = get_user_model()
 class CustomTokenObtainPairView(TokenObtainPairView):
     serializer_class = CustomTokenObtainPairSerializer
 
+# ==========================================
+# 1. AUTHENTICATION VIEWS - VERSÃO LGPD
+# ==========================================
+
 class CustomUserCreateView(generics.CreateAPIView):
+    """
+    Cadastro de usuário com registro AUTOMÁTICO de consentimento LGPD (Art. 8º)
+    """
     queryset = CustomUser.objects.all()
     serializer_class = CustomUserSerializer
     permission_classes = [AllowAny]
+    
+    def perform_create(self, serializer):
+        """
+        ✅ Cria usuário E registra consentimento LGPD automaticamente
+        """
+        # 1. Cria o usuário normalmente
+        user = serializer.save()
+        
+        # 2. Coleta dados para auditoria (anonimizados)
+        ip_address = self.request.META.get(
+            'HTTP_X_FORWARDED_FOR', 
+            self.request.META.get('REMOTE_ADDR', '')
+        )
+        user_agent = self.request.META.get('HTTP_USER_AGENT', '')[:500]  # Limita tamanho
+        
+        # 3. Define finalidades ESSENCIAIS para cadastro (não podem ser revogadas)
+        essential_purposes = ['essential', 'authentication', 'service_delivery']
+        
+        # 4. Cria registro de consentimento
+        try:
+            consent = ConsentRecord.objects.create(
+                user=user,
+                email=user.email.lower(),
+                ip_hash=ConsentRecord.hash_ip(ip_address),  # Hash do IP para LGPD
+                purpose_flags=essential_purposes,
+                term_version=getattr(settings, 'LGPD_CONSENT_VERSION', 'v1.0_2026-05'),
+                accepted_at=timezone.now(),
+                user_agent=user_agent
+            )
+            log_safe(
+                "Consentimento registrado no cadastro", 
+                user_id=user.id, 
+                purposes=essential_purposes
+            )
+        except Exception as e:
+            # Se falhar ao registrar consentimento, ainda cria o usuário
+            # Mas loga o erro para correção posterior
+            log_safe(
+                "Erro ao registrar consentimento no cadastro", 
+                user_id=user.id, 
+                error=str(e)
+            )
+            # Opcional: você pode decidir NÃO criar o usuário se consentimento falhar
+            # if not consent:
+            #     user.delete()
+            #     raise ValidationError("Não foi possível registrar seu consentimento")
+        
+        # 5. Cria loja automaticamente para o novo usuário
+        try:
+            ensure_user_has_store(user)
+        except Exception as e:
+            log_safe("Erro ao criar loja no cadastro", user_id=user.id, error=str(e))
+
+# backend/core/inventory/views.py - FirebaseLoginView COMPLETA
+
+import os
+import json
+import re
+import logging
+from django.conf import settings
+from rest_framework import status, permissions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+# Firebase imports
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
+
+from .models import CustomUser
+from .utils import ensure_user_has_store
+
+logger = logging.getLogger(__name__)
+# backend/core/inventory/views.py - FirebaseLoginView COMPLETA E ROBUSTA
+
+import os
+import json
+import re
+import logging
+from django.conf import settings
+from rest_framework import status, permissions
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+
+# Firebase imports
+import firebase_admin
+from firebase_admin import auth as firebase_auth, credentials
+
+from .models import CustomUser
+from .utils import ensure_user_has_store
+
+logger = logging.getLogger(__name__)
 
 
 class FirebaseLoginView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [permissions.AllowAny]
+    
+    def _init_firebase_safe(self) -> bool:
+        """
+        Inicializa Firebase com correção agressiva de caracteres.
+        Retorna True se sucesso, False se falhou (NUNCA lança exceção).
+        """
+        try:
+            # Se já inicializado, retorna
+            if firebase_admin._apps:
+                return True
+            
+            creds_json = os.environ.get("FIREBASE_CREDENTIALS")
+            if not creds_json:
+                logger.error("❌ FIREBASE_CREDENTIALS não configurada")
+                return False
+            
+            # 🔧 CORREÇÃO AGRESSIVA DE CARACTERES
+            # 1. Placeholder para \\ (para não duplicar escapes)
+            creds_json = creds_json.replace('\\\\', '\x00BSLASH\x00')
+            
+            # 2. Escapar caracteres de controle REAIS
+            creds_json = (creds_json
+                .replace('\n', '\\n')
+                .replace('\r', '\\r')
+                .replace('\t', '\\t')
+                .replace('\b', '\\b')
+                .replace('\f', '\\f')
+            )
+            
+            # 3. Restaurar \\
+            creds_json = creds_json.replace('\x00BSLASH\x00', '\\\\')
+            
+            # 4. Parse JSON
+            creds_dict = json.loads(creds_json)
+            
+            # 5. Validar campos obrigatórios
+            required = ['type', 'project_id', 'private_key', 'client_email']
+            missing = [k for k in required if k not in creds_dict]
+            if missing:
+                logger.error(f"❌ Firebase JSON missing: {missing}")
+                return False
+            
+            # 6. Inicializar SDK
+            cred = credentials.Certificate(creds_dict)
+            firebase_admin.initialize_app(cred, {'projectId': creds_dict.get('project_id')})
+            logger.info("✅ Firebase inicializado com sucesso")
+            return True
+            
+        except json.JSONDecodeError as e:
+            pos = getattr(e, 'pos', '?')
+            logger.error(f"❌ JSON decode error at pos {pos}: {str(e)[:150]}")
+            # Log de diagnóstico seguro (primeiros 200 chars)
+            if creds_json and isinstance(pos, int) and pos < len(creds_json):
+                start = max(0, pos - 30)
+                end = min(len(creds_json), pos + 30)
+                logger.error(f"🔍 Context: ...{creds_json[start:end]}...")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Firebase init error: {type(e).__name__}: {str(e)[:150]}")
+            return False
     
     def post(self, request):
-        firebase_token = request.data.get('token')
-        if not firebase_token:
-            return Response({'error': 'Token ausente'}, status=status.HTTP_400_BAD_REQUEST)
+        token = request.data.get("token")
+        if not token:
+            return Response({"error": "Token ausente"}, status=400)
         
+        # Inicializar Firebase AGORA (na request, não no startup)
+        if not self._init_firebase_safe():
+            # Fallback para DEBUG: mock user
+            if settings.DEBUG:
+                user, _ = CustomUser.objects.get_or_create(
+                    email="mock@example.com",
+                    defaults={"name": "Mock", "is_active": True}
+                )
+                user.set_unusable_password()
+                user.save()
+                store = ensure_user_has_store(user)
+                refresh = RefreshToken.for_user(user)
+                return Response({
+                    "access": str(refresh.access_token),
+                    "refresh": str(refresh),
+                    "user": {"email": user.email, "name": user.name},
+                    "store": {"plan": "free"} if store else None,
+                    "_debug": "Firebase mock (DEBUG mode)"
+                })
+            return Response({"error": "Firebase não configurado"}, status=503)
+        
+        # Verificar token
         try:
-            user = CustomUser.objects.create_user_with_firebase(firebase_token)
-            login(request, user)  
-            refresh = RefreshToken.for_user(user)
-            
-            return Response({
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'email': user.email,
-                'name': getattr(user, 'name', user.email),
-                'is_authenticated': True
-            }, status=status.HTTP_200_OK)
+            decoded = firebase_auth.verify_id_token(token)
         except Exception as e:
-            print(f"🔥 ERRO FIREBASE VIEW: {str(e)}")
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.error(f"❌ Token verify error: {type(e).__name__}: {str(e)[:100]}")
+            return Response({"error": "Token inválido"}, status=401)
+        
+        # Criar usuário
+        email = decoded.get("email")
+        if not email:
+            return Response({"error": "Email não encontrado"}, status=400)
+        
+        name = decoded.get("name", email.split("@")[0])
+        user, created = CustomUser.objects.get_or_create(
+            email=email,
+            defaults={"name": name, "is_active": True}
+        )
+        if created:
+            user.set_unusable_password()
+            user.save()
+        
+        # Loja
+        store = ensure_user_has_store(user)
+        
+        # JWT
+        refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+        access["email"] = user.email
+        if store:
+            access["plan"] = store.plan
+        
+        return Response({
+            "access": str(access),
+            "refresh": str(refresh),
+            "user": {"email": user.email, "name": user.name},
+            "store": {"plan": store.plan} if store else None,
+        })
+# ==========================================
+# UTILITÁRIOS LGPD - ANONIMIZAÇÃO E SEGURANÇA
+# ==========================================
 
-# ... (Abaixo seguem as rotas do Estoque: ProductViewSet, StockEntryView, etc) ...
+def hash_for_lgpd(value: str, salt_key: str = 'LGPD_SALT') -> str:
+    """
+    Gera hash SHA-256 para anonimização de dados pessoais (LGPD Art. 12)
+    Uso: hash_for_lgpd(user.email) ou hash_for_lgpd(ip, 'LGPD_IP_SALT')
+    """
+    if not value:
+        return ''
+    salt = getattr(settings, salt_key, settings.SECRET_KEY[:32])
+    return hashlib.sha256(f"{value}{salt}".encode('utf-8')).hexdigest()
+
+
+def log_safe(message: str, **context):
+    """
+    Log que anonimiza automaticamente dados sensíveis no contexto
+    Uso: log_safe("Login attempt", user_email=user.email, ip_address=ip)
+    """
+    safe_context = {}
+    for key, value in context.items():
+        if any(sensitive in key.lower() for sensitive in ['email', 'ip', 'phone', 'cpf', 'name', 'user_agent']):
+            safe_context[key] = hash_for_lgpd(str(value))
+        else:
+            safe_context[key] = value
+    # Só loga em DEBUG ou desenvolvimento
+    if settings.DEBUG:
+        print(f"[SAFE_LOG] {message}", **safe_context)
+
+
+def has_consent_for_purpose(user, purpose: str) -> bool:
+    """
+    Verifica se usuário consentiu com finalidade específica (LGPD Art. 8º)
+
+    Movida para consent_utils.py (fonte única, compartilhada com
+    admin_views.py e com o módulo de exportação para treino de IA).
+    Mantida como re-export aqui para não quebrar `from inventory.views
+    import has_consent_for_purpose`, já usado em outros lugares (ex: ai/views.py).
+    """
+    return _has_consent_for_purpose(user, purpose)
 # ============================================================================
 # 2. CORE BUSINESS (ESTOQUE)
 # ============================================================================
@@ -104,94 +351,80 @@ from .scraper import search_google_shopping
 # 0. HELPERS & MIXINS MULTI-TENANT
 # ==========================================
 
-
-# inventory/views.py - VERSÃO FINAL da função get_current_store
-
-# inventory/views.py - VERSÃO FINAL da função get_current_store
-
-# inventory/views.py - VERSÃO FINAL da função get_current_store
-
 def get_current_store(user):
     """
-    ✅ Versão final com fallback automático para criar loja
+    ✅ Versão atualizada com fallback e logs de auditoria
     """
     try:
-        print(f"🔍 get_current_store para usuário: {user.id} ({user.email})")
+        # Log de segurança (anonimizado se necessário)
+        print(f"🔍 get_current_store: Usuário {user.id if user else 'Anon'}")
         
         if not user or not user.id:
             print("❌ Usuário inválido ou sem ID")
             return None
         
-        from .models import Store
-        
         # Estratégia 1: Buscar por relacionamento owner
         try:
             store = Store.objects.filter(owner=user).first()
             if store:
-                print(f"✅ Loja encontrada via relacionamento: {store.id} - {store.name}")
+                print(f"✅ Loja encontrada (owner): {store.id}")
                 return store
         except Exception as e:
-            print(f"⚠️ Erro ao buscar por relacionamento: {e}")
+            print(f"⚠️ Erro busca owner: {e}")
         
         # Estratégia 2: Buscar por owner_id direto
         try:
             stores = Store.objects.filter(owner_id=user.id)
             if stores.exists():
                 store = stores.first()
-                print(f"✅ Loja encontrada por owner_id: {store.id} - {store.name}")
+                print(f"✅ Loja encontrada (owner_id): {store.id}")
                 return store
         except Exception as e:
-            print(f"⚠️ Erro ao buscar por owner_id: {e}")
+            print(f"⚠️ Erro busca owner_id: {e}")
         
         # Estratégia 3: FALLBACK - Criar loja automaticamente
-        print(f"🏪 Criando loja automaticamente para usuário {user.email}")
-        
+        print(f"🏪 Criando loja automática para {user.email}")
         try:
             store = Store.objects.create(
                 name=f"Loja de {user.email}",
                 owner=user,
-                slug=f"loja-{user.id}-{int(time.time())}"  # Slug único
+                slug=f"loja-{user.id}-{int(time())}",
+                plan="free"
             )
-            print(f"✅ Loja criada automaticamente: {store.id} - {store.name}")
+            print(f"✅ Loja criada: {store.id}")
             return store
-            
         except Exception as create_error:
             print(f"❌ Erro ao criar loja: {create_error}")
             
-            # Estratégia 4: ÚLTIMO RECURSO - Usar primeira loja disponível
-            try:
-                first_store = Store.objects.first()
-                if first_store:
-                    print(f"⚠️ Usando primeira loja disponível: {first_store.id}")
-                    return first_store
-            except Exception as e:
-                print(f"❌ Erro ao buscar primeira loja: {e}")
-        
-        print(f"❌ Nenhuma loja encontrada/criada para usuário {user.id}")
-        return None
+            # 🚨 ESTRATÉGIA 4 (PERIGOSA - LEAKAGE):
+            # A linha abaixo foi comentada para evitar vazamento de dados entre usuários.
+            # Se descomentar, um erro na criação pode expor a loja de outro cliente.
+            
+            # try:
+            #     first_store = Store.objects.first()
+            #     if first_store:
+            #         print(f"⚠️ Usando primeira loja disponível: {first_store.id}")
+            #         return first_store
+            # except Exception: pass
+            
+            # Retorno seguro: Se não achou e não criou, retorna None
+            return None
         
     except Exception as e:
-        print(f"❌ Erro geral em get_current_store: {e}")
-        import traceback
+        print(f"❌ Erro geral get_current_store: {e}")
         traceback.print_exc()
         return None
 
-# inventory/views.py - CORRIGIR a função
 
 def ensure_user_has_store(user):
     """
-    ✅ VERSÃO CORRIGIDA: Garantir que o usuário tenha uma loja
+    ✅ Garante que o usuário tenha uma loja, lançando erro se falhar
     """
     try:
         store = get_current_store(user)
         
         if not store:
-            print(f"🏪 Criando loja para usuário {user.email}")
-            
-            from .models import Store
-            from django.utils.text import slugify
-            
-            # ✅ CORREÇÃO: Criar loja com campos corretos
+            print(f"🏪 Tentativa secundária de criação para {user.email}")
             try:
                 store = Store.objects.create(
                     owner=user,
@@ -200,26 +433,16 @@ def ensure_user_has_store(user):
                     storefront_enabled=True,
                     plan="free"
                 )
-                print(f"✅ Loja criada: {store.id} - {store.name}")
+                print(f"✅ Loja criada via ensure: {store.id}")
             except Exception as create_error:
-                print(f"❌ Erro ao criar loja: {create_error}")
-                
-                # ✅ FALLBACK: Tentar criar com campos mínimos
-                try:
-                    store = Store.objects.create(
-                        owner=user,
-                        name=f"Loja de {user.email}"
-                    )
-                    print(f"✅ Loja criada via fallback: {store.id}")
-                except Exception as fallback_error:
-                    print(f"❌ Erro no fallback: {fallback_error}")
-                    raise
+                print(f"❌ Falha crítica ao garantir loja: {create_error}")
+                # Retorna None para que a View trate o erro (ex: 403 Forbidden)
+                return None
         
         return store
     
     except Exception as e:
-        print(f"❌ Erro ao garantir loja: {e}")
-        import traceback
+        print(f"❌ Erro ensure_user_has_store: {e}")
         traceback.print_exc()
         raise
 # inventory/mixins.py ou views.py
@@ -331,7 +554,30 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['product__category']
-    
+    # ✅ O frontend inteiro espera um ARRAY puro desta rota (data.length,
+    # .map, .filter). A paginação global do DRF (settings) embrulhava em
+    # {count, results} e quebrava a tela de estoque. Estoques de consultora
+    # são pequenos (dezenas de itens), então resposta sem paginação é ok.
+    pagination_class = None
+
+    # ✅ GET /api/inventory/by-barcode/<code>/ — o frontend (lib/api.ts) já
+    # chamava esta rota, mas ela nunca existiu no backend (Auditoria P0.1).
+    @action(detail=False, methods=['get'], url_path='by-barcode/(?P<barcode>[^/]+)')
+    def by_barcode(self, request, barcode=None):
+        item = self.get_queryset().filter(product__bar_code=barcode).first()
+        if not item:
+            return Response({'detail': 'Produto não encontrado no seu estoque.'},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(item).data)
+
+    # ✅ GET /api/inventory/<id>/batches/ — idem: chamado pelo frontend, sem rota.
+    @action(detail=True, methods=['get'])
+    def batches(self, request, pk=None):
+        from .serializers import InventoryBatchSerializer
+        item = self.get_object()  # get_object usa get_queryset → já filtra por loja
+        qs = item.batches.filter(quantity__gt=0).order_by('expiration_date', 'entry_date')
+        return Response(InventoryBatchSerializer(qs, many=True).data)
+
     def get_queryset(self):
         """Queryset com tratamento de erro robusto"""
         try:
@@ -615,239 +861,12 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
                 'message': str(e)
             }, status=500)
 
-from django.db import transaction
-from django.db.models import Sum
 
-from django.db import transaction
-from django.db.models import Sum
-
-class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
-    """Extrato de Movimentações da Loja - VERSÃO CORRIGIDA FINAL"""
-    serializer_class = StockTransactionSerializer
-    permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend]
-    filterset_fields = ['transaction_type']
-    
-    def get_queryset(self):
-        """Queryset com tratamento de erro robusto"""
-        try:
-            store = get_current_store(self.request.user)
-            if not store:
-                return StockTransaction.objects.none()
-                
-            return StockTransaction.objects.filter(
-                store=store
-            ).select_related('product', 'batch').order_by('-created_at')
-        except Exception as e:
-            print(f"❌ Erro no get_queryset StockTransaction: {e}")
-            return StockTransaction.objects.none()
-
-    # ✅ CORREÇÃO: Override do perform_create para garantir store_id
-    def perform_create(self, serializer):
-        """Garantir que store_id seja sempre definido"""
-        try:
-            store = get_current_store(self.request.user)
-            print(f"🏪 Definindo store_id: {store.id}")
-            
-            # ✅ FORÇAR store_id na criação
-            serializer.save(store=store)
-            
-            print(f"✅ StockTransaction criada para store {store.id}")
-            
-        except Exception as e:
-            print(f"❌ Erro ao criar StockTransaction: {e}")
-            raise
-
-    def apply_fifo_withdrawal(self, inventory_item, quantity_to_withdraw):
-        """✅ FIFO automático com correções"""
-        print(f"🎯 Aplicando FIFO: {quantity_to_withdraw} unidades de {inventory_item.product.name}")
-        
-        # Buscar lotes ordenados por validade (FIFO)
-        available_batches = inventory_item.batches.filter(
-            quantity__gt=0
-        ).order_by('expiration_date', 'id')
-        
-        if not available_batches.exists():
-            raise ValueError("Não há lotes disponíveis")
-        
-        total_available = sum(batch.quantity for batch in available_batches)
-        if total_available < quantity_to_withdraw:
-            raise ValueError(f"Estoque insuficiente. Disponível: {total_available}, Solicitado: {quantity_to_withdraw}")
-        
-        # Aplicar baixas nos lotes (FIFO)
-        remaining_to_withdraw = quantity_to_withdraw
-        batches_used = []
-        
-        for batch in available_batches:
-            if remaining_to_withdraw <= 0:
-                break
-            
-            qty_from_batch = min(remaining_to_withdraw, batch.quantity)
-            
-            print(f"📦 Lote {batch.id} (Val: {batch.expiration_date}): {batch.quantity} → {batch.quantity - qty_from_batch}")
-            
-            # Aplicar baixa
-            batch.quantity -= qty_from_batch
-            batch.save()
-            
-            # ✅ CORREÇÃO: Não deletar lotes zerados (manter histórico)
-            # if batch.quantity == 0:
-            #     batch.delete()
-            
-            batches_used.append({
-                'batch_id': batch.id,
-                'quantity_used': qty_from_batch,
-                'expiration_date': batch.expiration_date
-            })
-            
-            remaining_to_withdraw -= qty_from_batch
-        
-        # Recalcular total do inventário
-        total_real = inventory_item.batches.aggregate(
-            total=Sum('quantity')
-        )['total'] or 0
-        
-        inventory_item.total_quantity = total_real
-        inventory_item.save()
-        
-        print(f"📊 Total atualizado: {inventory_item.total_quantity}")
-        
-        return batches_used
-
-    def create(self, request, *args, **kwargs):
-        """✅ VERSÃO CORRIGIDA: Criar transação com validações robustas"""
-        try:
-            store = get_current_store(request.user)
-            if not store:
-                return Response({'error': 'Loja não encontrada para o usuário'}, status=400)
-            
-            data = request.data.copy()
-            print(f"🔄 Criando transação para store {store.id}: {data}")
-            
-            # ✅ VALIDAÇÕES OBRIGATÓRIAS
-            if not data.get('product') and not data.get('product_id'):
-                return Response({'error': 'Campo product ou product_id é obrigatório'}, status=400)
-            
-            if not data.get('quantity'):
-                return Response({'error': 'Campo quantity é obrigatório'}, status=400)
-            
-            if not data.get('transaction_type'):
-                return Response({'error': 'Campo transaction_type é obrigatório'}, status=400)
-            
-            # ✅ BUSCA MELHORADA DO PRODUTO
-            product_id = data.get('product_id') or data.get('product')
-            barcode = data.get('barcode') or data.get('bar_code')
-            
-            product = None
-            
-            # Buscar produto por ID primeiro
-            if product_id:
-                try:
-                    product = Product.objects.get(id=product_id)
-                    print(f"✅ Produto encontrado por ID: {product.name}")
-                except Product.DoesNotExist:
-                    print(f"❌ Produto com ID {product_id} não encontrado")
-            
-            # Se não encontrou por ID, buscar por código de barras
-            if not product and barcode:
-                try:
-                    product = Product.objects.get(bar_code=barcode)
-                    print(f"✅ Produto encontrado por código: {product.name}")
-                except Product.DoesNotExist:
-                    print(f"❌ Produto com código {barcode} não encontrado")
-            
-            if not product:
-                return Response({'error': 'Produto não encontrado no catálogo'}, status=404)
-            
-            # ✅ BUSCAR ITEM NO INVENTÁRIO
-            try:
-                inventory_item = InventoryItem.objects.get(store=store, product=product)
-                print(f"✅ Item encontrado no inventário: {inventory_item.id}")
-            except InventoryItem.DoesNotExist:
-                return Response({
-                    'error': 'Produto não encontrado no seu estoque',
-                    'message': f'O produto "{product.name}" não está no seu estoque.'
-                }, status=404)
-            
-            quantity = abs(int(data.get('quantity', 0)))
-            if quantity <= 0:
-                return Response({'error': 'Quantidade deve ser maior que zero'}, status=400)
-            
-            transaction_type = data.get('transaction_type', '').upper()
-            unit_price = float(data.get('unit_price', 0))
-            
-            # ✅ VERIFICAR SE É SAÍDA E APLICAR FIFO
-            is_exit = transaction_type in ['VENDA', 'USO_PROPRIO', 'PRESENTE', 'BRINDE', 'PERDA', 'SAIDA']
-            
-            if is_exit:
-                # Verificar estoque suficiente
-                if inventory_item.total_quantity < quantity:
-                    return Response({
-                        'error': 'Estoque insuficiente',
-                        'available': inventory_item.total_quantity,
-                        'requested': quantity
-                    }, status=400)
-                
-                # ✅ APLICAR FIFO COM TRANSAÇÃO ATÔMICA
-                with transaction.atomic():
-                    try:
-                        batches_used = self.apply_fifo_withdrawal(inventory_item, quantity)
-                        
-                        # ✅ CRIAR APENAS UMA TRANSAÇÃO CONSOLIDADA
-                        transaction_obj = StockTransaction.objects.create(
-                            store=store,
-                            product=product,
-                            transaction_type=transaction_type,
-                            quantity=-quantity,  # Negativo para saída
-                            unit_price=unit_price,
-                            unit_cost=inventory_item.cost_price,
-                            description=data.get('description', f"{transaction_type} - {product.name}")
-                        )
-                        
-                        print(f"✅ Transação FIFO criada: {transaction_obj.id}")
-                        
-                        serializer = self.get_serializer(transaction_obj)
-                        return Response({
-                            'message': 'Baixa FIFO aplicada com sucesso',
-                            'transaction': serializer.data,
-                            'batches_used': batches_used,
-                            'new_total_quantity': inventory_item.total_quantity
-                        }, status=201)
-                        
-                    except ValueError as ve:
-                        return Response({'error': str(ve)}, status=400)
-            
-            else:
-                # ✅ ENTRADA NORMAL (sem FIFO)
-                transaction_obj = StockTransaction.objects.create(
-                    store=store,
-                    product=product,
-                    transaction_type=transaction_type,
-                    quantity=quantity,  # Positivo para entrada
-                    unit_price=unit_price,
-                    unit_cost=data.get('unit_cost', 0),
-                    description=data.get('description', f"{transaction_type} - {product.name}")
-                )
-                
-                # ✅ CORREÇÃO: Para entradas, não atualizar inventory_item aqui
-                # O estoque deve ser atualizado via StockEntry ou Batch
-                
-                serializer = self.get_serializer(transaction_obj)
-                return Response(serializer.data, status=201)
-            
-        except Exception as e:
-            print(f"❌ Erro geral ao criar transação: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            return Response({
-                'error': 'Erro interno do servidor',
-                'message': str(e)
-            }, status=500)
-# ==========================================
-# 2. OPERAÇÕES COMPLEXAS (ENTRADA E SAÍDA)
-# ==========================================
-
+# NOTA: aqui existia uma segunda definição (morta) de StockTransactionViewSet
+# ('VERSÃO CORRIGIDA FINAL'). Como Python sobrescreve classes redefinidas, a
+# versão que sempre valeu foi a 'VERSÃO COM FIFO FUNCIONAL' (mais abaixo neste
+# arquivo). A duplicata foi removida para que o router DRF registre a classe
+# certa sem ambiguidade. (Auditoria P2.1)
 
 class StockEntryView(APIView):
     permission_classes = [IsAuthenticated]
@@ -1336,6 +1355,33 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 
 
+def _require_pro_feature(store, feature_key):
+    """
+    Verifica no BACKEND se a loja tem direito a um recurso pago.
+
+    O bloqueio no frontend é só de interface: qualquer pessoa pode chamar a
+    API direto (curl, DevTools) e obter os dados. Recurso pago precisa ser
+    barrado aqui também.
+
+    Retorna None se pode usar, ou um Response 403 se não pode.
+    """
+    try:
+        permitido = store.can_use_feature.get(feature_key, False)
+    except Exception:
+        permitido = False
+
+    if not permitido:
+        return Response(
+            {
+                'error': 'Recurso exclusivo do plano PRO',
+                'code': 'PRO_REQUIRED',
+                'feature': feature_key,
+            },
+            status=403,
+        )
+    return None
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_overview(request):
@@ -1344,6 +1390,11 @@ def dashboard_overview(request):
         store = ensure_user_has_store(request.user)
         if not store:
             return Response({'error': 'Loja não encontrada'}, status=400)
+
+        # 🔒 Recurso pago: valida o plano no servidor, não só na interface.
+        bloqueio = _require_pro_feature(store, 'analytics')
+        if bloqueio:
+            return bloqueio
 
         # ✅ PERÍODO CONFIGURÁVEL COM VALIDAÇÃO
         period = request.GET.get('period', '30d')
@@ -1950,13 +2001,19 @@ def dashboard_inventory_analysis(request):
         return Response({'error': str(e)}, status=500)
     
 
+# inventory/views.py
+
 @api_view(["GET"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])  # ✅ Usa autenticação JWT padrão
 def feature_gates_view(request):
     """
     Fornece lista de feature gates para o frontend.
-    Pode ser substituída futuramente por regras dinâmicas.
+    ✅ Autenticação via JWT (não requer API Key de gateway)
     """
+    # Opcional: filtrar gates baseado no plano do usuário
+    store = get_current_store(request.user)
+    is_pro = store and store.plan == 'pro' if store else False
+    
     gates = [
         {"feature_key": "barcode_scanner", "label": "Scanner de Código", "description": None, "requires_pro": True},
         {"feature_key": "ocr_expiry", "label": "Leitor de Validade (IA)", "description": None, "requires_pro": True},
@@ -1967,36 +2024,141 @@ def feature_gates_view(request):
         {"feature_key": "chat_assistant", "label": "Assistente de Estoque", "description": None, "requires_pro": True},
         {"feature_key": "unlimited_products", "label": "Produtos Ilimitados", "description": None, "requires_pro": True},
     ]
-    return Response(gates)
+    
+    # Filtra gates baseado no plano (opcional)
+    visible_gates = [g for g in gates if not g['requires_pro'] or is_pro]
+    
+    return Response(visible_gates)
+
+
+# backend/core/inventory/views.py
+
+import logging
+from django.conf import settings
+from rest_framework import status, permissions
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.response import Response
+
+logger = logging.getLogger(__name__)
+
+
 
 @api_view(["GET", "PATCH"])
 @permission_classes([IsAuthenticated])
 def profile_view(request):
     """
-    ✅ VERSÃO CORRIGIDA: Retorna ou atualiza as informações da loja
+    Retorna ou atualiza as informações da loja do usuário.
+    
+    ✅ OTIMIZAÇÕES:
+    - Cache Django para evitar queries repetidas
+    - Serialização imediata para evitar ContentNotRenderedError
+    - Tratamento de erro seguro que sempre retorna Response DRF
+    - Validação de tenant para segurança
     """
+    user = request.user
+    cache_key = f"profile_{user.id}"
+    
     try:
-        # ✅ CORREÇÃO: Usar ensure_user_has_store em vez de get_or_create
-        store = ensure_user_has_store(request.user)
-        
+        # ✅ GET: Tentar cache primeiro (5 minutos)
         if request.method == "GET":
-            serializer = ProfileSerializer(store)
-            return Response(serializer.data)
+            cached = cache.get(cache_key)
+            if cached:
+                logger.info(f"✅ Profile cache hit for user {user.id}")
+                return Response(cached, status=status.HTTP_200_OK)
             
-        if request.method == "PATCH":
-            serializer = ProfileSerializer(store, data=request.data, partial=True)
+            # ✅ Obter ou criar loja do usuário
+            from .utils import get_current_store, validate_store_ownership
+            
+            # ✅ Query otimizada com select_related para evitar N+1
+            store = get_current_store(user)
+            
+            if not store:
+                return Response(
+                    {"error": "Loja não encontrada para este usuário"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # ✅ Validar ownership (segurança tenant)
+            validate_store_ownership(user, store)
+            
+            # ✅ Serializar dados
+            from .serializers import ProfileSerializer
+            serializer = ProfileSerializer(store, context={"request": request})
+            
+            # ✅ CRÍTICO: Acessar .data força serialização IMEDIATA
+            # Isso evita que middleware acesse .content antes do render
+            serialized_data = serializer.data
+            
+            # ✅ Salvar no cache (5 minutos)
+            cache.set(cache_key, serialized_data, 300)
+            logger.info(f"✅ Profile cached for user {user.id}")
+            
+            # ✅ Retorna Response com dados já serializados (dict puro)
+            return Response(serialized_data, status=status.HTTP_200_OK)
+        
+        # ✅ PATCH: Atualizar perfil
+        elif request.method == "PATCH":
+            from .utils import get_current_store, validate_store_ownership
+            from .serializers import ProfileSerializer
+            
+            store = get_current_store(user)
+            if not store:
+                return Response(
+                    {"error": "Loja não encontrada"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            validate_store_ownership(user, store)
+            
+            serializer = ProfileSerializer(
+                store, 
+                data=request.data, 
+                partial=True,
+                context={"request": request}
+            )
+            
             if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                instance = serializer.save()
+                
+                # ✅ Forçar serialização imediata
+                serialized_data = ProfileSerializer(
+                    instance, 
+                    context={"request": request}
+                ).data
+                
+                # ✅ Invalidar cache após atualização
+                cache.delete(cache_key)
+                logger.info(f"✅ Profile updated and cache invalidated for user {user.id}")
+                
+                return Response(serialized_data, status=status.HTTP_200_OK)
             
+            # ✅ Retorna erros de validação como Response válido
+            return Response(
+                {"errors": serializer.errors}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
     except Exception as e:
-        print(f"❌ Erro no profile_view: {e}")
-        return Response({
-            'error': 'Erro ao carregar perfil',
-            'message': str(e)
-        }, status=500)
+        # ✅ Traceback COMPLETO no log do servidor, inclusive em produção.
+        # Antes, com DEBUG=False, só era registrado "Erro no profile_view para
+        # user X" — sem stack trace —, o que tornava impossível diagnosticar
+        # o 500 pelos logs do Render. O traceback fica só no servidor; a
+        # resposta ao cliente continua sem detalhes internos.
+        user_id = user.id if user.is_authenticated else 'anon'
+        logger.error(
+            f"❌ Erro no profile_view para user {user_id}: {type(e).__name__}: {e}",
+            exc_info=True,
+        )
 
+        # ✅ Sempre retorna Response DRF, nunca raise
+        return Response(
+            {
+                "error": "Erro interno ao processar perfil",
+                "details": str(e) if settings.DEBUG else "Tente novamente"
+            }, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    # ✅ FIM DA FUNÇÃO - Apenas UM bloco except Exception
 # ==========================================
 # 5. PAINEL ADMIN (Gestão de Assinaturas)
 # ==========================================
@@ -2353,6 +2515,8 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ['transaction_type']
+    # ✅ Mesmo motivo do InventoryViewSet: o frontend espera array puro.
+    pagination_class = None
     
     def get_queryset(self):
         """Queryset com tratamento de erro robusto"""
@@ -3071,7 +3235,12 @@ def cash_flow_detailed(request):
     """Fluxo de caixa detalhado com todas as transações"""
     try:
         store = ensure_user_has_store(request.user)
-        
+
+        # 🔒 Recurso pago: valida o plano no servidor, não só na interface.
+        bloqueio = _require_pro_feature(store, 'analytics')
+        if bloqueio:
+            return bloqueio
+
         # Filtros
         start_date = request.GET.get('start_date')
         end_date = request.GET.get('end_date')
@@ -3281,3 +3450,169 @@ class ThemeConfigAdminView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def dashboard_stats(request):
+    store = ensure_user_has_store(request.user)
+    items = InventoryItem.objects.filter(store=store)
+    transactions = StockTransaction.objects.filter(store=store)
+    
+    # 1. Valor Investido (custo * quantidade)
+    invested = items.aggregate(total=Sum(F('cost_price') * F('total_quantity')))['total'] or 0
+    
+    # 2. Potencial de Venda (preço_venda * quantidade)
+    potential = items.aggregate(total=Sum(F('sale_price') * F('total_quantity')))['total'] or 0
+    
+    # 3. Vendas e Lucro do Mês
+    now = timezone.now()
+    month_txs = transactions.filter(
+        created_at__year=now.year,
+        created_at__month=now.month,
+        transaction_type='VENDA'
+    )
+    month_sales = month_txs.aggregate(total=Sum(F('unit_price') * F('quantity')))['total'] or 0
+    # ⚠️ CORREÇÃO: StockTransaction não tem campo 'profit' (nunca teve) — o
+    # aggregate anterior (Sum(F('profit'))) sempre lançava FieldError e
+    # derrubava esse endpoint com 500. Lucro = (preço de venda - custo) * quantidade.
+    month_profit = month_txs.aggregate(
+        total=Sum((F('unit_price') - F('unit_cost')) * F('quantity'))
+    )['total'] or 0
+    
+    return Response({
+        "investedValue": float(invested),
+        "potentialValue": float(potential),
+        "projectedProfit": float(potential - invested),
+        "monthSales": float(month_sales),
+        "monthProfit": float(month_profit)
+    })
+
+
+# ==========================================
+# ENDPOINTS LGPD - GESTÃO DE CONSENTIMENTO
+# ==========================================
+# backend/core/inventory/views.py - record_consent CORRIGIDA
+# inventory/views.py
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def record_consent(request):
+    """Registra novo consentimento LGPD"""
+    from .serializers import ConsentRecordSerializer
+    
+    # Adicionar metadados da requisição ao contexto
+    serializer = ConsentRecordSerializer(
+        data=request.data, 
+        context={
+            'request': request,
+            'ip_address': request.META.get('REMOTE_ADDR'),
+            'user_agent': request.META.get('HTTP_USER_AGENT', '')[:500],
+        }
+    )
+    
+    if serializer.is_valid():
+        consent = serializer.save()
+        
+        return Response({
+            "status": "consent_recorded",
+            "consent_id": consent.id,
+            "version": consent.term_version,
+            "purposes_granted": consent.purpose_flags,
+            "can_revoke": [
+                p for p in consent.purpose_flags 
+                if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', [])
+            ]
+        }, status=status.HTTP_201_CREATED)
+    
+    return Response({
+        "status": "error",
+        "errors": serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def revoke_consent(request, purpose: str):
+    """Revoga consentimento para finalidade específica"""
+    from .serializers import ConsentRevocationSerializer
+    
+    # Validar que a finalidade é revogável
+    if purpose in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', []):
+        return Response({
+            "error": f"A finalidade '{purpose}' é essencial e não pode ser revogada"
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Buscar consentimento ativo do usuário
+    consent = ConsentRecord.objects.filter(
+        user=request.user,
+        purpose_flags__contains=[purpose],
+        revoked_at__isnull=True
+    ).first()
+    
+    if not consent:
+        return Response({
+            "error": "Consentimento não encontrado para esta finalidade"
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    # Revogar
+    consent.revoke(purpose=purpose)
+    
+    return Response({
+        "status": "revoked",
+        "purpose": purpose,
+        "revoked_at": consent.revoked_at.isoformat()
+    }, status=status.HTTP_200_OK)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_consents(request):
+    """Lista todos os consentimentos do usuário logado"""
+    from .serializers import ConsentSummarySerializer
+    
+    consents = ConsentRecord.objects.filter(
+        user=request.user
+    ).order_by('-accepted_at')
+    
+    serializer = ConsentSummarySerializer(consents, many=True)
+    
+    return Response({
+        "consents": serializer.data,
+        "current_version": getattr(settings, 'LGPD_CONSENT_VERSION', 'v1.0_2026-05'),
+        "essential_purposes": getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', []),
+        "revocable_purposes": [
+            p for p, _ in ConsentRecord.PURPOSE_CHOICES 
+            if p not in getattr(settings, 'LGPD_ESSENTIAL_PURPOSES', [])
+        ]
+    }, status=status.HTTP_200_OK)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def export_my_data(request):
+    """
+    Portabilidade de dados (Art. 18, V) - Exporta dados do usuário
+    GET /api/consent/export/
+    """
+    store = ensure_user_has_store(request.user)
+    
+    # Limita período para evitar exportação massiva
+    cutoff_date = timezone.now() - timedelta(days=730)  # 2 anos
+    
+    # Coleta dados de forma paginada/limitada
+    inventory = InventoryItem.objects.filter(
+        store=store, updated_at__gte=cutoff_date
+    ).select_related('product')[:500]  # Limite de segurança
+    
+    transactions = StockTransaction.objects.filter(
+        store=store, created_at__gte=cutoff_date
+    ).select_related('product', 'batch')[:1000]
+    
+    log_safe("Exportação de dados solicitada", user_id=request.user.id, store_id=store.id)
+    
+    return Response({
+        "exported_at": timezone.now().isoformat(),
+        "user_email": request.user.email,
+        "store_slug": store.slug,
+        "period": {"from": cutoff_date.isoformat(), "to": timezone.now().isoformat()},
+        "inventory_count": inventory.count(),
+        "transactions_count": transactions.count(),
+        "inventory": InventoryItemSerializer(inventory, many=True).data,
+        "transactions": StockTransactionSerializer(transactions, many=True).data,
+        "note": "Dados exportados conforme Art. 18, V da LGPD"
+    })

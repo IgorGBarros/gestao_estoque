@@ -1,5 +1,7 @@
-# inventory/utils.py - VERSÃO ROBUSTA E TENANT-AWARE
-
+# backend/core/inventory/utils.py
+"""
+Utilitários para gerenciamento de lojas (Store) e segurança tenant-aware.
+"""
 import logging
 from django.utils.text import slugify
 from django.core.exceptions import ValidationError
@@ -7,6 +9,7 @@ from .models import Store
 
 # Configurar logger
 logger = logging.getLogger(__name__)
+
 
 def get_current_store(user):
     """
@@ -96,6 +99,7 @@ def get_current_store(user):
         logger.error(f"❌ Erro inesperado ao criar loja para usuário {user.id}: {e}")
         raise ValidationError(f"Não foi possível criar loja: {str(e)}")
 
+
 def ensure_user_has_store(user):
     """
     Alias para get_current_store para compatibilidade com código existente.
@@ -107,6 +111,7 @@ def ensure_user_has_store(user):
         Store: Instância da loja do usuário
     """
     return get_current_store(user)
+
 
 def validate_store_ownership(user, store):
     """
@@ -126,10 +131,14 @@ def validate_store_ownership(user, store):
         raise ValidationError("Usuário e loja são obrigatórios")
     
     if store.owner_id != user.id:
-        logger.warning(f"Tentativa de acesso não autorizado: usuário {user.id} tentou acessar loja {store.id}")
+        logger.warning(
+            f"Tentativa de acesso não autorizado: usuário {user.id} "
+            f"tentou acessar loja {store.id}"
+        )
         raise ValidationError("Acesso negado: você não é dono desta loja")
     
     return True
+
 
 def get_store_stats(store):
     """
@@ -142,7 +151,8 @@ def get_store_stats(store):
         dict: Estatísticas da loja
     """
     try:
-        from .models import InventoryItem  # Import local para evitar circular
+        # Import local para evitar circular
+        from .models import InventoryItem
         
         total_products = store.items.count()
         total_value = sum(
@@ -160,10 +170,111 @@ def get_store_stats(store):
         
     except Exception as e:
         logger.error(f"Erro ao calcular estatísticas da loja {store.id}: {e}")
+        # Retornar valores padrão seguros em caso de erro
         return {
             'total_products': 0,
             'total_value': 0,
-            'plan': store.plan,
+            'plan': getattr(store, 'plan', 'free'),
             'can_add_products': True,
-            'created_at': store.created_at,
+            'created_at': getattr(store, 'created_at', None),
         }
+
+
+# ==========================================
+# UTILITÁRIOS ADICIONAIS (OPCIONAIS)
+# ==========================================
+
+def format_store_slug(name: str, user_id: int = None) -> str:
+    """
+    Gera um slug único e seguro para uma loja.
+    
+    Args:
+        name: Nome base para o slug
+        user_id: ID do usuário para garantir unicidade (opcional)
+        
+    Returns:
+        str: Slug único e URL-safe
+    """
+    base_slug = slugify(name)
+    if not base_slug:
+        base_slug = f"loja-{user_id}" if user_id else "minha-loja"
+    
+    # Verificar unicidade
+    unique_slug = base_slug
+    counter = 1
+    while Store.objects.filter(slug=unique_slug).exists():
+        unique_slug = f"{base_slug}-{counter}"
+        counter += 1
+        if counter > 100:  # Limite de segurança
+            unique_slug = f"{base_slug}-{user_id or 'x'}"
+            break
+    
+    return unique_slug
+
+
+def get_user_store_or_none(user):
+    """
+    Obtém a loja do usuário sem criar automaticamente.
+    
+    Útil para verificações onde não queremos criar loja silenciosamente.
+    
+    Args:
+        user: Instância do modelo User
+        
+    Returns:
+        Store or None: Loja do usuário ou None se não existir
+    """
+    if not user or not user.is_authenticated:
+        return None
+    
+    try:
+        # Tentar via relacionamento
+        if hasattr(user, 'store') and user.store:
+            return user.store
+        # Fallback via query
+        return Store.objects.filter(owner=user).first()
+    except Exception:
+        return None
+
+
+def bulk_create_stores_for_users(user_ids: list, plan: str = 'free') -> dict:
+    """
+    Cria lojas em massa para múltiplos usuários (admin/seed).
+    
+    Args:
+        user_ids: Lista de IDs de usuários
+        plan: Plano padrão para as lojas criadas
+        
+    Returns:
+        dict: Resumo da operação {created: int, skipped: int, errors: list}
+    """
+    from django.contrib.auth import get_user_model
+    
+    User = get_user_model()
+    result = {'created': 0, 'skipped': 0, 'errors': []}
+    
+    for user_id in user_ids:
+        try:
+            user = User.objects.get(id=user_id)
+            
+            # Pular se já tem loja
+            if get_user_store_or_none(user):
+                result['skipped'] += 1
+                continue
+            
+            # Criar loja
+            store = get_current_store(user)
+            if plan != 'free':
+                store.plan = plan
+                store.save(update_fields=['plan'])
+            
+            result['created'] += 1
+            
+        except Exception as e:
+            result['errors'].append({
+                'user_id': user_id,
+                'error': str(e)
+            })
+            logger.error(f"Erro ao criar loja para usuário {user_id}: {e}")
+    
+    return result

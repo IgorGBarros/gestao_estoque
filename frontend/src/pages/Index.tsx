@@ -1,3 +1,4 @@
+// pages/Index.tsx — VERSÃO SEGURA E OTIMIZADA
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
@@ -5,7 +6,7 @@ import {
   ArrowDownCircle, Settings, PieChart, Store, History, User, Bell, CheckCircle2
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { inventoryApi, movementsApi, profileApi } from "../lib/api";
+import { statsApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import { ChatAssistant } from "../components/ChatAssistant";
@@ -13,6 +14,7 @@ import ProBadge from "../components/ProBadge";
 import UpgradeModal from "../components/UpgradeModal";
 import ProfileCompletionBanner from "../components/ProfileCompletionBanner";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
+import AiTrainingConsentBanner from "@/components/AitrainingConsentBanner";
 
 interface Stats {
   investedValue: number;
@@ -25,7 +27,7 @@ interface Stats {
 export default function Index() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isLocked } = useFeatureGates();
+  const { isLocked, loading: gatesLoading } = useFeatureGates();
   const [stats, setStats] = useState<Stats>({
     investedValue: 0,
     potentialValue: 0,
@@ -41,48 +43,31 @@ export default function Index() {
 
   useEffect(() => {
     if (!user) return;
-    profileApi
-      .get()
-      .then((p) => setStoreSlug(p.store_slug))
-      .catch(() => setStoreSlug(null));
 
-    Promise.all([inventoryApi.list(), movementsApi.list()])
-      .then(([items, movements]) => {
-        const now = new Date();
-        const monthMovements = movements.filter((m) => {
-          const d = new Date(m.created_at);
-          return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-        }).map(m => {
-          const rawType = (m.transaction_type || (m as any).movement_type || "").toUpperCase();
-          const uiType = rawType === "ENTRADA" ? "entrada" : "saida";
-          return { ...m, raw_type: rawType, ui_type: uiType, profit: (m as any).profit ?? 0 };
-        });
+    // ✅ store_slug já vem no objeto `user` do useAuth (o login espalha o
+    // profile inteiro nele) — não precisa de outra chamada a /profile/.
+    // Era esta busca extra que disparava GET /profile/ toda vez que se
+    // voltava para a home.
+    setStoreSlug((user as any).store_slug ?? null);
 
-        const salesMovements = monthMovements.filter((m) => m.ui_type === "saida" && m.raw_type === "VENDA");
-        const monthSales = salesMovements.reduce((s, m) => s + (Number(m.unit_price) || 0) * Math.abs(m.quantity), 0);
-        const monthProfit = salesMovements.reduce((s, m) => s + (m.profit || 0), 0);
-
-        const totalInvested = items.reduce((s, i) => {
-          const qty = i.total_quantity ?? i.quantity ?? 0;
-          return s + (qty * i.cost_price);
-        }, 0);
-        const totalPotential = items.reduce((s, i) => {
-          const qty = i.total_quantity ?? i.quantity ?? 0;
-          const salePrice = i.sale_price || i.product?.official_price || 0;
-          return s + (qty * salePrice);
-        }, 0);
-
-        setStats({
-          investedValue: totalInvested,
-          potentialValue: totalPotential,
-          projectedProfit: totalPotential - totalInvested,
-          monthSales,
-          monthProfit,
-        });
+    const fetchData = async () => {
+      try {
+        // statsApi.getDashboard() tem cache de 30s + deduplicação — voltar
+        // pra home dentro da janela não gera requisição de rede.
+        const statsRes = await statsApi.getDashboard();
+        setStats(statsRes);
+      } catch (err) {
+        console.error("Erro ao carregar estatísticas:", err);
+      } finally {
         setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [user]);
+      }
+    };
+
+    fetchData();
+    // ✅ Depender de user?.id (primitivo), não do objeto inteiro: o useAuth
+    // recria o objeto em vários momentos e isso re-disparava este efeito.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const fmt = (v: number) => `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`;
 
@@ -100,7 +85,6 @@ export default function Index() {
       <header className="sticky top-0 z-20 border-b border-border bg-card">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
-            {/* ✅ border-brand/20 em vez de border-[#871745]/20 */}
             <div className="h-10 w-10 rounded-full overflow-hidden border-2 border-brand/20 shadow-sm">
               <img
                 src={amorinhaAvatar}
@@ -163,6 +147,7 @@ export default function Index() {
       {/* ══ MAIN ══ */}
       <main className="mx-auto max-w-6xl px-6 py-8 space-y-6">
         <ProfileCompletionBanner />
+        <AiTrainingConsentBanner />
 
         {/* CARDS FINANCEIROS */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -185,7 +170,23 @@ export default function Index() {
           <ActionBtn onClick={() => navigate("/withdraw")} icon={ArrowDownCircle} label="Baixa" desc="Registrar saída" />
           <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" />
           <ActionBtn onClick={() => navigate("/history")} icon={History} label="Extrato" desc="Movimentações" />
-          <ActionBtn onClick={() => navigate("/dashboard")} icon={PieChart} label="Dashboard" desc="Gráficos e análises" proBadge={isLocked("dashboard_charts")} />
+          <ActionBtn
+            onClick={() => {
+              // Bloqueado: oferece o upgrade em vez de levar a uma tela que
+              // vai negar o acesso.
+              if (isLocked("dashboard_charts")) {
+                setUpgradeCtx({ feature: "Dashboard", description: "Veja lucro real, fluxo de caixa e gráficos das suas vendas." });
+                setShowUpgrade(true);
+              } else {
+                navigate("/dashboard");
+              }
+            }}
+            icon={PieChart}
+            label="Dashboard"
+            desc="Gráficos e análises"
+            proBadge={isLocked("dashboard_charts")}
+            proBadgeLoading={gatesLoading}
+          />
           <ActionBtn
             onClick={() => {
               if (isLocked("storefront")) {
@@ -201,12 +202,17 @@ export default function Index() {
             label="Vitrine"
             desc="Sua loja online"
             proBadge={isLocked("storefront")}
+            proBadgeLoading={gatesLoading}
           />
         </div>
 
-        {/* ✅ Banner Amorinha — bg-brand-soft em vez de bg-[#FDF2F7] */}
         <div className="mt-10 text-center text-sm text-muted-foreground bg-brand-soft p-4 rounded-xl border border-brand/10">
-          {!isLocked("chat_assistant") ? (
+          {gatesLoading ? (
+            <div className="flex items-center justify-center gap-2 animate-pulse">
+              <div className="h-6 w-6 rounded-full bg-brand/15" />
+              <span className="h-3 w-48 rounded bg-brand/15" />
+            </div>
+          ) : !isLocked("chat_assistant") ? (
             <div className="flex items-center justify-center gap-2">
               <div className="h-6 w-6 rounded-full overflow-hidden border border-brand/20">
                 <img src={amorinhaAvatar} alt="Amorinha" className="h-full w-full object-cover" />
@@ -221,7 +227,7 @@ export default function Index() {
         </div>
       </main>
 
-      {!isLocked("chat_assistant") && <ChatAssistant />}
+      {!gatesLoading && !isLocked("chat_assistant") && <ChatAssistant />}
       <UpgradeModal
         isOpen={showUpgrade}
         onClose={() => setShowUpgrade(false)}
@@ -240,6 +246,7 @@ function ActionBtn({
   desc,
   primary,
   proBadge,
+  proBadgeLoading,
 }: {
   onClick: () => void;
   icon: typeof Package;
@@ -247,6 +254,7 @@ function ActionBtn({
   desc: string;
   primary?: boolean;
   proBadge?: boolean;
+  proBadgeLoading?: boolean;
 }) {
   return (
     <button
@@ -254,7 +262,7 @@ function ActionBtn({
       className={`flex items-center gap-3 rounded-xl p-4 text-left transition-all hover:scale-[1.02] hover:shadow-md ${
         primary
           ? "border-2 border-brand bg-gradient-to-br from-brand to-brand-hover shadow-sm"
-          : "border border-border bg-card hoverbg-brand-soft"
+          : "border border-border bg-card hover:bg-brand-soft" // ✅ Corrigido: hover:bg-brand-soft
       }`}
     >
       <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${primary ? "bg-white/20" : "bg-brand/10"}`}>
@@ -263,7 +271,11 @@ function ActionBtn({
       <div className="min-w-0">
         <p className={`text-sm font-bold flex items-center gap-1.5 ${primary ? "text-white" : "text-foreground"}`}>
           {label}
-          {proBadge && <ProBadge />}
+          {proBadgeLoading ? (
+            <span className="inline-block h-4 w-8 rounded-full bg-brand/15 animate-pulse" />
+          ) : (
+            proBadge && <ProBadge />
+          )}
         </p>
         <p className={`text-xs truncate mt-0.5 ${primary ? "text-white/80" : "text-muted-foreground"}`}>
           {desc}

@@ -1,20 +1,21 @@
 // pages/Plans.tsx — VERSÃO REFATORADA COM TEMA DINÂMICO
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Crown, Check, X, Sparkles,
-  CreditCard, ExternalLink, MessageCircle, QrCode, Loader2,
+  CreditCard, QrCode, Barcode, ShieldCheck, Loader2,
 } from "lucide-react";
 import { usePlan } from "../hooks/usePlan";
 import { useAuth } from "../hooks/useAuth";
-import { useToast } from "../hooks/use-toast";
+import { plansApi, paymentsApi } from "../lib/api";
+import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 
 type BillingCycle = "monthly" | "yearly";
-type PaymentMethod = "stripe" | "link" | "pix" | "whatsapp";
 
-const MONTHLY_PRICE = 39.9;
-const YEARLY_PRICE = 399.0;
-const YEARLY_SAVINGS = (MONTHLY_PRICE * 12 - YEARLY_PRICE).toFixed(2).replace(".", ",");
+// ✅ Fallback caso a API de planos não responda. Os valores REAIS vêm de
+// /api/plans/ (PlanConfig) — mesmos que o admin edita e que o Asaas cobra.
+const DEFAULT_MONTHLY_PRICE = 39.9;
+const DEFAULT_YEARLY_PRICE = 399.0;
 
 const FREE_FEATURES = [
   { text: "Até 50 produtos", included: true },
@@ -49,67 +50,66 @@ export default function Plans() {
   const { toast } = useToast();
 
   const [billing, setBilling] = useState<BillingCycle>("monthly");
-  const [selectedMethod, setSelectedMethod] = useState<PaymentMethod | null>(null);
   const [processing, setProcessing] = useState(false);
 
-  const currentPrice = billing === "monthly" ? MONTHLY_PRICE : YEARLY_PRICE;
+  // ✅ Preços dinâmicos do PlanConfig (via /api/plans/). Enquanto carrega,
+  // usa os defaults; se a API responder, substitui pelos valores reais.
+  const [monthlyPrice, setMonthlyPrice] = useState(DEFAULT_MONTHLY_PRICE);
+  const [yearlyPrice, setYearlyPrice] = useState(DEFAULT_YEARLY_PRICE);
+
+  useEffect(() => {
+    plansApi.list()
+      .then((plans) => {
+        const pro = Array.isArray(plans) ? plans.find((p: any) => p.plan_type === "pro") : null;
+        if (pro) {
+          if (typeof pro.monthly_price === "number") setMonthlyPrice(pro.monthly_price);
+          else if (pro.monthly_price) setMonthlyPrice(parseFloat(pro.monthly_price));
+          if (typeof pro.yearly_price === "number") setYearlyPrice(pro.yearly_price);
+          else if (pro.yearly_price) setYearlyPrice(parseFloat(pro.yearly_price));
+        }
+      })
+      .catch(() => { /* mantém defaults */ });
+  }, []);
+
+  const yearlySavings = (monthlyPrice * 12 - yearlyPrice).toFixed(2).replace(".", ",");
+  const currentPrice = billing === "monthly" ? monthlyPrice : yearlyPrice;
   const priceDisplay = currentPrice.toFixed(2).replace(".", ",");
-  const perMonthYearly = (YEARLY_PRICE / 12).toFixed(2).replace(".", ",");
+  const perMonthYearly = (yearlyPrice / 12).toFixed(2).replace(".", ",");
 
-  const handlePayment = async (method: PaymentMethod) => {
-    setSelectedMethod(method);
+  const handleSubscribe = async () => {
     setProcessing(true);
-    const planLabel = billing === "monthly" ? "Mensal" : "Anual";
-    const priceLabel = `R$ ${priceDisplay}`;
-
     try {
-      switch (method) {
-        case "stripe": {
-          toast({
-            title: "Stripe em configuração",
-            description:
-              "O checkout por cartão será habilitado em breve. Use outro método por enquanto.",
-          });
-          break;
-        }
-        case "link": {
-          const checkoutUrl = localStorage.getItem("admin_checkout_url");
-          if (checkoutUrl) {
-            window.open(checkoutUrl, "_blank");
-          } else {
-            toast({
-              title: "Link não configurado",
-              description:
-                "O administrador ainda não configurou o link de checkout externo.",
-              variant: "destructive",
-            });
-          }
-          break;
-        }
-        case "pix": {
-          toast({
-            title: "PIX - Dados para pagamento",
-            description: `Plano PRO ${planLabel}: ${priceLabel}. Envie o comprovante pelo WhatsApp para ativação.`,
-          });
-          const pixMsg = encodeURIComponent(
-            `Olá! Quero assinar o plano PRO ${planLabel} (${priceLabel}). Segue meu comprovante PIX.\n\nEmail: ${user?.email || ""}`
-          );
-          window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${pixMsg}`, "_blank");
-          break;
-        }
-        case "whatsapp": {
-          const msg = encodeURIComponent(
-            `Olá! Tenho interesse no plano PRO ${planLabel} (${priceLabel}).\n\nEmail: ${user?.email || ""}\nComo faço para assinar?`
-          );
-          window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${msg}`, "_blank");
-          break;
-        }
+      // Cria o checkout no Asaas e leva a consultora até lá. A escolha entre
+      // Pix, cartão e boleto acontece no checkout do provedor — é lá que os
+      // dados sensíveis são tratados, e a confirmação volta pelo webhook,
+      // liberando o PRO sozinho (sem comprovante, sem espera de 24h).
+      const result = await paymentsApi.createCheckout(billing);
+
+      if (!result?.checkout_url) {
+        throw new Error("Não recebemos o link de pagamento. Tente novamente.");
       }
+
+      // window.location (e não window.open): popup de pagamento costuma ser
+      // bloqueado pelo navegador.
+      window.location.href = result.checkout_url;
     } catch (err: any) {
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
-    } finally {
+      const msg: string = err?.message || "";
+
+      if (msg.toLowerCase().includes("já possui")) {
+        toast({
+          title: "Você já é PRO",
+          description: "Sua assinatura está ativa. Aproveite os recursos!",
+        });
+        setProcessing(false);
+        return;
+      }
+
+      toast({
+        title: "Não foi possível abrir o pagamento",
+        description: msg || "Tente novamente em alguns instantes.",
+        variant: "destructive",
+      });
       setProcessing(false);
-      setSelectedMethod(null);
     }
   };
 
@@ -246,7 +246,7 @@ export default function Plans() {
                     <strong className="text-foreground">R$ {priceDisplay}/ano</strong>
                   </p>
                   <p className="text-xs text-brand font-semibold">
-                    Economia de R$ {YEARLY_SAVINGS}
+                    Economia de R$ {yearlySavings}
                   </p>
                 </div>
               )}
@@ -257,7 +257,7 @@ export default function Plans() {
               </div>
             ) : (
               <div className="text-xs text-muted-foreground text-center py-1">
-                Escolha como pagar abaixo ↓
+                Cancele quando quiser, sem multa
               </div>
             )}
             <ul className="space-y-2.5">
@@ -272,105 +272,69 @@ export default function Plans() {
         </div>
 
         {/* ══════════════════════════════════════════
-            PAYMENT METHODS
+            CHECKOUT
             ══════════════════════════════════════════ */}
         {!isPro && (
           <div className="space-y-4">
-            <h3 className="font-display text-sm font-bold text-foreground text-center">
-              Escolha a forma de pagamento
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Stripe / Card */}
-              <button
-                onClick={() => handlePayment("stripe")}
-                disabled={processing}
-                className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 hover:border-brand/50 transition-all text-left group"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand/10 group-hover:bg-brand/20 transition-colors">
-                  <CreditCard className="h-5 w-5 text-brand" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-foreground">Cartão de Crédito</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    Via Stripe • Checkout seguro
-                  </p>
-                </div>
-                {selectedMethod === "stripe" && processing ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-brand" />
-                ) : (
-                  <ExternalLink className="h-4 w-4 text-muted-foreground group-hover:text-brand transition-colors" />
-                )}
-              </button>
+            <button
+              onClick={handleSubscribe}
+              disabled={processing}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-4 text-sm font-bold text-white shadow-lg shadow-brand/25 hover:opacity-90 transition-opacity disabled:opacity-70"
+            >
+              {processing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Abrindo pagamento...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Assinar PRO — R$ {priceDisplay}
+                  {billing === "monthly" ? "/mês" : "/ano"}
+                </>
+              )}
+            </button>
 
-              {/* External Link */}
-              <button
-                onClick={() => handlePayment("link")}
-                disabled={processing}
-                className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 hover:border-brand/50 transition-all text-left group"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/10 group-hover:bg-purple-500/20 transition-colors">
-                  <ExternalLink className="h-5 w-5 text-purple-500" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-foreground">Link de Pagamento</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    Hotmart, Kiwify ou similar
-                  </p>
-                </div>
-                {selectedMethod === "link" && processing ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
-                ) : (
-                  <ExternalLink className="h-4 w-4 text-muted-foreground group-hover:text-purple-500 transition-colors" />
-                )}
-              </button>
-
-              {/* PIX */}
-              <button
-                onClick={() => handlePayment("pix")}
-                disabled={processing}
-                className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 hover:border-brand/50 transition-all text-left group"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10 group-hover:bg-success/20 transition-colors">
-                  <QrCode className="h-5 w-5 text-success" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-foreground">PIX</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    Pagamento instantâneo • Envie comprovante
-                  </p>
-                </div>
-                {selectedMethod === "pix" && processing ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-success" />
-                ) : (
-                  <QrCode className="h-4 w-4 text-muted-foreground group-hover:text-success transition-colors" />
-                )}
-              </button>
-
-              {/* WhatsApp */}
-              <button
-                onClick={() => handlePayment("whatsapp")}
-                disabled={processing}
-                className="flex items-center gap-3 rounded-xl border border-border bg-card p-4 hover:border-brand/50 transition-all text-left group"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-success/10 group-hover:bg-success/20 transition-colors">
-                  <MessageCircle className="h-5 w-5 text-success" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-semibold text-foreground">WhatsApp</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    Fale com o suporte para assinar
-                  </p>
-                </div>
-                {selectedMethod === "whatsapp" && processing ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-success" />
-                ) : (
-                  <MessageCircle className="h-4 w-4 text-muted-foreground group-hover:text-success transition-colors" />
-                )}
-              </button>
+            {/* Formas aceitas: informação, não uma escolha a mais.
+                A seleção acontece no checkout do Asaas. */}
+            <div className="flex items-center justify-center gap-5 py-1">
+              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <QrCode className="h-3.5 w-3.5" /> Pix
+              </span>
+              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <CreditCard className="h-3.5 w-3.5" /> Cartão
+              </span>
+              <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <Barcode className="h-3.5 w-3.5" /> Boleto
+              </span>
             </div>
-            <p className="text-center text-[10px] text-muted-foreground">
-              Após o pagamento, seu plano será ativado em até 24h (PIX/WhatsApp) ou
-              instantaneamente (cartão/link).
+
+            <div className="rounded-xl border border-border bg-card p-4 space-y-2">
+              <p className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                <ShieldCheck className="h-4 w-4 text-brand shrink-0" />
+                Pagamento processado pelo Asaas
+              </p>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Você escolhe a forma de pagamento na próxima etapa. Seus dados de
+                cartão não passam pelo Minha Amora. Assim que o pagamento é
+                confirmado, o PRO é liberado automaticamente — sem enviar
+                comprovante.
+              </p>
+            </div>
+
+            <p className="text-center text-[11px] text-muted-foreground">
+              Dúvidas antes de assinar?{" "}
+              <button
+                onClick={() => {
+                  const msg = encodeURIComponent(
+                    `Olá! Tenho uma dúvida sobre o plano PRO.\n\nEmail: ${user?.email || ""}`
+                  );
+                  window.open(`https://wa.me/${ADMIN_WHATSAPP}?text=${msg}`, "_blank");
+                }}
+                className="font-medium text-brand hover:underline"
+              >
+                Falar no WhatsApp
+              </button>
             </p>
           </div>
         )}
@@ -389,11 +353,11 @@ export default function Plans() {
             },
             {
               q: "O pagamento é seguro?",
-              a: "Sim! Usamos provedores certificados (Stripe, Hotmart, etc.) para processar pagamentos com total segurança.",
+              a: "Sim. O pagamento é processado pelo Asaas, instituição autorizada pelo Banco Central. Seus dados de cartão não passam pelo Minha Amora.",
             },
             {
               q: "Quando meu plano PRO é ativado?",
-              a: "Pagamentos por cartão são instantâneos. PIX e WhatsApp podem levar até 24h para ativação manual.",
+              a: "Assim que o pagamento é confirmado, o PRO é liberado automaticamente. Pix e cartão costumam confirmar na hora; boleto leva de 1 a 3 dias úteis para compensar.",
             },
             {
               q: "E se eu ultrapassar 50 produtos no Free?",

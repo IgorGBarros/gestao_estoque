@@ -18,7 +18,7 @@ import {
 } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 
 const SALE_TYPES: {
   value: TransactionType; label: string; emoji: string;
@@ -65,11 +65,11 @@ export default function WithdrawProduct() {
 
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isLocked } = useFeatureGates();
+  const { isFeatureEnabled } = useFeatureGates();
   const { toast } = useToast();
 
   const handleScannerClick = () => {
-    if (isLocked("barcode_scanner")) {
+    if (!isFeatureEnabled("barcode_scanner")) {
       setShowUpgrade(true);
       return;
     }
@@ -282,7 +282,7 @@ export default function WithdrawProduct() {
               ════════════════════════════════ */}
           {step === 0 && (
             <motion.div key="scan" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              {showScanner && !isLocked("barcode_scanner") ? (
+              {showScanner && !isFeatureEnabled("barcode_scanner") ? (
                 <div className="space-y-4">
                   <BarcodeScanner
                     onScan={handleBarcodeScan}
@@ -318,24 +318,24 @@ export default function WithdrawProduct() {
                   <button
                     onClick={handleScannerClick}
                     className={`w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all ${
-                      isLocked("barcode_scanner") ? "opacity-80" : ""
+                      isFeatureEnabled("barcode_scanner") ? "opacity-80" : ""
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <div
                         className={`p-2 rounded-lg ${
-                          !isLocked("barcode_scanner") ? "bg-brand/10 text-brand" : "bg-muted text-muted-foreground"
+                          !isFeatureEnabled("barcode_scanner") ? "bg-brand/10 text-brand" : "bg-muted text-muted-foreground"
                         }`}
                       >
-                        {!isLocked("barcode_scanner") ? <ScanBarcode size={20} /> : <Lock size={20} />}
+                        {!isFeatureEnabled("barcode_scanner") ? <ScanBarcode size={20} /> : <Lock size={20} />}
                       </div>
                       <div>
                         <p className="font-bold text-sm text-foreground flex items-center gap-2">
                           Escanear com Câmera
-                          {isLocked("barcode_scanner") && <ProBadge />}
+                          {isFeatureEnabled("barcode_scanner") && <ProBadge />}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {!isLocked("barcode_scanner") ? "Use a câmera para ler o código de barras" : "Exclusivo para assinantes PRO"}
+                          {!isFeatureEnabled("barcode_scanner") ? "Use a câmera para ler o código de barras" : "Exclusivo para assinantes PRO"}
                         </p>
                       </div>
                     </div>
@@ -461,7 +461,7 @@ export default function WithdrawProduct() {
 
                 <div>
                   <label className="text-sm font-medium text-foreground">Classificação da Transação</label>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
+                  <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {SALE_TYPES.slice(0, 3).map((t) => (
                       <button
                         key={t.value}

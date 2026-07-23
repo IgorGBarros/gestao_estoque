@@ -1,9 +1,10 @@
 // components/NotificationBell.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
 import { useState, useRef, useEffect } from "react";
-import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package } from "lucide-react";
+import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package, Crown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useExpiryAlerts, ExpiryAlert } from "../hooks/useExpiryAlerts";
 import { useSalesNotifications, SalesMilestone, WeeklyInsight } from "../hooks/useSalesNotifications";
+import { useSubscriptionAlert } from "../hooks/Usesubscriptionalert";
 import { formatMoney } from "../lib/api";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -21,6 +22,7 @@ export default function NotificationBell() {
   const navigate = useNavigate();
   const { alerts: expiryAlerts, totalCount: expiryCount, criticalCount } = useExpiryAlerts();
   const { milestones, weeklyInsight, notificationCount: salesCount, dismissMilestone } = useSalesNotifications();
+  const { subscriptionAlert } = useSubscriptionAlert();
 
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"all" | "expiry" | "sales">("all");
@@ -36,7 +38,8 @@ export default function NotificationBell() {
   const filteredExpiryCount = expiryEnabled ? expiryCount : 0;
   const filteredCritical = expiryEnabled ? criticalCount : 0;
   const filteredSalesCount = filteredMilestones.length + (filteredWeekly ? 1 : 0);
-  const totalCount = filteredExpiryCount + filteredSalesCount;
+  const subCount = subscriptionAlert ? 1 : 0;
+  const totalCount = filteredExpiryCount + filteredSalesCount + subCount;
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -48,13 +51,17 @@ export default function NotificationBell() {
 
   if (totalCount === 0) {
     return (
-      <button className="relative rounded-lg p-2 text-muted-foreground hover:bg-brand-soft hover:text-brand transition-colors">
+      <div
+        className="relative rounded-lg p-2 text-muted-foreground/60"
+        title="Nenhuma notificação no momento"
+        aria-label="Nenhuma notificação"
+      >
         <Bell className="h-5 w-5" />
-      </button>
+      </div>
     );
   }
 
-  const hasCritical = filteredCritical > 0;
+  const hasCritical = filteredCritical > 0 || subscriptionAlert?.expired === true;
 
   return (
     <div ref={ref} className="relative">
@@ -86,7 +93,7 @@ export default function NotificationBell() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-12 z-50 w-[340px] rounded-xl border border-brand/15 bg-card shadow-xl"
+            className="absolute right-0 top-12 z-50 w-[calc(100vw-2rem)] max-w-[340px] rounded-xl border border-brand/15 bg-card shadow-xl"
           >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-brand-peach/30 px-4 py-3">
@@ -131,6 +138,17 @@ export default function NotificationBell() {
 
             {/* Content */}
             <div className="max-h-96 overflow-y-auto">
+              {/* Assinatura vencendo/vencida — sempre no topo */}
+              {subscriptionAlert && (
+                <SubscriptionAlertItem
+                  alert={subscriptionAlert}
+                  onNavigate={() => {
+                    setOpen(false);
+                    navigate("/plans");
+                  }}
+                />
+              )}
+
               {/* Milestones */}
               {(activeTab === "all" || activeTab === "sales") &&
                 filteredMilestones.map((m) => (
@@ -284,6 +302,52 @@ function WeeklyInsightItem({
 }
 
 // ── Expiry Alert Item ──
+function SubscriptionAlertItem({
+  alert,
+  onNavigate,
+}: {
+  alert: { daysLeft: number; expired: boolean; expiresAt: string | null };
+  onNavigate: () => void;
+}) {
+  const venceEm = alert.expiresAt
+    ? new Date(alert.expiresAt).toLocaleDateString("pt-BR")
+    : null;
+
+  const titulo = alert.expired
+    ? "Sua assinatura PRO venceu"
+    : alert.daysLeft <= 1
+    ? "Sua assinatura vence amanhã"
+    : `Sua assinatura vence em ${alert.daysLeft} dias`;
+
+  const descricao = alert.expired
+    ? "Renove para não perder os recursos PRO"
+    : venceEm
+    ? `Renove até ${venceEm} para continuar`
+    : "Renove para continuar com o PRO";
+
+  return (
+    <button
+      onClick={onNavigate}
+      className={`flex w-full items-center gap-3 border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50 ${
+        alert.expired ? "bg-destructive/5" : "bg-brand/5"
+      }`}
+    >
+      <div className="shrink-0">
+        {alert.expired ? (
+          <AlertTriangle className="h-4 w-4 text-destructive" />
+        ) : (
+          <Crown className="h-4 w-4 text-brand" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-foreground">{titulo}</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{descricao}</p>
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
 function ExpiryAlertItem({
   alert,
   onNavigate,

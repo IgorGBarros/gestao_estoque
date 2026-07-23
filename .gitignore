@@ -27,3 +27,5 @@ dist-ssr
 *.db   
 *.sql
 downloaded_files/
+*.dump
+.env.local

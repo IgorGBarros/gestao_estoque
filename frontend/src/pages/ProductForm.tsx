@@ -8,7 +8,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 import { Product, productService } from "../lib/productService";
 import BarcodeScanner from "../components/BarcodeScanner";
-import { useToast } from "../hooks/use-toast";
+import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import { inventoryApi } from "../lib/api";
 import { useStockEntry } from "../hooks/useStockEntry";
 import { api } from "../services/api";
