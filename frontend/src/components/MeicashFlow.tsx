@@ -13,7 +13,7 @@ import { useToast } from "./ui/use-toast";
 const dinheiro = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-export default function MeiCashflow() {
+export default function MeiCashFlow() {
   const { toast } = useToast();
   const [dados, setDados] = useState<MeiSummary | null>(null);
   const [carregando, setCarregando] = useState(true);

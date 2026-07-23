@@ -22,7 +22,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { useNavigate } from "react-router-dom";
 import { useFeatureGates } from "../hooks/useFeatureGates";
-import MeiCashflow from "../components/Meicashflow";  
+import MeicashFlow from "../components/Meicashflow";  
 import {
   BarChart,
   Bar,
@@ -322,7 +322,7 @@ export default function Dashboard() {
     <div className="space-y-6 p-6">
       {/* 💰 Fluxo de caixa simplificado (MEI) */}
       <div className="mb-6">
-        <MeiCashflow />
+        <MeicashFlow />
       </div>
 
       {/* ══════════════════════════════════════════

@@ -1,396 +1,989 @@
-// components/NotificationBell.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
-import { useState, useRef, useEffect } from "react";
-import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package, Crown } from "lucide-react";
+// components/Dashboard.tsx — VERSÃO REFATORADA COM TEMA DINÂMICO
+import { useState, useEffect } from "react";
+import {
+  TrendingUp,
+  Package,
+  AlertTriangle,
+  Calendar,
+  DollarSign,
+  ShoppingCart,
+  BarChart3,
+  PieChart,
+  Target,
+  Percent,
+  ArrowUpDown,
+  Wallet,
+  TrendingDown,
+  Activity,
+  Zap,
+  Loader2,
+  Crown,
+} from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { useNavigate } from "react-router-dom";
-import { useExpiryAlerts, ExpiryAlert } from "../hooks/useExpiryAlerts";
-import { useSalesNotifications, SalesMilestone, WeeklyInsight } from "../hooks/useSalesNotifications";
-import { useSubscriptionAlert } from "../hooks/Usesubscriptionalert";
-import { formatMoney } from "../lib/api";
-import { AnimatePresence, motion } from "framer-motion";
+import { useFeatureGates } from "../hooks/useFeatureGates";
+import MeicashFlow from "./Meicashflow";  
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart as RechartsPieChart,
+  Cell,
+  LineChart,
+  Line,
+  Area,
+  AreaChart,
+  Pie,
+  ComposedChart,
+  RadialBarChart,
+  RadialBar,
+  Legend,
+} from "recharts";
+import { api } from "../services/api";
 
-function formatDaysLeft(days: number): string {
-  if (days <= 0) return "Vencido!";
-  if (days === 1) return "Vence amanhã";
-  return `${days} dias`;
+// ══════════════════════════════════════════
+// CORES PARA GRÁFICOS
+// ══════════════════════════════════════════
+// Nota: Recharts exige cores HEX inline (não aceita classes Tailwind).
+// Cores de data-visualization são utilitárias e independentes do tema da marca.
+const CHART_COLORS = [
+  "#8884d8",
+  "#82ca9d",
+  "#ffc658",
+  "#ff7c7c",
+  "#8dd1e1",
+  "#d084d0",
+  "#ffb347",
+  "#87ceeb",
+];
+
+// Cores semânticas para gráficos financeiros
+const CHART_INCOME = "#10B981";
+const CHART_EXPENSE = "#EF4444";
+const CHART_PROFIT = "#3B82F6";
+const CHART_QUANTITY = "#8B5CF6";
+
+// ══════════════════════════════════════════
+// INTERFACES
+// ══════════════════════════════════════════
+interface DashboardData {
+  period_info?: {
+    selected: string;
+    days: number;
+    start_date: string;
+    end_date: string;
+  };
+  store_info: {
+    name: string;
+    plan: string;
+    created_at: string;
+  };
+  financial: {
+    total_invested: number;
+    total_potential: number;
+    profit_potential: number;
+    total_revenue_30d: number;
+    avg_ticket: number;
+    margin_percent: number;
+    real_profit?: number;
+    cost_of_goods_sold?: number;
+  };
+  inventory: {
+    total_products: number;
+    total_stock: number;
+    low_stock_count: number;
+  };
+  sales: {
+    total_sales_30d: number;
+    total_items_sold_30d: number;
+    daily_sales: Array<{
+      date: string;
+      day_name: string;
+      day_full?: string;
+      revenue: number;
+      quantity: number;
+      profit?: number;
+      cost?: number;
+    }>;
+    weekly_sales?: Array<{
+      week: string;
+      week_label?: string;
+      revenue: number;
+      quantity: number;
+      profit: number;
+      cost?: number;
+    }>;
+    monthly_comparison?: Array<{
+      month: string;
+      month_short?: string;
+      revenue: number;
+      profit: number;
+      cost?: number;
+      quantity?: number;
+    }>;
+  };
+  charts: {
+    by_category: Array<{
+      category: string;
+      total_products: number;
+      total_quantity: number;
+      total_value: number;
+      percentage?: number;
+      sales_revenue?: number;
+      sales_quantity?: number;
+      sales_percentage?: number;
+    }>;
+    top_products: Array<{
+      name: string;
+      id: number;
+      total_sold: number;
+      revenue: number;
+      profit?: number;
+      margin?: number;
+    }>;
+    performance_metrics?: {
+      turnover_rate: number;
+      stock_rotation_days: number;
+      sell_through_rate: number;
+      inventory_value?: number;
+      inventory_cost?: number;
+    };
+  };
+  alerts: {
+    low_stock: Array<any>;
+    expiring_soon: Array<any>;
+  };
+  cash_flow?: {
+    total_income: number;
+    total_expenses: number;
+    net_flow: number;
+    daily_average: number;
+    growth_rate?: number;
+    margin_percent?: number;
+  };
 }
 
-function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("pt-BR");
+interface CashFlowData {
+  period: {
+    selected: string;
+    days: number;
+    start_date: string;
+    end_date: string;
+  };
+  summary: {
+    total_income: number;
+    total_expenses: number;
+    net_flow: number;
+    total_transactions: number;
+    daily_average: number;
+  };
+  daily_flow: Array<{
+    date: string;
+    day_name: string;
+    income: number;
+    expenses: number;
+    net_flow: number;
+  }>;
 }
 
-export default function NotificationBell() {
+// ══════════════════════════════════════════
+// COMPONENTE PRINCIPAL
+// ══════════════════════════════════════════
+export default function Dashboard() {
   const navigate = useNavigate();
-  const { alerts: expiryAlerts, totalCount: expiryCount, criticalCount } = useExpiryAlerts();
-  const { milestones, weeklyInsight, notificationCount: salesCount, dismissMilestone } = useSalesNotifications();
-  const { subscriptionAlert } = useSubscriptionAlert();
+  // ⚠️ Esta página é um recurso PRO, mas não tinha NENHUMA verificação de
+  // plano: bastava digitar /dashboard na URL para uma conta free ver todos
+  // os gráficos. O selo "PRO" no Index era só decorativo.
+  const { isLocked, loading: gatesLoading } = useFeatureGates();
+  const bloqueado = !gatesLoading && isLocked("dashboard_charts");
 
-  const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"all" | "expiry" | "sales">("all");
-  const ref = useRef<HTMLDivElement>(null);
-
-  const salesMilestonesEnabled = localStorage.getItem("notif_sales_milestones") !== "false";
-  const weeklyInsightsEnabled = localStorage.getItem("notif_weekly_insights") !== "false";
-  const expiryEnabled = localStorage.getItem("notif_expiry_alerts") !== "false";
-
-  const filteredMilestones = salesMilestonesEnabled ? milestones : [];
-  const filteredWeekly = weeklyInsightsEnabled ? weeklyInsight : null;
-  const filteredExpiry = expiryEnabled ? expiryAlerts : [];
-  const filteredExpiryCount = expiryEnabled ? expiryCount : 0;
-  const filteredCritical = expiryEnabled ? criticalCount : 0;
-  const filteredSalesCount = filteredMilestones.length + (filteredWeekly ? 1 : 0);
-  const subCount = subscriptionAlert ? 1 : 0;
-  const totalCount = filteredExpiryCount + filteredSalesCount + subCount;
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [cashFlowData, setCashFlowData] = useState<CashFlowData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState<"7d" | "30d" | "90d" | "180d">("30d");
 
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    if (open) document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+    // Não busca dados se o plano não dá direito ao recurso.
+    if (gatesLoading || bloqueado) return;
+    loadDashboardData();
+    loadCashFlowData();
+  }, [selectedPeriod, gatesLoading, bloqueado]);
 
-  if (totalCount === 0) {
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      console.log("🔄 Carregando dashboard...");
+      const response = await api.get(`/dashboard/overview/?period=${selectedPeriod}`);
+      console.log("✅ Dados recebidos:", response.data);
+      setData(response.data);
+    } catch (err: any) {
+      console.error("❌ Erro ao carregar dashboard:", err);
+      setError(err.response?.data?.error || "Erro ao carregar dados");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadCashFlowData = async () => {
+    try {
+      const response = await api.get(`/cash-flow/detailed/?period=${selectedPeriod}`);
+      setCashFlowData(response.data);
+    } catch (err: any) {
+      console.error("❌ Erro ao carregar fluxo de caixa:", err);
+    }
+  };
+
+  // ── Verificando plano ──
+  if (gatesLoading) {
     return (
-      <div
-        className="relative rounded-lg p-2 text-muted-foreground/60"
-        title="Nenhuma notificação no momento"
-        aria-label="Nenhuma notificação"
-      >
-        <Bell className="h-5 w-5" />
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-brand" />
       </div>
     );
   }
 
-  const hasCritical = filteredCritical > 0 || subscriptionAlert?.expired === true;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="relative rounded-lg p-2 text-muted-foreground hover:bg-brand-soft hover:text-brand transition-colors"
-      >
-        <Bell className="h-5 w-5" />
-        <span
-          className={`absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
-            hasCritical
-              ? "bg-destructive"
-              : filteredMilestones.length > 0
-              ? "bg-brand"
-              : "bg-brand-rose"
-          }`}
-        >
-          {totalCount > 9 ? "9+" : totalCount}
-        </span>
-        {hasCritical && (
-          <span className="absolute -right-0.5 -top-0.5 h-5 w-5 animate-ping rounded-full bg-destructive/40" />
-        )}
-      </button>
-
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, y: -8, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.95 }}
-            transition={{ duration: 0.15 }}
-            className="absolute right-0 top-12 z-50 w-[calc(100vw-2rem)] max-w-[340px] rounded-xl border border-brand/15 bg-card shadow-xl"
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-brand-peach/30 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Bell className="h-4 w-4 text-brand" />
-                <h3 className="text-sm font-semibold text-foreground">Notificações</h3>
-                <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand">
-                  {totalCount}
-                </span>
-              </div>
-              <button
-                onClick={() => setOpen(false)}
-                className="rounded-lg p-1 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex border-b border-brand-peach/30">
-              {([
-                { key: "all" as const, label: "Tudo", count: totalCount },
-                { key: "sales" as const, label: "Vendas", count: filteredSalesCount },
-                { key: "expiry" as const, label: "Validade", count: filteredExpiryCount },
-              ]).map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
-                    activeTab === tab.key
-                      ? "border-b-2 border-brand text-brand"
-                      : "text-brand-rose/70 hover:text-foreground"
-                  }`}
-                >
-                  {tab.label}{" "}
-                  {tab.count > 0 && (
-                    <span className="ml-1 opacity-60">({tab.count})</span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* Content */}
-            <div className="max-h-96 overflow-y-auto">
-              {/* Assinatura vencendo/vencida — sempre no topo */}
-              {subscriptionAlert && (
-                <SubscriptionAlertItem
-                  alert={subscriptionAlert}
-                  onNavigate={() => {
-                    setOpen(false);
-                    navigate("/plans");
-                  }}
-                />
-              )}
-
-              {/* Milestones */}
-              {(activeTab === "all" || activeTab === "sales") &&
-                filteredMilestones.map((m) => (
-                  <MilestoneItem
-                    key={m.id}
-                    milestone={m}
-                    onDismiss={() => dismissMilestone(m.value)}
-                    onNavigate={() => {
-                      setOpen(false);
-                      navigate("/dashboard");
-                    }}
-                  />
-                ))}
-
-              {/* Weekly insight */}
-              {(activeTab === "all" || activeTab === "sales") && filteredWeekly && (
-                <WeeklyInsightItem
-                  insight={filteredWeekly}
-                  onNavigate={() => {
-                    setOpen(false);
-                    navigate("/dashboard");
-                  }}
-                />
-              )}
-
-              {/* Expiry alerts */}
-              {(activeTab === "all" || activeTab === "expiry") &&
-                filteredExpiry
-                  .slice(0, activeTab === "expiry" ? 15 : 5)
-                  .map((alert) => (
-                    <ExpiryAlertItem
-                      key={alert.id}
-                      alert={alert}
-                      onNavigate={() => {
-                        setOpen(false);
-                        navigate(`/products/${alert.id}/edit`);
-                      }}
-                    />
-                  ))}
-
-              {/* Empty states */}
-              {activeTab === "sales" && filteredSalesCount === 0 && (
-                <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
-                  Nenhuma notificação de vendas
-                </div>
-              )}
-              {activeTab === "expiry" && filteredExpiryCount === 0 && (
-                <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
-                  Nenhum alerta de validade
-                </div>
-              )}
-            </div>
-
-            {/* Footer */}
-            <div className="border-t border-brand-peach/30 px-4 py-2">
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  navigate("/settings");
-                }}
-                className="w-full text-center text-xs text-brand hover:underline"
-              >
-                Gerenciar notificações
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-// ── Milestone Item ──
-function MilestoneItem({
-  milestone,
-  onDismiss,
-  onNavigate,
-}: {
-  milestone: SalesMilestone;
-  onDismiss: () => void;
-  onNavigate: () => void;
-}) {
-  const IconMap = { trophy: Trophy, star: Star, flame: Flame };
-  const Icon = IconMap[milestone.icon];
-
-  return (
-    <div className="flex items-center gap-3 bg-brand-soft px-4 py-3 border-b border-brand-peach/30">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10">
-        <Icon className="h-5 w-5 text-brand" />
-      </div>
-      <button onClick={onNavigate} className="min-w-0 flex-1 text-left">
-        <p className="text-sm font-semibold text-foreground">{milestone.title}</p>
-        <p className="text-[11px] text-brand-rose/70">{milestone.description}</p>
-      </button>
-      <button
-        onClick={onDismiss}
-        className="shrink-0 rounded-lg p-1 text-brand-rose/50 hover:text-foreground"
-        title="Dispensar"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
-
-// ── Weekly Insight Item ──
-function WeeklyInsightItem({
-  insight,
-  onNavigate,
-}: {
-  insight: WeeklyInsight;
-  onNavigate: () => void;
-}) {
-  return (
-    <button
-      onClick={onNavigate}
-      className="w-full border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50"
-    >
-      <div className="flex items-center gap-2 mb-2">
-        <TrendingUp className="h-4 w-4 text-brand" />
-        <span className="text-sm font-semibold text-foreground">{insight.title}</span>
-      </div>
-      <div className="space-y-1.5">
-        {insight.products.map((p, i) => (
-          <div key={p.barcode} className="flex items-center gap-2">
-            <span
-              className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
-                i === 0
-                  ? "bg-brand-peach/50 text-brand"
-                  : "bg-brand-lavender/30 text-brand-rose"
-              }`}
-            >
-              {i + 1}
-            </span>
-            <span className="flex-1 truncate text-xs text-foreground">
-              {p.product_name}
-            </span>
-            <span className="text-[10px] font-mono text-brand-rose/70">
-              {p.totalQty} un.
-            </span>
-            {p.totalRevenue > 0 && (
-              <span className="text-[10px] font-mono font-medium text-brand">
-                {formatMoney(p.totalRevenue)}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    </button>
-  );
-}
-
-// ── Expiry Alert Item ──
-function SubscriptionAlertItem({
-  alert,
-  onNavigate,
-}: {
-  alert: { daysLeft: number; expired: boolean; expiresAt: string | null };
-  onNavigate: () => void;
-}) {
-  const venceEm = alert.expiresAt
-    ? new Date(alert.expiresAt).toLocaleDateString("pt-BR")
-    : null;
-
-  const titulo = alert.expired
-    ? "Sua assinatura PRO venceu"
-    : alert.daysLeft <= 1
-    ? "Sua assinatura vence amanhã"
-    : `Sua assinatura vence em ${alert.daysLeft} dias`;
-
-  const descricao = alert.expired
-    ? "Renove para não perder os recursos PRO"
-    : venceEm
-    ? `Renove até ${venceEm} para continuar`
-    : "Renove para continuar com o PRO";
-
-  return (
-    <button
-      onClick={onNavigate}
-      className={`flex w-full items-center gap-3 border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50 ${
-        alert.expired ? "bg-destructive/5" : "bg-brand/5"
-      }`}
-    >
-      <div className="shrink-0">
-        {alert.expired ? (
-          <AlertTriangle className="h-4 w-4 text-destructive" />
-        ) : (
-          <Crown className="h-4 w-4 text-brand" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">{titulo}</p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">{descricao}</p>
-      </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-    </button>
-  );
-}
-
-function ExpiryAlertItem({
-  alert,
-  onNavigate,
-}: {
-  alert: ExpiryAlert;
-  onNavigate: () => void;
-}) {
-  const isCritical = alert.severity === "critical";
-
-  return (
-    <button
-      onClick={onNavigate}
-      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50 ${
-        isCritical ? "bg-destructive/5" : "bg-brand-peach/20"
-      }`}
-    >
-      <div className="shrink-0">
-        {isCritical ? (
-          <AlertTriangle className="h-4 w-4 text-destructive" />
-        ) : (
-          <Clock className="h-4 w-4 text-brand-rose" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">
-          {alert.product_name}
+  // ── Recurso exclusivo do PRO ──
+  if (bloqueado) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-12 text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand/10">
+          <Crown className="h-7 w-7 text-brand" />
+        </div>
+        <h1 className="font-display text-lg font-bold text-foreground">
+          Dashboard é um recurso PRO
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Acompanhe lucro real, fluxo de caixa e os gráficos de vendas
+          assinando o plano PRO.
         </p>
-        <div className="mt-0.5 flex items-center gap-2">
-          <span
-            className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
-              isCritical
-                ? "bg-destructive/10 text-destructive border-destructive/20"
-                : "bg-brand-peach/40 text-brand-rose border-brand-peach"
-            }`}
-          >
-            {formatDaysLeft(alert.daysLeft)}
-          </span>
-          <span className="text-[10px] text-brand-rose/60">
-            {formatDate(alert.expiry_date)}
-          </span>
+        <button
+          onClick={() => navigate("/plans")}
+          className="mt-6 w-full rounded-xl bg-brand py-3 text-sm font-bold text-white hover:opacity-90 transition-opacity"
+        >
+          Ver planos
+        </button>
+        <button
+          onClick={() => navigate("/")}
+          className="mt-3 w-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Voltar ao início
+        </button>
+      </div>
+    );
+  }
+
+  // ── Loading State ──
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 animate-spin text-brand" />
+          <p className="text-sm text-muted-foreground">Carregando dashboard...</p>
         </div>
       </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-brand-rose/40" />
-    </button>
+    );
+  }
+
+  // ── Error State ──
+  if (error || !data) {
+    return (
+      <div className="text-center p-8">
+        <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
+        <h3 className="text-lg font-semibold text-foreground mb-2">
+          Erro ao carregar dashboard
+        </h3>
+        <p className="text-destructive mb-4">{error}</p>
+        <button
+          onClick={loadDashboardData}
+          className="px-4 py-2 bg-brand text-white rounded-md hover:opacity-90 transition-colors"
+        >
+          Tentar Novamente
+        </button>
+      </div>
+    );
+  }
+
+  // ── Formatters ──
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
+
+  const formatPercent = (value: number) => `${(value || 0).toFixed(1)}%`;
+
+  const formatNumber = (value: number) =>
+    new Intl.NumberFormat("pt-BR").format(value || 0);
+
+  return (
+    <div className="space-y-6 p-6">
+      {/* 💰 Fluxo de caixa simplificado (MEI) */}
+      <div className="mb-6">
+        <MeicashFlow />
+      </div>
+
+      {/* ══════════════════════════════════════════
+          HEADER + SELETOR DE PERÍODO
+          ══════════════════════════════════════════ */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">Dashboard Financeiro</h1>
+          <p className="text-muted-foreground">
+            {data.store_info.name} • Plano {data.store_info.plan.toUpperCase()}
+            {data.period_info && ` • ${data.period_info.days} dias`}
+          </p>
+        </div>
+
+        <div className="flex gap-2">
+          {[
+            { key: "7d", label: "7 dias" },
+            { key: "30d", label: "30 dias" },
+            { key: "90d", label: "90 dias" },
+            { key: "180d", label: "6 meses" },
+          ].map((period) => (
+            <button
+              key={period.key}
+              onClick={() => setSelectedPeriod(period.key as any)}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+                selectedPeriod === period.key
+                  ? "bg-brand text-white"
+                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+              }`}
+            >
+              {period.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════
+          KPIs PRINCIPAIS — 6 COLUNAS
+          ══════════════════════════════════════════ */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Receita Total</CardTitle>
+            <DollarSign className="h-4 w-4 text-success" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-success">
+              {formatCurrency(data.financial.total_revenue_30d)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {formatNumber(data.sales.total_sales_30d)} vendas
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Lucro Real</CardTitle>
+            <TrendingUp className="h-4 w-4 text-brand" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-brand">
+              {formatCurrency(data.financial.real_profit || data.financial.profit_potential)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Margem: {formatPercent(data.financial.margin_percent || 0)}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Investido</CardTitle>
+            <TrendingDown className="h-4 w-4 text-destructive" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-destructive">
+              {formatCurrency(data.financial.total_invested)}
+            </div>
+            <p className="text-xs text-muted-foreground">Custo dos produtos</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Ticket Médio</CardTitle>
+            <Target className="h-4 w-4 text-purple-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-purple-600">
+              {formatCurrency(data.financial.avg_ticket)}
+            </div>
+            <p className="text-xs text-muted-foreground">Por venda</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Giro Estoque</CardTitle>
+            <Activity className="h-4 w-4 text-orange-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-600">
+              {data.charts.performance_metrics?.turnover_rate?.toFixed(1) || "0.0"}x
+            </div>
+            <p className="text-xs text-muted-foreground">Taxa de rotação</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Itens Vendidos</CardTitle>
+            <Package className="h-4 w-4 text-teal-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-teal-600">
+              {formatNumber(data.sales.total_items_sold_30d)}
+            </div>
+            <p className="text-xs text-muted-foreground">Unidades no período</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ══════════════════════════════════════════
+          FLUXO DE CAIXA DIÁRIO
+          ══════════════════════════════════════════ */}
+      {cashFlowData && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <ArrowUpDown className="h-5 w-5" />
+              Fluxo de Caixa Diário
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={cashFlowData.daily_flow}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day_name" />
+                <YAxis />
+                <Tooltip formatter={(value: any) => [formatCurrency(value), ""]} />
+                <Area
+                  type="monotone"
+                  dataKey="income"
+                  fill={CHART_INCOME}
+                  fillOpacity={0.6}
+                  name="Receitas"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="expenses"
+                  fill={CHART_EXPENSE}
+                  fillOpacity={0.6}
+                  name="Despesas"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="net_flow"
+                  stroke={CHART_PROFIT}
+                  strokeWidth={3}
+                  name="Fluxo Líquido"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ══════════════════════════════════════════
+          GRÁFICOS PRINCIPAIS — 2 COLUNAS
+          ══════════════════════════════════════════ */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Vendas por Semana */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              Vendas por Semana
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={data.sales.weekly_sales || []}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="week" />
+                <YAxis yAxisId="left" />
+                <YAxis yAxisId="right" orientation="right" />
+                <Tooltip
+                  formatter={(value: any, name: string) => [
+                    name === "revenue"
+                      ? formatCurrency(value)
+                      : name === "profit"
+                      ? formatCurrency(value)
+                      : name === "cost"
+                      ? formatCurrency(value)
+                      : formatNumber(value),
+                    name === "revenue"
+                      ? "Receita"
+                      : name === "profit"
+                      ? "Lucro"
+                      : name === "cost"
+                      ? "Custo"
+                      : "Quantidade",
+                  ]}
+                />
+                <Bar yAxisId="left" dataKey="revenue" fill={CHART_INCOME} name="revenue" />
+                <Bar yAxisId="left" dataKey="cost" fill={CHART_EXPENSE} name="cost" />
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="quantity"
+                  stroke={CHART_QUANTITY}
+                  strokeWidth={3}
+                  name="quantity"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        {/* Vendas por Categoria (Rosca) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <PieChart className="h-5 w-5" />
+              Vendas por Categoria
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={320}>
+              <RechartsPieChart>
+                <Pie
+                  data={data.charts.by_category.filter((cat) => cat.total_value > 0)}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={120}
+                  paddingAngle={5}
+                  dataKey="total_value"
+                >
+                  {data.charts.by_category.map((_, index) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={CHART_COLORS[index % CHART_COLORS.length]}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value: any) => [formatCurrency(value), "Valor"]}
+                  labelFormatter={(label) => `${label}`}
+                />
+              </RechartsPieChart>
+            </ResponsiveContainer>
+
+            {/* Legenda */}
+            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+              {data.charts.by_category.slice(0, 6).map((cat, index) => (
+                <div key={cat.category} className="flex items-center gap-2">
+                  <div
+                    className="w-3 h-3 rounded-full"
+                    style={{
+                      backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
+                    }}
+                  />
+                  <span className="truncate">{cat.category}</span>
+                  <span className="text-muted-foreground">
+                    {formatPercent(cat.percentage || 0)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ══════════════════════════════════════════
+          EVOLUÇÃO MENSAL — LARGURA COMPLETA
+          ══════════════════════════════════════════ */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Evolução Mensal - Receita vs Lucro vs Custos
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={400}>
+            <ComposedChart data={data.sales.monthly_comparison || []}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month_short" />
+              <YAxis yAxisId="left" />
+              <YAxis yAxisId="right" orientation="right" />
+              <Tooltip
+                formatter={(value: any, name: string) => [
+                  name === "quantity" ? formatNumber(value) : formatCurrency(value),
+                  name === "revenue"
+                    ? "Receita"
+                    : name === "profit"
+                    ? "Lucro"
+                    : name === "cost"
+                    ? "Custo"
+                    : "Quantidade",
+                ]}
+              />
+              <Area
+                yAxisId="left"
+                type="monotone"
+                dataKey="revenue"
+                fill={CHART_INCOME}
+                fillOpacity={0.3}
+                name="revenue"
+              />
+              <Area
+                yAxisId="left"
+                type="monotone"
+                dataKey="cost"
+                fill={CHART_EXPENSE}
+                fillOpacity={0.3}
+                name="cost"
+              />
+              <Line
+                yAxisId="left"
+                type="monotone"
+                dataKey="profit"
+                stroke={CHART_PROFIT}
+                strokeWidth={3}
+                name="profit"
+              />
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="quantity"
+                stroke={CHART_QUANTITY}
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                name="quantity"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* ══════════════════════════════════════════
+          MÉTRICAS AVANÇADAS — 3 COLUNAS
+          ══════════════════════════════════════════ */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Análise Financeira */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5" />
+              Análise Financeira
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Capital Investido</span>
+              <span className="font-bold text-destructive">
+                {formatCurrency(data.financial.total_invested)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Receita Potencial</span>
+              <span className="font-bold text-success">
+                {formatCurrency(data.financial.total_potential)}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Lucro Potencial</span>
+              <span className="font-bold text-brand">
+                {formatCurrency(data.financial.profit_potential)}
+              </span>
+            </div>
+            <div className="pt-2 border-t border-border">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">ROI Potencial</span>
+                <span className="font-bold text-purple-600">
+                  {formatPercent(
+                    (data.financial.profit_potential /
+                      Math.max(data.financial.total_invested, 1)) *
+                      100
+                  )}
+                </span>
+              </div>
+            </div>
+            {data.cash_flow && (
+              <div className="pt-2 border-t border-border">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium">Fluxo Líquido</span>
+                  <span
+                    className={`font-bold ${
+                      data.cash_flow.net_flow >= 0 ? "text-success" : "text-destructive"
+                    }`}
+                  >
+                    {formatCurrency(data.cash_flow.net_flow)}
+                  </span>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Performance de Estoque */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5" />
+              Performance de Estoque
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Produtos Ativos</span>
+              <span className="font-bold">{data.inventory.total_products}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Unidades Totais</span>
+              <span className="font-bold">{data.inventory.total_stock}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Giro Médio</span>
+              <span className="font-bold text-brand">
+                {data.charts.performance_metrics?.turnover_rate?.toFixed(1) || "0.0"}x/mês
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Taxa de Conversão</span>
+              <span className="font-bold text-orange-600">
+                {formatPercent(data.charts.performance_metrics?.sell_through_rate || 0)}
+              </span>
+            </div>
+            <div className="pt-2 border-t border-border">
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium">Eficiência</span>
+                <span className="font-bold text-success">
+                  {formatPercent(
+                    ((data.inventory.total_products - data.inventory.low_stock_count) /
+                      Math.max(data.inventory.total_products, 1)) *
+                      100
+                  )}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Gestão de Riscos */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              Gestão de Riscos
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Estoque Baixo</span>
+              <span
+                className={`font-bold ${
+                  data.alerts.low_stock.length > 0 ? "text-orange-600" : "text-success"
+                }`}
+              >
+                {data.alerts.low_stock.length}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Vencendo em Breve</span>
+              <span
+                className={`font-bold ${
+                  data.alerts.expiring_soon.length > 0 ? "text-destructive" : "text-success"
+                }`}
+              >
+                {data.alerts.expiring_soon.length}
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Risco Total</span>
+              <span className="font-bold text-purple-600">
+                {data.alerts.low_stock.length + data.alerts.expiring_soon.length > 5
+                  ? "Alto"
+                  : data.alerts.low_stock.length + data.alerts.expiring_soon.length > 2
+                  ? "Médio"
+                  : "Baixo"}
+              </span>
+            </div>
+            <div className="pt-2 border-t border-border">
+              <div className="flex justify-between items-center">
+                                <span className="text-sm font-medium">Saúde Geral</span>
+                <span className="font-bold text-brand">
+                  {data.financial.margin_percent && data.financial.margin_percent > 20
+                    ? "Excelente"
+                    : data.financial.margin_percent && data.financial.margin_percent > 10
+                    ? "Boa"
+                    : "Regular"}
+                </span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* ══════════════════════════════════════════
+          VENDAS DIÁRIAS — ÚLTIMOS 7 DIAS
+          ══════════════════════════════════════════ */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Vendas dos Últimos 7 Dias
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={300}>
+            <ComposedChart data={data.sales.daily_sales}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="day_name" />
+              <YAxis yAxisId="left" />
+              <YAxis yAxisId="right" orientation="right" />
+              <Tooltip
+                formatter={(value: any, name: string) => [
+                  name === "revenue" || name === "profit"
+                    ? formatCurrency(value)
+                    : `${value} itens`,
+                  name === "revenue"
+                    ? "Receita"
+                    : name === "profit"
+                    ? "Lucro"
+                    : "Quantidade",
+                ]}
+              />
+              <Bar yAxisId="left" dataKey="revenue" fill={CHART_INCOME} name="revenue" />
+              {data.sales.daily_sales[0]?.profit !== undefined && (
+                <Bar yAxisId="left" dataKey="profit" fill={CHART_PROFIT} name="profit" />
+              )}
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="quantity"
+                stroke={CHART_QUANTITY}
+                strokeWidth={3}
+                dot={{ fill: CHART_QUANTITY, strokeWidth: 2, r: 4 }}
+                name="quantity"
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* ══════════════════════════════════════════
+          TOP 5 PRODUTOS MAIS VENDIDOS
+          ══════════════════════════════════════════ */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Top 5 Produtos Mais Vendidos
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart
+              data={data.charts.top_products.slice(0, 5)}
+              layout="horizontal"
+              margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis type="number" />
+              <YAxis dataKey="name" type="category" width={150} />
+              <Tooltip
+                formatter={(value: any, name: string) => [
+                  name === "revenue" ? formatCurrency(value) : `${value} vendidos`,
+                  name === "revenue" ? "Receita" : "Quantidade",
+                ]}
+              />
+              <Bar dataKey="revenue" fill={CHART_COLORS[0]} name="revenue" />
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* ══════════════════════════════════════════
+          ALERTAS VISUAIS
+          ══════════════════════════════════════════ */}
+      {(data.alerts.low_stock.length > 0 || data.alerts.expiring_soon.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Estoque Baixo */}
+          {data.alerts.low_stock.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-orange-600">
+                  <AlertTriangle className="h-5 w-5" />
+                  Estoque Baixo ({data.alerts.low_stock.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {data.alerts.low_stock.slice(0, 5).map((item: any) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 rounded-lg bg-orange-50 border border-orange-200"
+                    >
+                      <div>
+                        <div className="font-medium text-sm">{item.product_name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Mín: {item.min_stock} • Atual: {item.current_stock}
+                        </div>
+                      </div>
+                      <div
+                        className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          item.status === "critical"
+                            ? "bg-destructive/10 text-destructive"
+                            : "bg-orange-100 text-orange-800"
+                        }`}
+                      >
+                        {item.status === "critical" ? "Crítico" : "Atenção"}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Produtos Vencendo */}
+          {data.alerts.expiring_soon.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-destructive">
+                  <Calendar className="h-5 w-5" />
+                  Vencendo em Breve ({data.alerts.expiring_soon.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {data.alerts.expiring_soon.slice(0, 5).map((item: any) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 rounded-lg bg-destructive/5 border border-destructive/20"
+                    >
+                      <div>
+                        <div className="font-medium text-sm">{item.product_name}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Lote: {item.batch_code} • {item.quantity} unidades
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-sm font-medium text-destructive">
+                          {item.days_to_expire} dias
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(item.expiration_date).toLocaleDateString("pt-BR")}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
