@@ -6,7 +6,7 @@ import {
   AlertTriangle, Clock, ChevronDown, ChevronUp, X, BookOpen, ZoomIn, Calendar,
   TrendingUp, TrendingDown, Download } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { inventoryApi, formatMoney, movementsReportApi } from "../lib/api";
+import { inventoryApi, formatMoney, stockReportApi } from "../lib/api";
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import StockAdjustmentModal from "../components/StockAdjustmentModal";
 import ProductSearchModal from "../components/ProductSearchModal";
@@ -83,11 +83,12 @@ type StockFilter = "TODOS" | "COM_ESTOQUE" | "ESGOTADO";
 export default function ProductList() {
   const [baixandoRel, setBaixandoRel] = useState(false);
 
-  // Relatório de movimentação do estoque em CSV.
+  // Relatório do estoque ATUAL em CSV: o que tem hoje, quanto vale e o que
+  // está para vencer. (O histórico de entradas/saídas fica no Extrato.)
   const baixarRelatorio = async () => {
     setBaixandoRel(true);
     try {
-      await movementsReportApi.download("tudo");
+      await stockReportApi.download();
     } catch {
       /* silencioso: a lista na tela continua disponível */
     } finally {
@@ -218,7 +219,7 @@ export default function ProductList() {
               onClick={baixarRelatorio}
               disabled={baixandoRel}
               className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-60"
-              title="Baixar relatório de movimentação"
+              title="Baixar relatório de estoque"
             >
               {baixandoRel ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

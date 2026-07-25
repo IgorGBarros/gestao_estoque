@@ -3696,10 +3696,16 @@ def mei_summary(request):
     except (TypeError, ValueError):
         ano = agora.year
 
-    # ── Mês corrente ──
-    inicio_mes = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    entradas_mes = _receita_periodo(store, inicio_mes)
-    saidas_mes = _compras_periodo(store, inicio_mes)
+    # ── Período escolhido (cards de caixa) ──
+    # O TETO do MEI continua sendo sempre anual — é assim na lei. O filtro
+    # afeta só os cards de entrada/saída/sobra, para ela poder olhar o dia,
+    # o mês ou o ano.
+    periodo = request.GET.get('period', 'mes')
+    if periodo not in ('dia', 'mes', 'ano'):
+        periodo = 'mes'
+    ini_p, fim_p, rotulo_p = _intervalo_periodo(periodo)
+    entradas_mes = _receita_periodo(store, ini_p, fim_p)
+    saidas_mes = _compras_periodo(store, ini_p, fim_p)
 
     # ── Ano ──
     inicio_ano = agora.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -3736,6 +3742,10 @@ def mei_summary(request):
 
     return Response({
         'ano': ano,
+        'periodo': periodo,
+        'periodo_rotulo': rotulo_p,
+        # `mes_atual` mantém o nome por compatibilidade, mas agora reflete o
+        # período escolhido no filtro.
         'mes_atual': {
             'entradas': float(entradas_mes),
             'saidas': float(saidas_mes),
@@ -4148,4 +4158,109 @@ def movements_report_csv(request):
     w.writerow([])
     w.writerow(['Observação: valores calculados a partir das movimentações '
                 'registradas no sistema.'])
+    return resp
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def stock_report_csv(request):
+    """
+    GET /api/stock/report/
+
+    Relatório do estoque ATUAL (foto do momento) em CSV: o que tem, quanto
+    tem, quanto custou, quanto vale e o que está para vencer.
+
+    Diferente de /api/movements/report/, que é o histórico do que entrou e
+    saiu. Aqui a pergunta é "o que eu tenho hoje".
+    """
+    import csv
+    from django.http import HttpResponse
+
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    agora = timezone.localtime()
+    hoje = agora.date()
+
+    itens = (InventoryItem.objects
+             .filter(store=store)
+             .select_related('product')
+             .prefetch_related('batches')
+             .order_by('product__name'))
+
+    resp = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    resp['Content-Disposition'] = f'attachment; filename="estoque-{agora:%Y%m%d}.csv"'
+    w = csv.writer(resp, delimiter=';')  # ; abre direto no Excel em pt-BR
+    fmt = lambda v: f'{v:.2f}'.replace('.', ',')
+
+    w.writerow([f'Relatório de estoque — {agora:%d/%m/%Y %H:%M}'])
+    w.writerow(['Loja', store.name])
+    w.writerow([])
+    w.writerow([
+        'Produto', 'Marca', 'Quantidade', 'Estoque mínimo', 'Custo unitário',
+        'Preço de venda', 'Total investido', 'Valor de venda',
+        'Lucro previsto', 'Validade mais próxima', 'Situação',
+    ])
+
+    tot_investido = tot_potencial = Decimal('0')
+    n_baixo = n_vencendo = n_vencido = 0
+
+    for it in itens:
+        qtd = it.total_quantity or 0
+        minimo = it.min_quantity if it.min_quantity is not None else 0
+        custo = it.cost_price or Decimal('0')
+        venda = it.sale_price or Decimal('0')
+        investido = custo * qtd
+        potencial = venda * qtd
+
+        tot_investido += investido
+        tot_potencial += potencial
+
+        # Validade mais próxima entre os lotes com data
+        datas = [b.expiration_date for b in it.batches.all() if b.expiration_date]
+        proxima = min(datas) if datas else None
+
+        situacao = []
+        if qtd == 0:
+            situacao.append('Sem estoque')
+            n_baixo += 1
+        elif qtd <= minimo:
+            situacao.append('Estoque baixo')
+            n_baixo += 1
+        if proxima:
+            dias = (proxima - hoje).days
+            if dias < 0:
+                situacao.append('Vencido')
+                n_vencido += 1
+            elif dias <= 30:
+                situacao.append(f'Vence em {dias} dias')
+                n_vencendo += 1
+
+        w.writerow([
+            it.product.name if it.product else '—',
+            getattr(it.product, 'brand', '') or '',
+            qtd,
+            minimo,
+            fmt(custo),
+            fmt(venda),
+            fmt(investido),
+            fmt(potencial),
+            fmt(potencial - investido),
+            proxima.strftime('%d/%m/%Y') if proxima else '',
+            ' / '.join(situacao) if situacao else 'OK',
+        ])
+
+    w.writerow([])
+    w.writerow(['RESUMO'])
+    w.writerow(['Produtos cadastrados', itens.count()])
+    w.writerow(['Total investido no estoque', fmt(tot_investido)])
+    w.writerow(['Valor se vender tudo', fmt(tot_potencial)])
+    w.writerow(['Lucro previsto', fmt(tot_potencial - tot_investido)])
+    w.writerow(['Produtos acabando ou zerados', n_baixo])
+    w.writerow(['Lotes vencendo em 30 dias', n_vencendo])
+    w.writerow(['Lotes vencidos', n_vencido])
+    w.writerow([])
+    w.writerow(['Observação: "Valor se vender tudo" e "Lucro previsto" são '
+                'projeções sobre o estoque parado, não dinheiro recebido.'])
     return resp

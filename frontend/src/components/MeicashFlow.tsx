@@ -6,6 +6,7 @@
 // estoque gera saída. Isso elimina o erro de "esqueci de lançar" e mantém a
 // tela compreensível para quem não é da área contábil.
 import { useState, useEffect } from "react";
+type PeriodoMei = "dia" | "mes" | "ano";
 import { TrendingUp, TrendingDown, Wallet, Download, AlertTriangle, Loader2 } from "lucide-react";
 import { meiApi, type MeiSummary } from "../lib/api";
 import { useToast } from "./ui/use-toast";
@@ -65,13 +66,31 @@ export default function MeiCashFlow() {
   const larguraBarra = Math.max(0, Math.min(mei.percentual_usado, 100));
   const corBarra = excedeu ? "bg-destructive" : atencao ? "bg-amber-500" : "bg-emerald-500";
 
+  const [periodo, setPeriodo] = useState<PeriodoMei>("mes");
+
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-display text-base font-bold text-foreground">
           Meu caixa
         </h2>
-        <span className="text-xs text-muted-foreground">Este mês</span>
+        <div className="flex gap-1.5">
+          {([["dia", "Hoje"], ["mes", "Mês"], ["ano", "Ano"]] as [PeriodoMei, string][]).map(
+            ([k, label]) => (
+              <button
+                key={k}
+                onClick={() => setPeriodo(k)}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  periodo === k
+                    ? "bg-brand text-white"
+                    : "border border-border text-muted-foreground hover:bg-secondary"
+                }`}
+              >
+                {label}
+              </button>
+            )
+          )}
+        </div>
       </div>
 
       {/* Os três números que importam */}

@@ -817,6 +817,8 @@ export const plansApi = {
 // ── Fluxo de caixa simplificado (MEI) ──
 export interface MeiSummary {
   ano: number;
+  periodo?: string;
+  periodo_rotulo?: string;
   mes_atual: { entradas: number; saidas: number; sobra: number };
   ano_atual: { receita_bruta: number; compras: number; sobra: number };
   mei: {
@@ -830,8 +832,11 @@ export interface MeiSummary {
 }
 
 export const meiApi = {
-  getSummary: (year?: number) =>
-    apiRequest<MeiSummary>(`/mei/summary/${year ? `?year=${year}` : ""}`),
+  getSummary: (period: "dia" | "mes" | "ano" = "mes", year?: number) => {
+    const p = new URLSearchParams({ period });
+    if (year) p.set("year", String(year));
+    return apiRequest<MeiSummary>(`/mei/summary/?${p.toString()}`);
+  },
 
   /**
    * Baixa o relatório CSV para o contador.
@@ -982,6 +987,21 @@ export const adminHealthApi = {
 };
 
 // ── Relatório de movimentações (CSV) ──
+export const stockReportApi = {
+  /** Relatório do estoque atual (o que tem hoje) em CSV. */
+  download: async () => {
+    const resp = await api.get("/stock/report/", { responseType: "blob" });
+    const url = window.URL.createObjectURL(new Blob([resp.data]));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `estoque-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+};
+
 export const movementsReportApi = {
   /**
    * Baixa o CSV de movimentações. Precisa passar pelo axios (e não por um
