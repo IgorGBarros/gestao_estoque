@@ -44,7 +44,8 @@ from .serializers import (
     ProfileSerializer, ThemeConfigSerializer,
     ProductSerializer, InventoryItemSerializer,
     StockEntrySerializer, SaleSerializer, StockTransactionSerializer,
-    ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer  # ✅ Novos serializers LGPD
+    ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer,  # ✅ Serializers LGPD
+    PlanConfigSerializer,
 )
 
 from .scraper import search_google_shopping
@@ -3817,3 +3818,237 @@ def mei_report_csv(request):
                 'taxas e outras despesas não estão incluídas.'])
     w.writerow(['Não substitui orientação contábil.'])
     return resp
+
+# ==========================================
+# 📊 RELATÓRIOS DA CONSULTORA (dashboard)
+# ==========================================
+# Endpoint único que alimenta o Dashboard inteiro, com filtro de período.
+# Evita 4 ou 5 chamadas em paralelo — no celular, cada requisição extra é
+# latência que a consultora sente.
+#
+# Períodos: 'dia' (hoje), 'mes' (mês corrente), 'ano' (ano corrente).
+
+def _intervalo_periodo(periodo: str):
+    """Devolve (inicio, fim, rotulo) para o período pedido."""
+    agora = timezone.localtime()
+    if periodo == 'dia':
+        ini = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+        return ini, ini + timedelta(days=1), 'Hoje'
+    if periodo == 'ano':
+        ini = agora.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return ini, ini.replace(year=ini.year + 1), f'{agora.year}'
+    # padrão: mês corrente
+    ini = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    fim = ini.replace(year=ini.year + 1, month=1) if ini.month == 12 else ini.replace(month=ini.month + 1)
+    return ini, fim, ini.strftime('%m/%Y')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def consultant_reports(request):
+    """
+    GET /api/reports/?period=dia|mes|ano
+
+    Retorna, em uma só resposta:
+      • resumo      — entradas, saídas e lucro do período
+      • fluxo       — linhas de entrada/saída para a tabela
+      • evolucao    — série para o gráfico (por dia, mês ou mês do ano)
+      • top_produtos— 10 mais vendidos no período
+      • saidas      — saídas detalhadas com a descrição da consultora
+      • acabando    — produtos com estoque baixo
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    bloqueio = _require_pro_feature(store, 'analytics')
+    if bloqueio:
+        return bloqueio
+
+    periodo = request.GET.get('period', 'mes')
+    if periodo not in ('dia', 'mes', 'ano'):
+        periodo = 'mes'
+    inicio, fim, rotulo = _intervalo_periodo(periodo)
+
+    txs = (StockTransaction.objects
+           .filter(store=store, created_at__gte=inicio, created_at__lt=fim)
+           .select_related('product')
+           .order_by('-created_at'))
+
+    # ── Resumo ──
+    # Entrada de caixa = venda. Saída de caixa = compra de estoque.
+    # Presente, brinde, uso próprio e perda NÃO entram no caixa: não houve
+    # dinheiro trocando de mão. Eles aparecem na tabela de saídas de produto,
+    # que é outra coisa.
+    entradas = Decimal('0')
+    saidas_caixa = Decimal('0')
+    custo_vendido = Decimal('0')
+
+    for t in txs:
+        qtd = t.quantity or 0
+        if t.transaction_type == 'VENDA':
+            entradas += (t.unit_price or 0) * abs(qtd)
+            custo_vendido += (t.unit_cost or 0) * abs(qtd)
+        elif t.transaction_type == 'ENTRADA':
+            saidas_caixa += (t.unit_cost or 0) * qtd
+
+    lucro = entradas - custo_vendido
+
+    # ── Tabela de fluxo de caixa ──
+    fluxo = []
+    for t in txs:
+        qtd = abs(t.quantity or 0)
+        if t.transaction_type == 'VENDA':
+            valor = float((t.unit_price or 0) * qtd)
+            tipo, natureza = 'Venda', 'entrada'
+        elif t.transaction_type == 'ENTRADA':
+            valor = float((t.unit_cost or 0) * qtd)
+            tipo, natureza = 'Compra de estoque', 'saida'
+        else:
+            continue  # só movimento de dinheiro nesta tabela
+        fluxo.append({
+            'id': t.id,
+            'data': t.created_at.date(),
+            'tipo': tipo,
+            'natureza': natureza,
+            'produto': t.product.name if t.product else '—',
+            'quantidade': qtd,
+            'valor': valor,
+            'descricao': t.description or '',
+        })
+
+    # ── Evolução (gráfico) ──
+    # dia  → por hora não ajuda; usamos os últimos 7 dias para dar contexto
+    # mes  → dia a dia do mês
+    # ano  → mês a mês
+    evolucao = []
+    if periodo == 'ano':
+        for m in range(1, 13):
+            ini_m = inicio.replace(month=m)
+            fim_m = fim if m == 12 else inicio.replace(month=m + 1)
+            if ini_m > timezone.localtime():
+                break
+            ent = sai = Decimal('0')
+            for t in txs:
+                if ini_m <= t.created_at < fim_m:
+                    q = abs(t.quantity or 0)
+                    if t.transaction_type == 'VENDA':
+                        ent += (t.unit_price or 0) * q
+                    elif t.transaction_type == 'ENTRADA':
+                        sai += (t.unit_cost or 0) * q
+            evolucao.append({
+                'rotulo': ini_m.strftime('%b'),
+                'entradas': float(ent),
+                'saidas': float(sai),
+                'saldo': float(ent - sai),
+            })
+    else:
+        dias = 7 if periodo == 'dia' else (fim - inicio).days
+        base = (timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+                - timedelta(days=6)) if periodo == 'dia' else inicio
+        # Para 'dia' precisamos olhar além do intervalo do resumo.
+        origem = (StockTransaction.objects
+                  .filter(store=store, created_at__gte=base)
+                  .select_related('product')) if periodo == 'dia' else txs
+        for d in range(dias):
+            ini_d = base + timedelta(days=d)
+            fim_d = ini_d + timedelta(days=1)
+            if ini_d > timezone.localtime():
+                break
+            ent = sai = Decimal('0')
+            for t in origem:
+                if ini_d <= t.created_at < fim_d:
+                    q = abs(t.quantity or 0)
+                    if t.transaction_type == 'VENDA':
+                        ent += (t.unit_price or 0) * q
+                    elif t.transaction_type == 'ENTRADA':
+                        sai += (t.unit_cost or 0) * q
+            evolucao.append({
+                'rotulo': ini_d.strftime('%d/%m'),
+                'entradas': float(ent),
+                'saidas': float(sai),
+                'saldo': float(ent - sai),
+            })
+
+    # ── Top 10 mais vendidos ──
+    por_produto = {}
+    for t in txs:
+        if t.transaction_type != 'VENDA':
+            continue
+        nome = t.product.name if t.product else '—'
+        q = abs(t.quantity or 0)
+        d = por_produto.setdefault(nome, {'produto': nome, 'quantidade': 0, 'receita': Decimal('0')})
+        d['quantidade'] += q
+        d['receita'] += (t.unit_price or 0) * q
+    top = sorted(por_produto.values(), key=lambda x: x['quantidade'], reverse=True)[:10]
+    top_produtos = [
+        {'produto': i['produto'], 'quantidade': i['quantidade'], 'receita': float(i['receita'])}
+        for i in top
+    ]
+
+    # ── Saídas de produto (com a descrição da consultora) ──
+    # Aqui entram TODAS as saídas — venda, presente, brinde, uso próprio,
+    # perda — porque a pergunta é "para onde foi meu produto".
+    rotulos_tipo = {
+        'VENDA': 'Venda', 'PRESENTE': 'Presente', 'BRINDE': 'Brinde',
+        'USO_PROPRIO': 'Uso próprio', 'PERDA': 'Perda', 'AJUSTE': 'Ajuste',
+    }
+    saidas = []
+    for t in txs:
+        if t.transaction_type == 'ENTRADA' or (t.quantity or 0) >= 0:
+            continue
+        q = abs(t.quantity or 0)
+        # Presente/uso próprio não têm receita: mostramos o custo, que é o
+        # valor que saiu do bolso dela.
+        unit = (t.unit_price if t.transaction_type == 'VENDA' else t.unit_cost) or 0
+        saidas.append({
+            'id': t.id,
+            'data': t.created_at.date(),
+            'produto': t.product.name if t.product else '—',
+            'tipo': rotulos_tipo.get(t.transaction_type, t.transaction_type),
+            'valor_unitario': float(unit),
+            'quantidade': q,
+            'total': float(unit * q),
+            'descricao': t.description or '',
+        })
+
+    # ── Produtos acabando ──
+    acabando = [
+        {
+            'id': it.id,
+            'produto': it.product.name if it.product else '—',
+            'estoque': it.total_quantity or 0,
+            'minimo': it.min_quantity if it.min_quantity is not None else 0,
+        }
+        for it in InventoryItem.objects.filter(store=store).select_related('product')
+        if (it.total_quantity or 0) <= (it.min_quantity if it.min_quantity is not None else 0)
+    ][:20]
+
+    return Response({
+        'periodo': periodo,
+        'rotulo': rotulo,
+        'resumo': {
+            'entradas': float(entradas),
+            'saidas': float(saidas_caixa),
+            'lucro': float(lucro),
+            'custo_vendido': float(custo_vendido),
+        },
+        'fluxo': fluxo[:100],
+        'evolucao': evolucao,
+        'top_produtos': top_produtos,
+        'saidas': saidas[:100],
+        'acabando': acabando,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_plans_view(request):
+    """
+    GET /api/plans/ → planos visíveis com preços reais (público).
+
+    Estava declarada dentro de core/urls.py, o que é lugar de roteamento e
+    não de view. Trazida para cá junto com a limpeza das URLs duplicadas.
+    """
+    plans = PlanConfig.objects.filter(is_visible=True).order_by('sort_order')
+    return Response(PlanConfigSerializer(plans, many=True).data)

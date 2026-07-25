@@ -1,55 +1,59 @@
-// pages/Dashboard.tsx — VERSÃO ENXUTA
+// pages/Dashboard.tsx
 //
-// A versão anterior tinha 24 indicadores (ROI Potencial, Giro de Estoque,
-// Taxa de Conversão, Saúde Geral...), 68 cards e 8 gráficos. Nenhum deles
-// respondia à pergunta que a consultora realmente faz: "e agora, o que faço?".
+// Duas abas:
+//   • Relatórios — fluxo de caixa, vendas e saídas de produto (padrão)
+//   • Meu MEI    — controle do teto anual e relatório para o contador
 //
-// Esta versão responde quatro perguntas, nessa ordem:
-//   1. Quanto sobrou este mês?    → painel Meu Caixa (MEI)
-//   2. O que precisa de atenção?  → produtos vencendo e acabando, COM NOME
-//   3. O que devo repor?          → o que mais vende
-//   4. Estou melhorando?          → comparação com o mês anterior
-//
-// Decisão importante: saíram os números "potenciais" (Lucro Potencial, Receita
-// Potencial, ROI Potencial). Eles mostram dinheiro que ela AINDA NÃO TEM — o
-// que ganharia se vendesse todo o estoque, coisa que nunca acontece. Exibidos
-// ao lado do lucro real, criam otimismo falso e incentivam comprar mais
-// estoque do que ela consegue vender.
-//
-// Os indicadores de gestão que saíram daqui foram para o admin-panel, onde
-// servem para acompanhar a saúde de todas as consultoras.
-import { useState, useEffect } from "react";
+// Filtro de período (dia / mês / ano) recarrega todos os blocos de uma vez:
+// os dados vêm de UMA chamada só (/api/reports/), porque no celular cada
+// requisição extra é espera que a consultora sente.
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  AlertTriangle, Calendar, Package, TrendingUp, TrendingDown,
-  Crown, Loader2, ChevronRight, Trophy,
+  TrendingUp, TrendingDown, Wallet, Crown, Loader2, AlertTriangle,
+  ArrowDownRight, ArrowUpRight, Trophy, Package, BarChart3, Receipt,
 } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, Legend,
 } from "recharts";
 import { api } from "../services/api";
 import { useFeatureGates } from "../hooks/useFeatureGates";
-import { useExpiryAlerts } from "../hooks/useExpiryAlerts";
 import MeicashFlow from "../components/MeicashFlow";
+
+type Periodo = "dia" | "mes" | "ano";
+type Aba = "relatorios" | "mei";
 
 const dinheiro = (v: number) =>
   (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-interface TopProduct {
-  name: string;
-  total_sold: number;
-  revenue: number;
-}
+const dataBR = (d: string) => {
+  if (!d) return "—";
+  const [a, m, dia] = d.split("-");
+  return `${dia}/${m}`;
+};
 
-interface LowStockAlert {
-  id: number | string;
-  product_name: string;
-  current_stock: number;
+interface Resumo { entradas: number; saidas: number; lucro: number; custo_vendido: number }
+interface LinhaFluxo {
+  id: number; data: string; tipo: string; natureza: "entrada" | "saida";
+  produto: string; quantidade: number; valor: number; descricao: string;
 }
+interface PontoEvolucao { rotulo: string; entradas: number; saidas: number; saldo: number }
+interface TopProduto { produto: string; quantidade: number; receita: number }
+interface LinhaSaida {
+  id: number; data: string; produto: string; tipo: string;
+  valor_unitario: number; quantidade: number; total: number; descricao: string;
+}
+interface Acabando { id: number | string; produto: string; estoque: number; minimo: number }
 
-interface MonthPoint {
-  month_short: string;
-  revenue: number;
+interface Relatorio {
+  rotulo: string;
+  resumo: Resumo;
+  fluxo: LinhaFluxo[];
+  evolucao: PontoEvolucao[];
+  top_produtos: TopProduto[];
+  saidas: LinhaSaida[];
+  acabando: Acabando[];
 }
 
 export default function Dashboard() {
@@ -57,32 +61,23 @@ export default function Dashboard() {
   const { isLocked, loading: gatesLoading } = useFeatureGates();
   const bloqueado = !gatesLoading && isLocked("dashboard_charts");
 
-  const { alerts: expiryAlerts } = useExpiryAlerts();
-
-  const [topProdutos, setTopProdutos] = useState<TopProduct[]>([]);
-  const [estoqueBaixo, setEstoqueBaixo] = useState<LowStockAlert[]>([]);
-  const [meses, setMeses] = useState<MonthPoint[]>([]);
-  const [itensVendidos, setItensVendidos] = useState(0);
-  const [ticketMedio, setTicketMedio] = useState(0);
-  const [lucro, setLucro] = useState(0);
+  const [aba, setAba] = useState<Aba>("relatorios");
+  const [periodo, setPeriodo] = useState<Periodo>("mes");
+  const [dados, setDados] = useState<Relatorio | null>(null);
   const [carregando, setCarregando] = useState(true);
+
+  const carregar = useCallback(() => {
+    setCarregando(true);
+    api.get(`/reports/?period=${periodo}`)
+      .then(({ data }) => setDados(data))
+      .catch(() => setDados(null))
+      .finally(() => setCarregando(false));
+  }, [periodo]);
 
   useEffect(() => {
     if (gatesLoading || bloqueado) return;
-
-    api.get("/dashboard/overview/?period=30d")
-      .then(({ data: d }) => {
-        setTopProdutos(d?.charts?.top_products?.slice(0, 5) ?? []);
-        setEstoqueBaixo(d?.alerts?.low_stock?.slice(0, 5) ?? []);
-        // A API devolve do mês mais recente para o mais antigo.
-        setMeses([...(d?.sales?.monthly_comparison ?? [])].reverse());
-        setItensVendidos(d?.sales?.total_items_sold_30d ?? 0);
-        setTicketMedio(d?.financial?.avg_ticket ?? 0);
-        setLucro(d?.financial?.real_profit ?? 0);
-      })
-      .catch(() => { /* a tela ainda serve com o painel de caixa */ })
-      .finally(() => setCarregando(false));
-  }, [gatesLoading, bloqueado]);
+    carregar();
+  }, [gatesLoading, bloqueado, carregar]);
 
   if (gatesLoading) {
     return (
@@ -102,7 +97,7 @@ export default function Dashboard() {
           Relatórios são um recurso PRO
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Acompanhe seu lucro, o que mais vende e o que está para vencer.
+          Acompanhe seu caixa, o que mais vende e para onde vão seus produtos.
         </p>
         <button
           onClick={() => navigate("/plans")}
@@ -114,205 +109,317 @@ export default function Dashboard() {
     );
   }
 
-  // Vencendo: os mais urgentes primeiro
-  const vencendo = [...expiryAlerts].sort((a, b) => a.daysLeft - b.daysLeft).slice(0, 5);
-  const temAtencao = vencendo.length > 0 || estoqueBaixo.length > 0;
-
-  // Comparação com o mês anterior
-  const mesAtual = meses[meses.length - 1]?.revenue ?? 0;
-  const mesAnterior = meses[meses.length - 2]?.revenue ?? 0;
-  const variacao =
-    mesAnterior > 0 ? ((mesAtual - mesAnterior) / mesAnterior) * 100 : null;
-
   return (
-    <div className="mx-auto max-w-3xl space-y-8 p-4 sm:p-6">
-      {/* 1. Quanto sobrou — painel do caixa (MEI) */}
-      <MeicashFlow />
+    <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
+      {/* Abas */}
+      <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
+        {([
+          ["relatorios", "Relatórios", BarChart3],
+          ["mei", "Meu MEI", Receipt],
+        ] as [Aba, string, any][]).map(([k, label, Icon]) => (
+          <button
+            key={k}
+            onClick={() => setAba(k)}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-sm font-medium transition-colors ${
+              aba === k ? "bg-brand text-white" : "text-muted-foreground hover:bg-secondary"
+            }`}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
+      </div>
 
-      {/* 2. O que precisa de atenção agora */}
-      {temAtencao && (
-        <section className="space-y-3">
-          <h2 className="font-display text-base font-bold text-foreground">
-            Precisa de atenção
-          </h2>
-
-          {vencendo.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-amber-500/20 bg-amber-500/5">
-              <div className="flex items-center gap-2 border-b border-amber-500/15 px-4 py-2.5">
-                <Calendar className="h-4 w-4 shrink-0 text-amber-600" />
-                <span className="text-sm font-semibold text-foreground">
-                  Vencendo em breve
-                </span>
-              </div>
-              <ul>
-                {vencendo.map((a, i) => (
-                  <li
-                    key={`${a.product_name}-${i}`}
-                    className="flex items-center justify-between gap-3 border-b border-amber-500/10 px-4 py-2.5 last:border-0"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                      {a.product_name}
-                    </span>
-                    <span
-                      className={`shrink-0 text-xs font-semibold ${
-                        a.daysLeft <= 7 ? "text-destructive" : "text-amber-600"
-                      }`}
-                    >
-                      {a.daysLeft <= 0
-                        ? "vencido"
-                        : a.daysLeft === 1
-                        ? "vence amanhã"
-                        : `${a.daysLeft} dias`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <button
-                onClick={() => navigate("/products")}
-                className="flex w-full items-center justify-center gap-1 py-2.5 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-500/10"
-              >
-                Ver no estoque <ChevronRight className="h-3 w-3" />
-              </button>
-            </div>
-          )}
-
-          {estoqueBaixo.length > 0 && (
-            <div className="overflow-hidden rounded-xl border border-rose-500/20 bg-rose-500/5">
-              <div className="flex items-center gap-2 border-b border-rose-500/15 px-4 py-2.5">
-                <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600" />
-                <span className="text-sm font-semibold text-foreground">
-                  Acabando
-                </span>
-              </div>
-              <ul>
-                {estoqueBaixo.map((item) => (
-                  <li
-                    key={item.id}
-                    className="flex items-center justify-between gap-3 border-b border-rose-500/10 px-4 py-2.5 last:border-0"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                      {item.product_name}
-                    </span>
-                    <span className="shrink-0 text-xs font-semibold text-rose-600">
-                      {item.current_stock === 0
-                        ? "acabou"
-                        : `restam ${item.current_stock}`}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* 3. O que mais vende — para saber o que repor */}
-      <section className="space-y-3">
-        <h2 className="font-display text-base font-bold text-foreground">
-          Seus campeões de venda
-        </h2>
-        <p className="-mt-1 text-xs text-muted-foreground">Últimos 30 dias</p>
-
-        {carregando ? (
-          <div className="flex justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-brand" />
-          </div>
-        ) : topProdutos.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card px-4 py-8 text-center">
-            <Package className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">
-              Nenhuma venda registrada ainda.
-            </p>
-          </div>
-        ) : (
-          <ul className="overflow-hidden rounded-xl border border-border bg-card">
-            {topProdutos.map((p, i) => (
-              <li
-                key={p.name}
-                className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-0"
-              >
-                <span
-                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                    i === 0
-                      ? "bg-amber-500/15 text-amber-600"
-                      : "bg-muted text-muted-foreground"
+      {aba === "mei" ? (
+        <MeicashFlow />
+      ) : (
+        <>
+          {/* Filtro de período */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Período:</span>
+            {([["dia", "Hoje"], ["mes", "Este mês"], ["ano", "Este ano"]] as [Periodo, string][]).map(
+              ([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setPeriodo(k)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    periodo === k
+                      ? "bg-brand text-white"
+                      : "border border-border text-muted-foreground hover:bg-secondary"
                   }`}
                 >
-                  {i === 0 ? <Trophy className="h-3 w-3" /> : i + 1}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                  {p.name}
-                </span>
-                <span className="shrink-0 text-right">
-                  <span className="block text-sm font-semibold text-foreground">
-                    {p.total_sold} un
-                  </span>
-                  <span className="block text-[11px] text-muted-foreground">
-                    {dinheiro(p.revenue)}
-                  </span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                  {label}
+                </button>
+              )
+            )}
+          </div>
 
-      {/* 4. Estou melhorando? */}
-      {meses.length > 1 && (
-        <section className="space-y-3">
-          <h2 className="font-display text-base font-bold text-foreground">
-            Como você vem indo
-          </h2>
-
-          {variacao !== null && (
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3">
-              {variacao >= 0 ? (
-                <TrendingUp className="h-4 w-4 shrink-0 text-emerald-600" />
-              ) : (
-                <TrendingDown className="h-4 w-4 shrink-0 text-rose-600" />
-              )}
-              <p className="text-sm text-foreground">
-                Você vendeu{" "}
-                <strong className={variacao >= 0 ? "text-emerald-600" : "text-rose-600"}>
-                  {Math.abs(variacao).toFixed(0)}% {variacao >= 0 ? "a mais" : "a menos"}
-                </strong>{" "}
-                que no mês passado.
-              </p>
+          {carregando ? (
+            <div className="flex justify-center py-16">
+              <Loader2 className="h-6 w-6 animate-spin text-brand" />
             </div>
-          )}
-
-          <div className="rounded-xl border border-border bg-card p-4">
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={meses}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
-                <XAxis dataKey="month_short" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={48} />
-                <Tooltip
-                  formatter={(v: number) => [dinheiro(v), "Vendas"]}
-                  contentStyle={{ borderRadius: 8, fontSize: 12 }}
+          ) : !dados ? (
+            <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+              Não foi possível carregar os relatórios.
+              <button onClick={carregar} className="ml-2 font-medium text-brand hover:underline">
+                Tentar de novo
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* 1. Cards: entrou, saiu, lucro */}
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <CardValor
+                  icone={TrendingUp} cor="emerald"
+                  titulo="Entrou" valor={dados.resumo.entradas} sub="vendas no período"
                 />
-                <Bar dataKey="revenue" fill="hsl(var(--brand))" radius={[6, 6, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+                <CardValor
+                  icone={TrendingDown} cor="rose"
+                  titulo="Saiu" valor={dados.resumo.saidas} sub="compras de estoque"
+                />
+                <CardValor
+                  icone={Wallet} cor="brand"
+                  titulo="Lucro" valor={dados.resumo.lucro} sub="vendas menos o custo"
+                />
+              </div>
 
-          {/* Os três números que ela entende sem explicação */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">Você lucrou</p>
-              <p className="mt-1 text-lg font-bold text-emerald-600">{dinheiro(lucro)}</p>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">Produtos vendidos</p>
-              <p className="mt-1 text-lg font-bold text-foreground">{itensVendidos}</p>
-            </div>
-            <div className="rounded-xl border border-border bg-card p-4">
-              <p className="text-xs text-muted-foreground">Cada venda rende</p>
-              <p className="mt-1 text-lg font-bold text-foreground">{dinheiro(ticketMedio)}</p>
-            </div>
-          </div>
-        </section>
+              {/* 2. Gráfico de evolução */}
+              {dados.evolucao.length > 0 && (
+                <Bloco titulo="Evolução do caixa">
+                  <ResponsiveContainer width="100%" height={230}>
+                    <ComposedChart data={dados.evolucao}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
+                      <XAxis dataKey="rotulo" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={52} />
+                      <Tooltip
+                        formatter={(v: number, n: string) => [dinheiro(v), n]}
+                        contentStyle={{ borderRadius: 8, fontSize: 12 }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <Bar dataKey="entradas" name="Entrou" fill="#10b981" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="saidas" name="Saiu" fill="#f43f5e" radius={[4, 4, 0, 0]} />
+                      <Line
+                        type="monotone" dataKey="saldo" name="Saldo"
+                        stroke="hsl(var(--brand))" strokeWidth={2} dot={false}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </Bloco>
+              )}
+
+              {/* 3. Tabela de fluxo de caixa */}
+              <Bloco titulo="Fluxo de caixa" vazio={dados.fluxo.length === 0}
+                     msgVazio="Nenhuma movimentação de dinheiro no período.">
+                <Tabela cabecalho={["Data", "Movimento", "Produto", "Qtd", "Valor"]}>
+                  {dados.fluxo.map((l) => (
+                    <tr key={l.id} className="border-t border-border">
+                      <td className="px-3 py-2.5 text-muted-foreground">{dataBR(l.data)}</td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={`inline-flex items-center gap-1 text-xs font-medium ${
+                            l.natureza === "entrada" ? "text-emerald-600" : "text-rose-600"
+                          }`}
+                        >
+                          {l.natureza === "entrada" ? (
+                            <ArrowUpRight className="h-3 w-3" />
+                          ) : (
+                            <ArrowDownRight className="h-3 w-3" />
+                          )}
+                          {l.tipo}
+                        </span>
+                      </td>
+                      <td className="max-w-[180px] truncate px-3 py-2.5 text-foreground">{l.produto}</td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">{l.quantidade}</td>
+                      <td
+                        className={`px-3 py-2.5 text-right font-semibold ${
+                          l.natureza === "entrada" ? "text-emerald-600" : "text-rose-600"
+                        }`}
+                      >
+                        {l.natureza === "entrada" ? "+" : "−"} {dinheiro(l.valor)}
+                      </td>
+                    </tr>
+                  ))}
+                </Tabela>
+              </Bloco>
+
+              {/* 4. Top 10 mais vendidos */}
+              <Bloco titulo="10 mais vendidos" vazio={dados.top_produtos.length === 0}
+                     msgVazio="Nenhuma venda registrada no período.">
+                <ul>
+                  {dados.top_produtos.map((p, i) => (
+                    <li
+                      key={p.produto}
+                      className="flex items-center gap-3 border-t border-border px-4 py-2.5 first:border-0"
+                    >
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                          i === 0 ? "bg-amber-500/15 text-amber-600" : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {i === 0 ? <Trophy className="h-3 w-3" /> : i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{p.produto}</span>
+                      <span className="shrink-0 text-right">
+                        <span className="block text-sm font-semibold text-foreground">
+                          {p.quantidade} un
+                        </span>
+                        <span className="block text-[11px] text-muted-foreground">
+                          {dinheiro(p.receita)}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Bloco>
+
+              {/* 5. Saídas de produto (com a descrição) */}
+              <Bloco
+                titulo="Saídas de produto"
+                subtitulo="Inclui vendas, presentes, brindes e uso próprio"
+                vazio={dados.saidas.length === 0}
+                msgVazio="Nenhuma saída registrada no período."
+              >
+                <Tabela cabecalho={["Data", "Produto", "Tipo", "Valor", "Qtd", "Total", "Descrição"]}>
+                  {dados.saidas.map((s) => (
+                    <tr key={s.id} className="border-t border-border">
+                      <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{dataBR(s.data)}</td>
+                      <td className="max-w-[160px] truncate px-3 py-2.5 text-foreground">{s.produto}</td>
+                      <td className="px-3 py-2.5">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            s.tipo === "Venda"
+                              ? "bg-emerald-500/10 text-emerald-600"
+                              : s.tipo === "Perda"
+                              ? "bg-destructive/10 text-destructive"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {s.tipo}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right text-muted-foreground">
+                        {dinheiro(s.valor_unitario)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-muted-foreground">{s.quantidade}</td>
+                      <td className="whitespace-nowrap px-3 py-2.5 text-right font-semibold text-foreground">
+                        {dinheiro(s.total)}
+                      </td>
+                      <td className="max-w-[220px] truncate px-3 py-2.5 text-muted-foreground" title={s.descricao}>
+                        {s.descricao || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </Tabela>
+              </Bloco>
+
+              {/* 6. Produtos acabando */}
+              {dados.acabando.length > 0 && (
+                <Bloco titulo="Produtos acabando">
+                  <ul>
+                    {dados.acabando.map((a) => (
+                      <li
+                        key={a.id}
+                        className="flex items-center justify-between gap-3 border-t border-border px-4 py-2.5 first:border-0"
+                      >
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <AlertTriangle
+                            className={`h-3.5 w-3.5 shrink-0 ${
+                              a.estoque === 0 ? "text-destructive" : "text-amber-600"
+                            }`}
+                          />
+                          <span className="truncate text-sm text-foreground">{a.produto}</span>
+                        </span>
+                        <span
+                          className={`shrink-0 text-xs font-semibold ${
+                            a.estoque === 0 ? "text-destructive" : "text-amber-600"
+                          }`}
+                        >
+                          {a.estoque === 0 ? "acabou" : `restam ${a.estoque}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </Bloco>
+              )}
+            </>
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+/* ── Componentes auxiliares ── */
+
+function CardValor({
+  icone: Icone, cor, titulo, valor, sub,
+}: { icone: any; cor: "emerald" | "rose" | "brand"; titulo: string; valor: number; sub: string }) {
+  const estilos = {
+    emerald: { borda: "border-emerald-500/20 bg-emerald-500/5", texto: "text-emerald-600" },
+    rose: { borda: "border-rose-500/20 bg-rose-500/5", texto: "text-rose-600" },
+    brand: { borda: "border-brand/20 bg-brand/5", texto: "text-brand" },
+  }[cor];
+  return (
+    <div className={`rounded-xl border p-4 ${estilos.borda}`}>
+      <div className="flex items-center gap-2">
+        <Icone className={`h-4 w-4 shrink-0 ${estilos.texto}`} />
+        <span className="text-xs font-medium text-muted-foreground">{titulo}</span>
+      </div>
+      <p className={`mt-2 text-xl font-bold ${valor < 0 ? "text-rose-600" : estilos.texto}`}>
+        {dinheiro(valor)}
+      </p>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>
+    </div>
+  );
+}
+
+function Bloco({
+  titulo, subtitulo, children, vazio, msgVazio,
+}: {
+  titulo: string; subtitulo?: string; children: React.ReactNode;
+  vazio?: boolean; msgVazio?: string;
+}) {
+  return (
+    <section className="space-y-2">
+      <div>
+        <h2 className="font-display text-base font-bold text-foreground">{titulo}</h2>
+        {subtitulo && <p className="text-xs text-muted-foreground">{subtitulo}</p>}
+      </div>
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        {vazio ? (
+          <div className="px-4 py-8 text-center">
+            <Package className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+            <p className="text-sm text-muted-foreground">{msgVazio}</p>
+          </div>
+        ) : (
+          children
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Tabela({ cabecalho, children }: { cabecalho: string[]; children: React.ReactNode }) {
+  return (
+    // Rola na horizontal no celular em vez de cortar colunas.
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[620px] text-sm">
+        <thead className="bg-muted/40 text-xs uppercase text-muted-foreground">
+          <tr>
+            {cabecalho.map((h, i) => (
+              <th
+                key={h}
+                className={`px-3 py-2.5 font-medium ${
+                  i >= 3 && i < cabecalho.length - 1 ? "text-right" : "text-left"
+                }`}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
     </div>
   );
 }

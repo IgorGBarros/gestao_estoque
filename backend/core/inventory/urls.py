@@ -14,6 +14,8 @@ from inventory.views import (
   
     profile_view,
     mei_summary,
+    consultant_reports,
+    public_plans_view,
     mei_report_csv,
 )
 
@@ -75,6 +77,10 @@ urlpatterns = [
     path('api/dashboard/financial/', dashboard_financial_summary, name='dashboard_financial'),
     path('api/dashboard/inventory/', dashboard_inventory_analysis, name='dashboard_inventory'),
     path('api/cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
+    path('api/plans/', public_plans_view, name='public_plans'),
+
+    # 📊 Relatórios da consultora (dashboard com filtro de período)
+    path('api/reports/', consultant_reports, name='consultant_reports'),
     # 💰 Fluxo de caixa simplificado (MEI)
     path('api/mei/summary/', mei_summary, name='mei_summary'),
     path('api/mei/report/', mei_report_csv, name='mei_report'),
