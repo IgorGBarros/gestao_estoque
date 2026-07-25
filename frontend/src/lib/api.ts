@@ -934,6 +934,53 @@ function normalizeConsentRecord(raw: any): ConsentRecord {
   };
 }
 
+// ── Admin: saúde das consultoras e suporte ──
+export interface ConsultantHealth {
+  store_id: number;
+  name: string;
+  email: string;
+  plan: string;
+  produtos: number;
+  capital_investido: number;
+  receita_30d: number;
+  lucro_30d: number;
+  margem_percent: number;
+  roi_percent: number;
+  giro_estoque: number;
+  ticket_medio: number;
+  vendas_30d: number;
+  estoque_baixo: number;
+  lotes_vencidos: number;
+  lotes_vencendo: number;
+  saude: number;
+}
+
+export const adminHealthApi = {
+  getConsultants: () =>
+    apiRequest<{
+      periodo: string;
+      totais: {
+        consultoras: number; ativas_30d: number; inativas_30d: number;
+        receita_total_30d: number; capital_investido_total: number;
+        receita_media_por_consultora: number; em_risco: number;
+      };
+      consultoras: ConsultantHealth[];
+    }>("/admin/analytics/consultants/"),
+
+  /** Emite token de suporte para ver o app como a consultora. */
+  impersonate: (userId: number) =>
+    apiRequest<{
+      access: string;
+      user: { id: number; email: string; display_name: string };
+      expires_in_minutes: number;
+    }>(`/admin/users/${userId}/impersonate/`, { method: "POST" }),
+
+  toggleBlock: (userId: number) =>
+    apiRequest<{ user_id: number; email: string; is_active: boolean; status: string }>(
+      `/admin/users/${userId}/toggle-block/`, { method: "POST" }
+    ),
+};
+
 export const consentApi = {
   record: async (data: ConsentRequest): Promise<ConsentRecord> => {
     const response = await apiRequest<ConsentRecord>("/consent/", {

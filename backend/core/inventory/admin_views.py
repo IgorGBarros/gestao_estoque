@@ -1,4 +1,5 @@
 # inventory/admin_views.py
+import logging
 from decimal import Decimal
 from datetime import timedelta
 from django.db.models import Count, Sum, Avg, Max, Q, F
@@ -11,6 +12,8 @@ from .models import (
     Product, Store, InventoryItem, Sale, UserBehaviorLog, 
     PlanConfig, Promotion, CustomUser, ConsentRecord, StockTransaction
 )
+
+logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────────────────────
 # UTILITÁRIOS
@@ -852,3 +855,251 @@ def update_subscription(request, user_id):
         
     store.save()
     return Response({'success': True})
+
+# ==========================================
+# 📊 SAÚDE DAS CONSULTORAS (visão do dono)
+# ==========================================
+# Os indicadores que saíram do Dashboard da consultora vivem aqui: giro de
+# estoque, ROI, capital investido, saúde geral. Para ela esses números não
+# geravam ação; para quem administra a plataforma, mostram quais consultoras
+# estão indo bem e quais precisam de ajuda.
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_consultants_health(request):
+    """
+    GET /api/admin/analytics/consultants/
+
+    Uma linha por consultora com os indicadores de gestão, além dos totais
+    da plataforma. Ordenado por receita nos últimos 30 dias.
+    """
+    from django.db.models import Sum, F, Q
+    from django.utils import timezone
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from inventory.models import Store, InventoryItem, StockTransaction
+
+    desde = timezone.now() - timedelta(days=30)
+    hoje = timezone.now().date()
+    linhas = []
+
+    stores = Store.objects.select_related('owner').all()
+
+    for store in stores:
+        itens = InventoryItem.objects.filter(store=store).select_related('product')
+
+        investido = Decimal('0')
+        potencial = Decimal('0')
+        unidades = 0
+        estoque_baixo = 0
+        for it in itens:
+            qtd = it.total_quantity or 0
+            unidades += qtd
+            investido += (it.cost_price or 0) * qtd
+            potencial += (it.sale_price or 0) * qtd
+            minimo = it.min_quantity if it.min_quantity is not None else 0
+            if qtd <= minimo:
+                estoque_baixo += 1
+
+        vendas = StockTransaction.objects.filter(
+            store=store, transaction_type='VENDA', created_at__gte=desde
+        )
+        receita = vendas.aggregate(
+            s=Sum(F('unit_price') * (F('quantity') * -1))
+        )['s'] or Decimal('0')
+        custo_vendido = vendas.aggregate(
+            s=Sum(F('unit_cost') * (F('quantity') * -1))
+        )['s'] or Decimal('0')
+        unidades_vendidas = abs(vendas.aggregate(q=Sum('quantity'))['q'] or 0)
+        num_vendas = vendas.count()
+
+        lucro = receita - custo_vendido
+        # Giro: quanto do estoque parado virou venda no período.
+        giro = float(custo_vendido / investido) if investido else 0.0
+        roi = float(lucro / custo_vendido * 100) if custo_vendido else 0.0
+        margem = float(lucro / receita * 100) if receita else 0.0
+        ticket = float(receita / num_vendas) if num_vendas else 0.0
+
+        # Lotes vencidos e a vencer
+        vencidos = 0
+        vencendo = 0
+        for it in itens:
+            for lote in it.batches.all():
+                if lote.expiration_date:
+                    dias = (lote.expiration_date - hoje).days
+                    if dias < 0:
+                        vencidos += 1
+                    elif dias <= 30:
+                        vencendo += 1
+
+        # Saúde: combina atividade de venda, giro e risco de perda.
+        # Serve para ordenar quem precisa de atenção — não é nota fiscal.
+        saude = 100
+        if num_vendas == 0:
+            saude -= 40
+        if giro < 0.1:
+            saude -= 20
+        if estoque_baixo > 5:
+            saude -= 15
+        if vencidos > 0:
+            saude -= 15
+        if unidades == 0:
+            saude -= 10
+        saude = max(0, saude)
+
+        linhas.append({
+            'store_id': store.id,
+            'name': store.name,
+            'email': getattr(store.owner, 'email', ''),
+            'plan': store.plan,
+            'access_status': getattr(store, 'access_status', store.plan),
+            'produtos': itens.count(),
+            'unidades': unidades,
+            'capital_investido': float(investido),
+            'valor_potencial': float(potencial),
+            'receita_30d': float(receita),
+            'lucro_30d': float(lucro),
+            'margem_percent': round(margem, 1),
+            'roi_percent': round(roi, 1),
+            'giro_estoque': round(giro, 2),
+            'ticket_medio': round(ticket, 2),
+            'vendas_30d': num_vendas,
+            'unidades_vendidas_30d': unidades_vendidas,
+            'estoque_baixo': estoque_baixo,
+            'lotes_vencidos': vencidos,
+            'lotes_vencendo': vencendo,
+            'saude': saude,
+        })
+
+    linhas.sort(key=lambda x: x['receita_30d'], reverse=True)
+
+    total_receita = sum(l['receita_30d'] for l in linhas)
+    total_investido = sum(l['capital_investido'] for l in linhas)
+    ativas = [l for l in linhas if l['vendas_30d'] > 0]
+
+    return Response({
+        'periodo': '30 dias',
+        'totais': {
+            'consultoras': len(linhas),
+            'ativas_30d': len(ativas),
+            'inativas_30d': len(linhas) - len(ativas),
+            'receita_total_30d': round(total_receita, 2),
+            'capital_investido_total': round(total_investido, 2),
+            'receita_media_por_consultora': round(
+                total_receita / len(ativas), 2) if ativas else 0,
+            'em_risco': len([l for l in linhas if l['saude'] < 60]),
+        },
+        'consultoras': linhas,
+    })
+
+
+# ==========================================
+# 🔐 ACESSAR COMO CONSULTORA (suporte)
+# ==========================================
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_impersonate_user(request, user_id):
+    """
+    POST /api/admin/users/<id>/impersonate/
+
+    Emite um token de acesso para a conta da consultora, para o suporte
+    conseguir ver a tela exatamente como ela vê.
+
+    ⚠️ Isto dá acesso a DADOS PESSOAIS de terceiros: nomes de clientes finais,
+    histórico de vendas, contatos. Por isso:
+      • só quem é staff pode chamar;
+      • não é possível assumir a conta de outro admin (evita escalar acesso);
+      • toda utilização fica registrada no log do servidor;
+      • o token dura 30 minutos, não os 60 normais.
+
+    Use apenas para suporte solicitado pela própria consultora.
+    """
+    from datetime import timedelta
+
+    from django.contrib.auth import get_user_model
+    from rest_framework_simplejwt.tokens import RefreshToken
+
+    User = get_user_model()
+
+    try:
+        alvo = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'Usuário não encontrado'}, status=404)
+
+    # Um admin não assume a conta de outro admin.
+    if alvo.is_staff or alvo.is_superuser:
+        return Response(
+            {'error': 'Não é possível acessar a conta de outro administrador.'},
+            status=403,
+        )
+
+    if alvo.id == request.user.id:
+        return Response({'error': 'Você já está na sua própria conta.'}, status=400)
+
+    refresh = RefreshToken.for_user(alvo)
+    access = refresh.access_token
+    access.set_exp(lifetime=timedelta(minutes=30))
+
+    # Marca o token para ser possível auditar depois.
+    access['impersonated_by'] = request.user.email
+    access['is_impersonation'] = True
+
+    logger.warning(
+        f"[IMPERSONATE] {request.user.email} acessou a conta de {alvo.email} "
+        f"(user_id={alvo.id})"
+    )
+
+    return Response({
+        'access': str(access),
+        'user': {
+            'id': alvo.id,
+            'email': alvo.email,
+            'display_name': getattr(getattr(alvo, 'store', None), 'name', '') or alvo.email,
+        },
+        'expires_in_minutes': 30,
+        'aviso': 'Sessão de suporte. O acesso fica registrado.',
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_toggle_block_user(request, user_id):
+    """
+    POST /api/admin/users/<id>/toggle-block/
+
+    Bloqueia ou libera o acesso de uma consultora (`is_active` do Django).
+    Uma conta inativa não consegue autenticar.
+
+    ⚠️ Antes, o botão de bloquear no painel só mudava a tela: nada era enviado
+    ao servidor. O admin acreditava ter bloqueado alguém que continuava
+    entrando normalmente.
+    """
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    try:
+        alvo = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response({'error': 'Usuário não encontrado'}, status=404)
+
+    if alvo.is_staff or alvo.is_superuser:
+        return Response(
+            {'error': 'Não é possível bloquear um administrador.'}, status=403
+        )
+
+    alvo.is_active = not alvo.is_active
+    alvo.save(update_fields=['is_active'])
+
+    logger.warning(
+        f"[{'DESBLOQUEIO' if alvo.is_active else 'BLOQUEIO'}] "
+        f"{request.user.email} alterou o acesso de {alvo.email}"
+    )
+
+    return Response({
+        'user_id': alvo.id,
+        'email': alvo.email,
+        'is_active': alvo.is_active,
+        'status': 'liberado' if alvo.is_active else 'bloqueado',
+    })

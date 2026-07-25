@@ -10,8 +10,9 @@ import {
   Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy
 } from "lucide-react";
 
-import { profileApi, adminApi } from "../lib/api";
+import { profileApi, adminApi, adminHealthApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
+import ConsultantsHealthTab from "../components/admin/ConsultantsHealthTab";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { Badge } from "../components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
@@ -649,21 +650,66 @@ export default function AdminPanel() {
     });
   }, []);
 
-  const impersonateUser = useCallback((u: AdminUser) => {
-    logAuditEvent('IMPERSONATE_USER', u.email);
-    toast({ title: `Acessando como ${u.display_name || u.email}`, description: "Sessão de suporte iniciada (simulação)" });
+  const impersonateUser = useCallback(async (u: AdminUser) => {
+    // ⚠️ Isto abre a conta da consultora com os DADOS PESSOAIS dela e dos
+    // clientes finais. Antes o botão era só um toast de simulação — não fazia
+    // nada. Agora é real, então pedimos confirmação explícita.
+    if (!confirm(
+      `Acessar o sistema como ${u.display_name || u.email}?\n\n` +
+      `Você verá os dados reais desta consultora e o acesso ficará registrado. ` +
+      `Use apenas para suporte solicitado por ela.`
+    )) return;
+
+    try {
+      const r = await adminHealthApi.impersonate(Number(u.id));
+      // Guarda o token do admin para conseguir voltar depois.
+      const tokenAdmin = localStorage.getItem("auth_token");
+      if (tokenAdmin) sessionStorage.setItem("admin_token_backup", tokenAdmin);
+      sessionStorage.setItem("impersonating_as", r.user.display_name || r.user.email);
+
+      localStorage.setItem("auth_token", r.access);
+      logAuditEvent('IMPERSONATE_USER', u.email);
+      toast({
+        title: `Acessando como ${r.user.display_name || r.user.email}`,
+        description: `Sessão de suporte de ${r.expires_in_minutes} minutos.`,
+      });
+      // Recarrega na home já com a sessão da consultora.
+      setTimeout(() => { window.location.href = "/"; }, 600);
+    } catch (e: any) {
+      toast({
+        title: "Não foi possível acessar",
+        description: e?.message || "Tente novamente.",
+        variant: "destructive",
+      });
+    }
   }, [logAuditEvent, toast]);
 
-  const toggleBlockUser = useCallback((u: AdminUser) => {
+  const toggleBlockUser = useCallback(async (u: AdminUser) => {
+    // ⚠️ Antes isto só mudava a tela: NADA era enviado ao servidor. O admin
+    // acreditava ter bloqueado alguém que continuava entrando normalmente.
     const isBlocked = blockedUsers.has(u.id);
-    if (!isBlocked && !confirm(`Bloquear acesso de ${u.email}?`)) return;
-    setBlockedUsers(prev => {
-      const next = new Set(prev);
-      if (isBlocked) next.delete(u.id); else next.add(u.id);
-      return next;
-    });
-    logAuditEvent(isBlocked ? 'UNBLOCK_USER' : 'BLOCK_USER', u.email);
-    toast({ title: isBlocked ? "Usuário desbloqueado" : "Usuário bloqueado", variant: isBlocked ? "default" : "destructive" });
+    if (!isBlocked && !confirm(`Bloquear o acesso de ${u.email}?`)) return;
+
+    try {
+      const r = await adminHealthApi.toggleBlock(Number(u.id));
+      setBlockedUsers(prev => {
+        const next = new Set(prev);
+        if (r.is_active) next.delete(u.id); else next.add(u.id);
+        return next;
+      });
+      logAuditEvent(r.is_active ? 'UNBLOCK_USER' : 'BLOCK_USER', u.email);
+      toast({
+        title: r.is_active ? "Acesso liberado" : "Acesso bloqueado",
+        description: `${u.email} está ${r.status}.`,
+        variant: r.is_active ? "default" : "destructive",
+      });
+    } catch (e: any) {
+      toast({
+        title: "Não foi possível alterar o acesso",
+        description: e?.message || "Tente novamente.",
+        variant: "destructive",
+      });
+    }
   }, [blockedUsers, logAuditEvent, toast]);
 
   // Estados originais mantidos
@@ -1830,7 +1876,17 @@ export default function AdminPanel() {
               TAB: ANALYTICS
               ========================================== */}
           <TabsContent value="analytics" className="space-y-6">
-            <div className="flex justify-between items-center">
+            {/* 📊 Indicadores de gestão que saíram do Dashboard da consultora.
+                Para ela não geravam ação; aqui mostram quem precisa de ajuda. */}
+            <div>
+              <h2 className="text-2xl font-bold">Saúde das consultoras</h2>
+              <p className="text-muted-foreground">
+                Receita, giro de estoque, ROI e risco — últimos 30 dias
+              </p>
+            </div>
+            <ConsultantsHealthTab />
+
+            <div className="flex justify-between items-center pt-4 border-t border-border">
               <div>
                 <h2 className="text-2xl font-bold">Analytics de Produtos & Comportamento</h2>
                 <p className="text-muted-foreground">Insights sobre catálogo e padrões de uso</p>
