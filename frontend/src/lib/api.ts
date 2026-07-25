@@ -981,6 +981,28 @@ export const adminHealthApi = {
     ),
 };
 
+// ── Relatório de movimentações (CSV) ──
+export const movementsReportApi = {
+  /**
+   * Baixa o CSV de movimentações. Precisa passar pelo axios (e não por um
+   * <a href>) porque o endpoint exige o token JWT — link simples não envia
+   * o cabeçalho Authorization.
+   */
+  download: async (period: "dia" | "mes" | "ano" | "tudo" = "mes") => {
+    const resp = await api.get(`/movements/report/?period=${period}`, {
+      responseType: "blob",
+    });
+    const url = window.URL.createObjectURL(new Blob([resp.data]));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `movimentacoes-${period}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+};
+
 export const consentApi = {
   record: async (data: ConsentRequest): Promise<ConsentRecord> => {
     const response = await apiRequest<ConsentRecord>("/consent/", {

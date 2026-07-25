@@ -1,8 +1,13 @@
 """
-backend/core/core/urls.py
-URL configuration for core project.
+backend/core/inventory/urls.py
+
+Rotas do app inventory: estoque, vendas, perfil, consentimento, relatórios.
+Montadas na raiz por core/urls.py através de path('', include('inventory.urls')).
+
+⚠️ É AQUI que entra rota nova de negócio — nunca em core/urls.py, que agora
+faz apenas o roteamento dos apps. Antes os dois arquivos tinham 28 rotas
+duplicadas e as versões daqui eram ignoradas pelo Django.
 """
-from django.contrib import admin
 from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -15,6 +20,7 @@ from inventory.views import (
     profile_view,
     mei_summary,
     consultant_reports,
+    movements_report_csv,
     public_plans_view,
     mei_report_csv,
 )
@@ -81,6 +87,7 @@ urlpatterns = [
 
     # 📊 Relatórios da consultora (dashboard com filtro de período)
     path('api/reports/', consultant_reports, name='consultant_reports'),
+    path('api/movements/report/', movements_report_csv, name='movements_report'),
     # 💰 Fluxo de caixa simplificado (MEI)
     path('api/mei/summary/', mei_summary, name='mei_summary'),
     path('api/mei/report/', mei_report_csv, name='mei_report'),

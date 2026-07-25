@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  TrendingUp, TrendingDown, Wallet, Crown, Loader2, AlertTriangle,
+  TrendingUp, TrendingDown, Wallet, Crown, Loader2, AlertTriangle, ArrowLeft,
   ArrowDownRight, ArrowUpRight, Trophy, Package, BarChart3, Receipt,
 } from "lucide-react";
 import {
@@ -110,7 +110,24 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
+    <div>
+      {/* Header com volta para a home */}
+      <header className="border-b border-border bg-card">
+        <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3 sm:px-6">
+          <button
+            onClick={() => navigate("/")}
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+            aria-label="Voltar para o início"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <h1 className="font-display text-base font-bold text-foreground">
+            Relatórios
+          </h1>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
       {/* Abas */}
       <div className="flex gap-1 rounded-xl border border-border bg-card p-1">
         {([
@@ -345,6 +362,7 @@ export default function Dashboard() {
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

@@ -4,10 +4,9 @@ import { useNavigate } from "react-router-dom";
 import {
   Plus, Search, Edit2, Package, ArrowLeft, Scale, Loader2,
   AlertTriangle, Clock, ChevronDown, ChevronUp, X, BookOpen, ZoomIn, Calendar,
-  TrendingUp, TrendingDown,
-} from "lucide-react";
+  TrendingUp, TrendingDown, Download } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import { inventoryApi, formatMoney } from "../lib/api";
+import { inventoryApi, formatMoney, movementsReportApi } from "../lib/api";
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import StockAdjustmentModal from "../components/StockAdjustmentModal";
 import ProductSearchModal from "../components/ProductSearchModal";
@@ -82,6 +81,20 @@ const consolidateBatchesByExpiry = (batches: any[]) => {
 type StockFilter = "TODOS" | "COM_ESTOQUE" | "ESGOTADO";
 
 export default function ProductList() {
+  const [baixandoRel, setBaixandoRel] = useState(false);
+
+  // Relatório de movimentação do estoque em CSV.
+  const baixarRelatorio = async () => {
+    setBaixandoRel(true);
+    try {
+      await movementsReportApi.download("tudo");
+    } catch {
+      /* silencioso: a lista na tela continua disponível */
+    } finally {
+      setBaixandoRel(false);
+    }
+  };
+
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -201,6 +214,19 @@ export default function ProductList() {
             </span>
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={baixarRelatorio}
+              disabled={baixandoRel}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary disabled:opacity-60"
+              title="Baixar relatório de movimentação"
+            >
+              {baixandoRel ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Relatório</span>
+            </button>
             <button
               onClick={() => setShowCatalog(true)}
               className="flex items-center gap-1.5 rounded-lg border border-brand/20 bg-brand-soft px-3 py-2 text-sm font-medium text-brand transition-colors hover:bg-brand-peach/30"

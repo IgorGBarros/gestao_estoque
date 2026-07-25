@@ -3,10 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { 
   ArrowLeft, ArrowUpCircle, ArrowDownCircle, Search, Package, 
   ChevronDown, ChevronUp, Calendar, Gift, ShoppingCart, 
-  AlertTriangle, User, Settings2, Calculator
-} from "lucide-react";
+  AlertTriangle, User, Settings2, Calculator, Download, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { movementsApi, Movement, formatMoney } from "../lib/api";
+import { movementsApi, Movement, formatMoney, movementsReportApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 
 const TYPE_LABELS: Record<string, { label: string; emoji: string }> = {
@@ -19,6 +18,20 @@ const TYPE_LABELS: Record<string, { label: string; emoji: string }> = {
 };
 
 export default function MovementHistory() {
+  const [baixando, setBaixando] = useState(false);
+
+  // Relatório de movimentação em CSV — abre no Excel e no Google Sheets.
+  const baixarRelatorio = async () => {
+    setBaixando(true);
+    try {
+      await movementsReportApi.download("tudo");
+    } catch {
+      /* silencioso: o extrato na tela continua disponível */
+    } finally {
+      setBaixando(false);
+    }
+  };
+
   const navigate = useNavigate();
   const { user } = useAuth();
   
@@ -101,6 +114,19 @@ export default function MovementHistory() {
               <p className="text-xs text-gray-500">{movements.length} operações registradas</p>
             </div>
           </div>
+
+          <button
+            onClick={baixarRelatorio}
+            disabled={baixando}
+            className="flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 text-xs font-semibold text-brand transition-colors hover:bg-brand/10 disabled:opacity-60"
+          >
+            {baixando ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden sm:inline">Baixar relatório</span>
+          </button>
         </div>
       </header>
 

@@ -2,8 +2,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Save, Loader2, LogOut, Sun, Moon, Monitor, Bell, Download,
-} from "lucide-react";
+  ArrowLeft, Save, Loader2, LogOut, Sun, Moon, Monitor, Bell, } from "lucide-react";
 import { inventoryApi, movementsApi, InventoryItem, Movement } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
@@ -17,7 +16,6 @@ export default function Settings() {
   const { toast } = useToast();
 
   const [saving, setSaving] = useState(false);
-  const [exporting, setExporting] = useState(false);
 
   const [expiryDays, setExpiryDays] = useState(() => {
     return parseInt(localStorage.getItem("expiry_alert_days") || "30", 10);
@@ -62,52 +60,6 @@ export default function Settings() {
   };
 
   // ── Export CSV ──
-  const exportCSV = async (type: "inventory" | "movements") => {
-    setExporting(true);
-    try {
-      if (type === "inventory") {
-        const items = await inventoryApi.list();
-        const header =
-          "Nome,Código de Barras,Categoria,Quantidade,Preço Custo,Preço Venda,Validade\n";
-        const rows = items
-          .map(
-            (i: InventoryItem) =>
-              `"${i.product?.name || i.product_name}","${
-                i.product?.bar_code || i.barcode
-              }","${i.product?.category || i.category}",${
-                i.total_quantity || i.quantity
-              },${i.cost_price},${i.sale_price || ""},${i.expiry_date || ""}`
-          )
-          .join("\n");
-        downloadFile(header + rows, "estoque.csv");
-      } else {
-        const items = await movementsApi.list();
-        const header =
-          "Data,Produto,Código,Tipo,Quantidade,Preço Unit.,Tipo Saída,Observações\n";
-        const rows = items
-          .map(
-            (m: Movement) =>
-              `"${new Date(m.created_at).toLocaleDateString("pt-BR")}","${
-                m.product_name
-              }","${(m as any).barcode}","${(m as any).movement_type}",${
-                m.quantity
-              },${m.unit_price || ""},"${(m as any).sale_type || ""}","${
-                (m as any).notes || ""
-              }"`
-          )
-          .join("\n");
-        downloadFile(header + rows, "movimentacoes.csv");
-      }
-      toast({ title: "Exportado com sucesso!" });
-    } catch (err: any) {
-      toast({
-        title: "Erro ao exportar",
-        description: err.message,
-        variant: "destructive",
-      });
-    }
-    setExporting(false);
-  };
 
   const downloadFile = (content: string, filename: string) => {
     const blob = new Blob(["\uFEFF" + content], {
@@ -257,44 +209,6 @@ export default function Settings() {
               </div>
             </div>
           )}
-        </div>
-
-        {/* ══════════════════════════════════════════
-            EXPORTAR DADOS
-            ══════════════════════════════════════════ */}
-        <div className="rounded-xl border border-border bg-card p-5 space-y-4">
-          <h2 className="font-display text-sm font-semibold text-foreground flex items-center gap-2">
-            <Download className="h-4 w-4 text-brand" /> Exportar Dados
-          </h2>
-          <p className="text-xs text-muted-foreground">
-            Baixe seus dados em formato CSV para backup ou análise externa.
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => exportCSV("inventory")}
-              disabled={exporting}
-              className="flex items-center justify-center gap-2 rounded-xl border border-border bg-secondary py-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
-            >
-              {exporting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4" />
-              )}
-              Estoque
-            </button>
-            <button
-              onClick={() => exportCSV("movements")}
-              disabled={exporting}
-              className="flex items-center justify-center gap-2 rounded-xl border border-border bg-secondary py-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
-            >
-              {exporting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4" />
-              )}
-              Movimentações
-            </button>
-          </div>
         </div>
 
         {/* ══════════════════════════════════════════

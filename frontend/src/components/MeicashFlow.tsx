@@ -59,8 +59,10 @@ export default function MeiCashFlow() {
   const excedeu = mei.situacao === "excedido" || mei.situacao === "excedido_grave";
   const atencao = mei.situacao === "atencao";
 
-  // Barra nunca passa de 100% visualmente, mas o número real continua visível.
-  const larguraBarra = Math.min(mei.percentual_usado, 100);
+  // Barra fica entre 0 e 100%. O Math.max protege contra valor negativo:
+  // largura negativa é CSS inválido e o navegador renderizava a barra CHEIA,
+  // dando a impressão de teto estourado quando o número era o oposto disso.
+  const larguraBarra = Math.max(0, Math.min(mei.percentual_usado, 100));
   const corBarra = excedeu ? "bg-destructive" : atencao ? "bg-amber-500" : "bg-emerald-500";
 
   return (

@@ -50,7 +50,8 @@ from .serializers import (
 
 from .scraper import search_google_shopping
 from .consent_utils import has_consent_for_purpose as _has_consent_for_purpose
-from decimal import Decimal  # usado no fluxo de caixa MEI
+from decimal import Decimal
+from django.db.models.functions import Abs  # usado no fluxo de caixa MEI
 
 User = get_user_model()
 # ============================================================================
@@ -3643,14 +3644,24 @@ MEI_TOLERANCIA_20 = MEI_LIMITE_ANUAL * Decimal('1.20')
 
 
 def _receita_periodo(store, inicio=None, fim=None):
-    """Receita bruta (vendas) no período. Quantidade de VENDA é negativa."""
+    """
+    Receita bruta (vendas) no período.
+
+    ⚠️ CORREÇÃO: antes o cálculo era `unit_price * (quantity * -1)`, partindo
+    do princípio de que TODA venda é gravada com quantidade negativa. Bastava
+    um registro com quantidade positiva para a receita virar NEGATIVA — foi o
+    que aconteceu em produção ("-R$ 919,50 de R$ 81.000").
+
+    Agora usamos o valor absoluto: vender 5 unidades é 5 unidades,
+    independentemente de como o sinal foi gravado.
+    """
     qs = StockTransaction.objects.filter(store=store, transaction_type='VENDA')
     if inicio:
         qs = qs.filter(created_at__gte=inicio)
     if fim:
         qs = qs.filter(created_at__lt=fim)
     total = qs.aggregate(
-        s=Sum(F('unit_price') * (F('quantity') * -1))
+        s=Sum(F('unit_price') * Abs(F('quantity')))
     )['s']
     return Decimal(total or 0)
 
@@ -3662,7 +3673,8 @@ def _compras_periodo(store, inicio=None, fim=None):
         qs = qs.filter(created_at__gte=inicio)
     if fim:
         qs = qs.filter(created_at__lt=fim)
-    total = qs.aggregate(s=Sum(F('unit_cost') * F('quantity')))['s']
+    # Valor absoluto pelo mesmo motivo da receita: o sinal não é confiável.
+    total = qs.aggregate(s=Sum(F('unit_cost') * Abs(F('quantity'))))['s']
     return Decimal(total or 0)
 
 
@@ -4052,3 +4064,88 @@ def public_plans_view(request):
     """
     plans = PlanConfig.objects.filter(is_visible=True).order_by('sort_order')
     return Response(PlanConfigSerializer(plans, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def movements_report_csv(request):
+    """
+    GET /api/movements/report/?period=dia|mes|ano|tudo
+
+    Relatório de movimentação de estoque em CSV — entradas, saídas, valores,
+    lucro e a descrição preenchida pela consultora.
+
+    CSV (e não PDF) porque abre no Excel e no Google Sheets sem depender de
+    biblioteca extra no servidor.
+    """
+    import csv
+    from django.http import HttpResponse
+
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    periodo = request.GET.get('period', 'mes')
+    qs = StockTransaction.objects.filter(store=store).select_related('product')
+    if periodo != 'tudo':
+        inicio, fim, rotulo = _intervalo_periodo(periodo)
+        qs = qs.filter(created_at__gte=inicio, created_at__lt=fim)
+    else:
+        rotulo = 'completo'
+    qs = qs.order_by('-created_at')
+
+    agora = timezone.localtime()
+    resp = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="movimentacoes-{periodo}-{agora:%Y%m%d}.csv"'
+    )
+    w = csv.writer(resp, delimiter=';')  # ; abre direto no Excel em pt-BR
+
+    rotulos = {
+        'ENTRADA': 'Entrada de estoque', 'VENDA': 'Venda', 'PRESENTE': 'Presente',
+        'BRINDE': 'Brinde', 'USO_PROPRIO': 'Uso próprio', 'PERDA': 'Perda',
+        'AJUSTE': 'Ajuste',
+    }
+    fmt = lambda v: f'{v:.2f}'.replace('.', ',')
+
+    w.writerow([f'Movimentações de estoque — {rotulo}'])
+    w.writerow(['Loja', store.name])
+    w.writerow(['Gerado em', agora.strftime('%d/%m/%Y %H:%M')])
+    w.writerow([])
+    w.writerow(['Data', 'Tipo', 'Produto', 'Quantidade', 'Valor unitário',
+                'Total', 'Lucro', 'Descrição'])
+
+    tot_ent = tot_sai = tot_lucro = Decimal('0')
+    for t in qs:
+        qtd = abs(t.quantity or 0)
+        eh_venda = t.transaction_type == 'VENDA'
+        unit = (t.unit_price if eh_venda else t.unit_cost) or Decimal('0')
+        total = unit * qtd
+        lucro = ((t.unit_price or 0) - (t.unit_cost or 0)) * qtd if eh_venda else None
+
+        if t.transaction_type == 'ENTRADA':
+            tot_sai += total
+        elif eh_venda:
+            tot_ent += total
+            tot_lucro += lucro or 0
+
+        w.writerow([
+            t.created_at.strftime('%d/%m/%Y %H:%M'),
+            rotulos.get(t.transaction_type, t.transaction_type),
+            t.product.name if t.product else '—',
+            qtd,
+            fmt(unit),
+            fmt(total),
+            fmt(lucro) if lucro is not None else '',
+            t.description or '',
+        ])
+
+    w.writerow([])
+    w.writerow(['RESUMO'])
+    w.writerow(['Total de vendas (entrou)', fmt(tot_ent)])
+    w.writerow(['Total de compras (saiu)', fmt(tot_sai)])
+    w.writerow(['Lucro das vendas', fmt(tot_lucro)])
+    w.writerow([])
+    w.writerow(['Observação: valores calculados a partir das movimentações '
+                'registradas no sistema.'])
+    return resp
