@@ -324,10 +324,10 @@ export default function PaymentGatewaysTab() {
       {/* ─── CARD PRINCIPAL: STATUS DO ASAAS ─── */}
       <div className="border border-border rounded-xl bg-card overflow-hidden">
         {/* Header com gradiente */}
-        <div className="p-6 border-b border-border bg-gradient-to-r from-blue-500/5 via-green-500/5 to-emerald-500/5">
+        <div className="p-6 border-b border-border bg-gradient-to-r from-blue-500/5 via-brand-rose/5 to-success/5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-green-500 flex items-center justify-center shadow-lg">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-success flex items-center justify-center shadow-lg">
                 <CreditCard className="h-6 w-6 text-white" />
               </div>
               <div>
@@ -349,7 +349,7 @@ export default function PaymentGatewaysTab() {
               {connectionTest.status === "connected" ? (
                 <Badge
                   variant="default"
-                  className="bg-green-500 hover:bg-green-600"
+                  className="bg-success hover:bg-success"
                 >
                   <CheckCircle className="h-3 w-3 mr-1" />
                   Conectado
@@ -407,8 +407,8 @@ export default function PaymentGatewaysTab() {
               <div className="flex items-center gap-2">
                 {asaasConfig?.has_api_key ? (
                   <>
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                    <span className="font-medium text-green-600 text-sm">
+                    <CheckCircle className="h-4 w-4 text-success" />
+                    <span className="font-medium text-success text-sm">
                       Configurada
                     </span>
                   </>
@@ -434,8 +434,8 @@ export default function PaymentGatewaysTab() {
               <div className="flex items-center gap-2">
                 {asaasConfig?.has_webhook_token ? (
                   <>
-                    <CheckCircle className="h-4 w-4 text-green-500" />
-                    <span className="font-medium text-green-600 text-sm">
+                    <CheckCircle className="h-4 w-4 text-success" />
+                    <span className="font-medium text-success text-sm">
                       Configurado
                     </span>
                   </>
@@ -459,7 +459,7 @@ export default function PaymentGatewaysTab() {
                 </span>
               </div>
               {connectionTest.status === "connected" ? (
-                <p className="font-bold text-green-600">
+                <p className="font-bold text-success">
                   R$ {connectionTest.balance?.toFixed(2) || "0.00"}
                 </p>
               ) : (
@@ -492,7 +492,7 @@ export default function PaymentGatewaysTab() {
                 className="flex items-center gap-1 px-3 py-2.5 border border-border rounded-lg text-xs hover:bg-secondary shrink-0"
               >
                 {copied === "webhook" ? (
-                  <Check className="h-3 w-3 text-green-500" />
+                  <Check className="h-3 w-3 text-success" />
                 ) : (
                   <Copy className="h-3 w-3" />
                 )}
@@ -646,8 +646,8 @@ export default function PaymentGatewaysTab() {
                     onClick={() => toggleGateway(gateway.id)}
                     className={`p-2 rounded-lg transition-colors ${
                       gateway.enabled
-                        ? "bg-green-100 text-green-700 hover:bg-green-200"
-                        : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                        ? "bg-success/10 text-success hover:bg-success/10"
+                        : "bg-secondary text-muted-foreground hover:bg-muted"
                     }`}
                   >
                     {gateway.enabled ? (

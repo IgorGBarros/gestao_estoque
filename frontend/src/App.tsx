@@ -13,6 +13,7 @@ import { ThemeProvider } from "./hooks/useTheme";
 
 // Components
 import ProtectedRoute from "./components/ProtectedRoute";
+import ImpersonationBanner from "./components/ImpersonationBanner";
 // ✅ ErrorBoundary REMOVIDO
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
@@ -65,6 +66,9 @@ const queryClient = new QueryClient({
 // Ativa" e o resumo ao finalizar), e não ao app inteiro.
 const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
   <div className="min-h-screen bg-background flex flex-col">
+    {/* Aviso de sessão de suporte. Some sozinho fora do modo — e é o único
+        caminho de volta para a conta do administrador. */}
+    <ImpersonationBanner />
     <main className="flex-1">{children}</main>
   </div>
 );

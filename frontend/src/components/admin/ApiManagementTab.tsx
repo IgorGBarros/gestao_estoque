@@ -364,7 +364,7 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
                 label: "Receita API (MRR)", 
                 value: formatCurrency(displayData.revenue_api_mrr ?? 0), 
                 icon: DollarSign, 
-                color: "text-emerald-600",
+                color: "text-success",
                 change: apiData ? "+18% vs mês anterior" : "— (comercialização pendente)"
               },
               { 
@@ -422,7 +422,7 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
                   <p className="text-xs text-muted-foreground">Tempo Médio de Resposta</p>
                 </div>
                 <div className="p-3 bg-secondary/30 rounded-lg text-center">
-                  <p className="text-2xl font-bold text-green-600">
+                  <p className="text-2xl font-bold text-success">
                     {displayData.internal_metrics?.error_rate_percent ?? 0}%
                   </p>
                   <p className="text-xs text-muted-foreground">Taxa de Erro</p>
@@ -599,7 +599,7 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         <div>
                           <p className="text-muted-foreground">Entregues (24h)</p>
-                          <p className="font-medium text-emerald-600">{webhook.stats.delivered_24h}</p>
+                          <p className="font-medium text-success">{webhook.stats.delivered_24h}</p>
                         </div>
                         <div>
                           <p className="text-muted-foreground">Falhas</p>
@@ -634,7 +634,7 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
                     <div className="flex items-start justify-between mb-2 gap-2">
                       <div className="flex items-center gap-2 min-w-0">
                         <Badge variant="outline" className={`text-xs font-mono ${
-                          endpoint.method === "GET" ? "text-blue-600" : "text-green-600"
+                          endpoint.method === "GET" ? "text-blue-600" : "text-success"
                         }`}>
                           {endpoint.method}
                         </Badge>
@@ -712,7 +712,7 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
                       <ul className="space-y-1 mb-4">
                         {plan.features.map((feature, idx) => (
                           <li key={idx} className="flex items-center gap-2 text-xs">
-                            <Check className="h-3 w-3 text-green-500 flex-shrink-0" />
+                            <Check className="h-3 w-3 text-success flex-shrink-0" />
                             <span>{feature}</span>
                           </li>
                         ))}
@@ -754,7 +754,7 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
                   ].map((task, i) => (
                     <div key={i} className="flex items-center gap-3 p-3 bg-secondary/30 rounded-lg">
                       {task.done ? (
-                        <Check className="h-4 w-4 text-green-500 flex-shrink-0" />
+                        <Check className="h-4 w-4 text-success flex-shrink-0" />
                       ) : (
                         <div className="h-4 w-4 rounded-full border-2 border-muted-foreground flex-shrink-0" />
                       )}
