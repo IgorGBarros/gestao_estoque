@@ -22,7 +22,8 @@ import { api } from "../services/api";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import MeicashFlow from "../components/MeicashFlow";
 import PeriodoSelect from "../components/PeriodoSelect";
-import type { PeriodoRelatorio } from "../lib/api";
+import type { PeriodoRelatorio, IntervaloDatas } from "../lib/api";
+import { queryPeriodo } from "../lib/api";
 
 type Aba = "relatorios" | "mei";
 
@@ -68,6 +69,7 @@ export default function Dashboard() {
 
   const [aba, setAba] = useState<Aba>("relatorios");
   const [periodo, setPeriodo] = useState<PeriodoRelatorio>("30d");
+  const [datas, setDatas] = useState<IntervaloDatas | undefined>();
   const [dados, setDados] = useState<Relatorio | null>(null);
   const [carregando, setCarregando] = useState(true);
   // Quais tabelas estão expandidas. Colapsadas por padrão para a tela não
@@ -78,11 +80,11 @@ export default function Dashboard() {
 
   const carregar = useCallback(() => {
     setCarregando(true);
-    api.get(`/reports/?period=${periodo}`)
+    api.get(`/reports/?${queryPeriodo(periodo, datas)}`)
       .then(({ data }) => setDados(data))
       .catch(() => setDados(null))
       .finally(() => setCarregando(false));
-  }, [periodo]);
+  }, [periodo, datas]);
 
   useEffect(() => {
     if (gatesLoading || bloqueado) return;
@@ -163,7 +165,11 @@ export default function Dashboard() {
         <>
           {/* Filtro de período */}
           <div className="flex items-center justify-end">
-            <PeriodoSelect valor={periodo} onChange={setPeriodo} />
+            <PeriodoSelect
+              valor={periodo}
+              datas={datas}
+              onChange={(p, d) => { setPeriodo(p); setDatas(d); }}
+            />
           </div>
 
           {carregando ? (

@@ -7,7 +7,7 @@
 // tela compreensível para quem não é da área contábil.
 import { useState, useEffect } from "react";
 import { TrendingUp, TrendingDown, Wallet, Download, AlertTriangle, Loader2 } from "lucide-react";
-import { meiApi, type MeiSummary, type PeriodoRelatorio } from "../lib/api";
+import { meiApi, type MeiSummary, type PeriodoRelatorio, type IntervaloDatas } from "../lib/api";
 import PeriodoSelect from "./PeriodoSelect";
 import { useToast } from "./ui/use-toast";
 
@@ -26,13 +26,14 @@ export default function MeiCashFlow() {
   // O filtro afeta só os cards de caixa. O teto do MEI é anual por definição
   // legal e não muda com o período escolhido.
   const [periodo, setPeriodo] = useState<PeriodoRelatorio>("30d");
+  const [datas, setDatas] = useState<IntervaloDatas | undefined>();
 
   useEffect(() => {
-    meiApi.getSummary(periodo)
+    meiApi.getSummary(periodo, datas)
       .then(setDados)
       .catch(() => setDados(null))
       .finally(() => setCarregando(false));
-  }, [periodo]);
+  }, [periodo, datas]);
 
   const baixarRelatorio = async () => {
     setBaixando(true);
@@ -79,7 +80,12 @@ export default function MeiCashFlow() {
         <h2 className="font-display text-base font-bold text-foreground">
           Meu caixa
         </h2>
-        <PeriodoSelect valor={periodo} onChange={setPeriodo} compacto />
+        <PeriodoSelect
+          valor={periodo}
+          datas={datas}
+          onChange={(p, d) => { setPeriodo(p); setDatas(d); }}
+          compacto
+        />
       </div>
 
       {/* Os três números que importam */}

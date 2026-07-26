@@ -3700,10 +3700,7 @@ def mei_summary(request):
     # O TETO do MEI continua sendo sempre anual — é assim na lei. O filtro
     # afeta só os cards de entrada/saída/sobra, para ela poder olhar o dia,
     # o mês ou o ano.
-    periodo = request.GET.get('period', '30d')
-    if periodo not in PERIODOS_ACEITOS:
-        periodo = '30d'
-    ini_p, fim_p, rotulo_p = _intervalo_periodo(periodo)
+    periodo, ini_p, fim_p, rotulo_p = _intervalo_da_requisicao(request)
     entradas_mes = _receita_periodo(store, ini_p, fim_p)
     saidas_mes = _compras_periodo(store, ini_p, fim_p)
 
@@ -3852,7 +3849,47 @@ def mei_report_csv(request):
 
 # Períodos aceitos pelos relatórios. A chave é o que o frontend envia.
 PERIODOS_EM_DIAS = {'30d': 30, '60d': 60, '90d': 90}
-PERIODOS_ACEITOS = set(PERIODOS_EM_DIAS) | {'dia', 'mes', 'ano'}
+PERIODOS_ACEITOS = set(PERIODOS_EM_DIAS) | {'dia', 'mes', 'ano', 'custom'}
+
+
+def _intervalo_da_requisicao(request):
+    """
+    Resolve o intervalo a partir da querystring.
+
+    Aceita:
+      • period=30d|60d|90d|ano|mes|dia  → janelas prontas
+      • period=custom&start=AAAA-MM-DD&end=AAAA-MM-DD → intervalo escolhido
+        pela consultora no calendário
+
+    Datas inválidas ou invertidas caem no padrão de 30 dias, para a tela nunca
+    quebrar por causa de um parâmetro malformado.
+    """
+    from datetime import datetime as _dt
+
+    periodo = request.GET.get('period', '30d')
+
+    if periodo == 'custom':
+        bruto_ini = request.GET.get('start')
+        bruto_fim = request.GET.get('end')
+        try:
+            d_ini = _dt.strptime(bruto_ini, '%Y-%m-%d').date()
+            d_fim = _dt.strptime(bruto_fim, '%Y-%m-%d').date()
+            if d_fim < d_ini:
+                d_ini, d_fim = d_fim, d_ini
+            tz = timezone.get_current_timezone()
+            ini = timezone.make_aware(_dt.combine(d_ini, _dt.min.time()), tz)
+            # fim exclusivo: inclui o dia inteiro escolhido
+            fim = timezone.make_aware(
+                _dt.combine(d_fim, _dt.min.time()), tz) + timedelta(days=1)
+            rotulo = f'{d_ini:%d/%m/%Y} a {d_fim:%d/%m/%Y}'
+            return periodo, ini, fim, rotulo
+        except (TypeError, ValueError):
+            periodo = '30d'
+
+    if periodo not in PERIODOS_ACEITOS:
+        periodo = '30d'
+    ini, fim, rotulo = _intervalo_periodo(periodo)
+    return periodo, ini, fim, rotulo
 
 
 def _intervalo_periodo(periodo: str):
@@ -3910,10 +3947,7 @@ def consultant_reports(request):
     if bloqueio:
         return bloqueio
 
-    periodo = request.GET.get('period', '30d')
-    if periodo not in PERIODOS_ACEITOS:
-        periodo = '30d'
-    inicio, fim, rotulo = _intervalo_periodo(periodo)
+    periodo, inicio, fim, rotulo = _intervalo_da_requisicao(request)
 
     txs = (StockTransaction.objects
            .filter(store=store, created_at__gte=inicio, created_at__lt=fim)
@@ -3996,9 +4030,15 @@ def consultant_reports(request):
                   .filter(store=store, created_at__gte=base)
                   .select_related('product')) if periodo == 'dia' else txs
 
-        # Acima de ~45 dias, agrupamos por semana: 90 barras diárias ficam
-        # ilegíveis na tela de um celular.
-        passo = 7 if dias > 45 else 1
+        # Agrupamento conforme o tamanho da janela: um gráfico com 90 barras
+        # diárias (ou 700, num intervalo personalizado longo) fica ilegível
+        # na tela de um celular.
+        if dias > 120:
+            passo = 30      # blocos de ~1 mês
+        elif dias > 45:
+            passo = 7       # blocos de 1 semana
+        else:
+            passo = 1       # dia a dia
         agora_local = timezone.localtime()
 
         d = 0
@@ -4126,10 +4166,10 @@ def movements_report_csv(request):
     if not store:
         return Response({'error': 'Loja não encontrada'}, status=400)
 
-    periodo = request.GET.get('period', 'mes')
+    periodo = request.GET.get('period', 'tudo')
     qs = StockTransaction.objects.filter(store=store).select_related('product')
     if periodo != 'tudo':
-        inicio, fim, rotulo = _intervalo_periodo(periodo)
+        periodo, inicio, fim, rotulo = _intervalo_da_requisicao(request)
         qs = qs.filter(created_at__gte=inicio, created_at__lt=fim)
     else:
         rotulo = 'completo'

@@ -815,7 +815,23 @@ export const plansApi = {
 };
 
 /** Janelas de período usadas nos relatórios e no painel do MEI. */
-export type PeriodoRelatorio = "30d" | "60d" | "90d";
+export type PeriodoRelatorio = "30d" | "60d" | "90d" | "ano" | "custom";
+
+/** Intervalo escolhido no calendário (só usado quando período = "custom"). */
+export interface IntervaloDatas {
+  start: string; // AAAA-MM-DD
+  end: string;   // AAAA-MM-DD
+}
+
+/** Monta a querystring de período para os endpoints de relatório. */
+export function queryPeriodo(period: PeriodoRelatorio, datas?: IntervaloDatas): string {
+  const p = new URLSearchParams({ period });
+  if (period === "custom" && datas?.start && datas?.end) {
+    p.set("start", datas.start);
+    p.set("end", datas.end);
+  }
+  return p.toString();
+}
 
 // ── Fluxo de caixa simplificado (MEI) ──
 export interface MeiSummary {
@@ -835,11 +851,8 @@ export interface MeiSummary {
 }
 
 export const meiApi = {
-  getSummary: (period: PeriodoRelatorio = "30d", year?: number) => {
-    const p = new URLSearchParams({ period });
-    if (year) p.set("year", String(year));
-    return apiRequest<MeiSummary>(`/mei/summary/?${p.toString()}`);
-  },
+  getSummary: (period: PeriodoRelatorio = "30d", datas?: IntervaloDatas) =>
+    apiRequest<MeiSummary>(`/mei/summary/?${queryPeriodo(period, datas)}`),
 
   /**
    * Baixa o relatório CSV para o contador.
