@@ -521,8 +521,15 @@ class ProfileSerializer(serializers.ModelSerializer):
         return obj.get_active_promotions()
     
     def get_subscription_status(self, obj):
-        """Status da assinatura"""
+        """Status da assinatura + período de teste"""
         return {
+            # 🎁 Trial: o frontend usa `access_status` para decidir entre
+            # contagem regressiva, tela de expiração ou nada.
+            'access_status': obj.access_status,
+            'is_in_trial': obj.is_in_trial,
+            'trial_days_left': obj.trial_days_left,
+            'trial_ends_at': obj.trial_ends_at,
+            'has_pro_access': obj.has_pro_access,
             'status': obj.subscription_status,
             'days_until_expiry': obj.days_until_expiry,
             'is_active': obj.plan == 'pro' and obj.subscription_status == 'active',

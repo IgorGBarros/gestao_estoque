@@ -1052,6 +1052,12 @@ export const consentApi = {
     return apiRequest(`/consent/revoke/${purpose}/`, { method: "DELETE" });
   },
 
+  /** Portabilidade LGPD: baixa os dados da titular. Disponível mesmo com o
+   *  teste expirado — é direito, não recurso de plano. */
+  exportData: async (): Promise<unknown> => {
+    return apiRequest("/consent/export/");
+  },
+
   getMyConsents: async (): Promise<{
     consents: ConsentRecord[];
     essential_purposes: string[];

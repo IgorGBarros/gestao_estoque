@@ -181,6 +181,11 @@ class Store(models.Model):
     subscription_started_at = models.DateTimeField(blank=True, null=True)
     subscription_expires_at = models.DateTimeField(blank=True, null=True)
 
+    # 🎁 Período de teste: 14 dias com acesso completo, sem pedir cartão.
+    # Preenchidos automaticamente na criação da loja (ver signals.py).
+    trial_started_at = models.DateTimeField(blank=True, null=True)
+    trial_ends_at = models.DateTimeField(blank=True, null=True)
+
     class Meta:
         verbose_name = 'Loja'
         verbose_name_plural = 'Lojas'
@@ -207,13 +212,63 @@ class Store(models.Model):
     
     @property
     def plan_config(self):
-        """Retorna configuração do plano atual"""
-        return PlanConfig.objects.filter(plan_type=self.plan).first()
+        """
+        Configuração do plano em vigor.
+
+        Durante o teste devolvemos a config do PRO. Assim TODO o sistema
+        (recursos liberados, limite de produtos, feature gates, /profile/,
+        os 403 do servidor) respeita o trial automaticamente, sem precisar
+        tratar o caso em cada lugar que consulta o plano.
+        """
+        tipo = 'pro' if (self.plan == 'pro' or self.is_in_trial) else self.plan
+        return PlanConfig.objects.filter(plan_type=tipo).first()
+
+    @property
+    def is_in_trial(self):
+        """Está no período de teste (e ainda não assinou)."""
+        if self.plan == 'pro':
+            return False
+        if not self.trial_ends_at:
+            return False
+        return timezone.now() < self.trial_ends_at
+
+    @property
+    def trial_days_left(self):
+        """Dias inteiros restantes de teste. 0 se acabou ou não há trial."""
+        if not self.trial_ends_at:
+            return 0
+        restante = self.trial_ends_at - timezone.now()
+        if restante.total_seconds() <= 0:
+            return 0
+        return restante.days + (1 if restante.seconds > 0 else 0)
+
+    @property
+    def trial_expired(self):
+        """Teve teste e ele terminou, sem assinatura ativa."""
+        if self.plan == 'pro':
+            return False
+        return bool(self.trial_ends_at) and timezone.now() >= self.trial_ends_at
+
+    @property
+    def has_pro_access(self):
+        """Pode usar os recursos completos (assinante OU em teste)."""
+        return self.plan == 'pro' or self.is_in_trial
+
+    @property
+    def access_status(self):
+        """Situação de acesso, para o frontend decidir o que mostrar."""
+        if self.plan == 'pro':
+            return 'subscribed'
+        if self.is_in_trial:
+            return 'trial'
+        if self.trial_expired:
+            return 'trial_expired'
+        return 'no_trial'
     
     @property
     def can_add_products(self):
         """Verifica se a loja pode adicionar mais produtos"""
-        if self.plan == 'pro':
+        if self.has_pro_access:
             return True
         current_count = self.items.count()
         plan_config = self.plan_config
