@@ -19,13 +19,22 @@ export default function MeiCashFlow() {
   const [dados, setDados] = useState<MeiSummary | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [baixando, setBaixando] = useState(false);
+  // ⚠️ TODOS os hooks ficam aqui em cima, antes de qualquer `return`.
+  // O React exige que a quantidade de hooks seja a mesma em toda
+  // renderização; um useState depois de um `return` condicional quebra a
+  // tela com o erro #310 assim que a condição muda.
+  //
+  // O filtro afeta só os cards de caixa. O teto do MEI é anual por definição
+  // legal e não muda com o período escolhido.
+  const [periodo, setPeriodo] = useState<PeriodoMei>("mes");
 
   useEffect(() => {
-    meiApi.getSummary()
+    setCarregando(true);
+    meiApi.getSummary(periodo)
       .then(setDados)
       .catch(() => setDados(null))
       .finally(() => setCarregando(false));
-  }, []);
+  }, [periodo]);
 
   const baixarRelatorio = async () => {
     setBaixando(true);
@@ -65,8 +74,6 @@ export default function MeiCashFlow() {
   // dando a impressão de teto estourado quando o número era o oposto disso.
   const larguraBarra = Math.max(0, Math.min(mei.percentual_usado, 100));
   const corBarra = excedeu ? "bg-destructive" : atencao ? "bg-amber-500" : "bg-emerald-500";
-
-  const [periodo, setPeriodo] = useState<PeriodoMei>("mes");
 
   return (
     <section className="space-y-4">

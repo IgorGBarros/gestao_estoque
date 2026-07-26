@@ -3,10 +3,10 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowUpCircle, ArrowDownCircle, Search, Package,
-  ChevronDown, ChevronUp, Calendar, Calculator,
+  ChevronDown, ChevronUp, Calendar, Calculator, Download, Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { movementsApi, formatMoney } from "../lib/api";
+import { movementsApi, formatMoney, movementsReportApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 
 const TYPE_LABELS: Record<string, { label: string; emoji: string }> = {
@@ -29,6 +29,7 @@ export default function MovementHistory() {
   const [loading, setLoading] = useState(true);
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | number | null>(null);
+  const [baixandoRel, setBaixandoRel] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -109,6 +110,20 @@ export default function MovementHistory() {
     });
   };
 
+  // ── Relatório de movimentação (CSV) ──
+  // Entradas, saídas, valores, lucro e a descrição preenchida pela
+  // consultora. CSV abre no Excel e no Google Sheets sem plugin.
+  const baixarRelatorio = async () => {
+    setBaixandoRel(true);
+    try {
+      await movementsReportApi.download("tudo");
+    } catch {
+      /* silencioso: o extrato na tela continua disponível */
+    } finally {
+      setBaixandoRel(false);
+    }
+  };
+
   // ── Loading ──
   if (loading) {
     return (
@@ -137,6 +152,20 @@ export default function MovementHistory() {
           <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
             {filtered.length}
           </span>
+
+          <button
+            onClick={baixarRelatorio}
+            disabled={baixandoRel}
+            className="ml-auto flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 text-xs font-semibold text-brand transition-colors hover:bg-brand/10 disabled:opacity-60"
+            title="Baixar relatório de movimentação"
+          >
+            {baixandoRel ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden sm:inline">Relatório</span>
+          </button>
         </div>
       </header>
 
