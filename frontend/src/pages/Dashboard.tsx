@@ -123,7 +123,10 @@ export default function Dashboard() {
   }
 
   return (
-    <div>
+    // Sempre claro: os valores em destaque (Entrou / Saiu / Lucro) perdem
+    // legibilidade em vinho sobre fundo escuro, e a paleta não tem verde
+    // para abrir contraste. Ver .tema-claro no index.css.
+    <div className="tema-claro min-h-screen">
       {/* Header com volta para a home */}
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3 sm:px-6">
@@ -189,15 +192,15 @@ export default function Dashboard() {
               {/* 1. Cards: entrou, saiu, lucro */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <CardValor
-                  icone={TrendingUp} cor="marca"
+                  icone={TrendingUp} cor="entrada"
                   titulo="Entrou" valor={dados.resumo.entradas} sub="vendas no período"
                 />
                 <CardValor
-                  icone={TrendingDown} cor="rose"
+                  icone={TrendingDown} cor="saida"
                   titulo="Saiu" valor={dados.resumo.saidas} sub="compras de estoque"
                 />
                 <CardValor
-                  icone={Wallet} cor="brand"
+                  icone={Wallet} cor="resultado"
                   titulo="Lucro" valor={dados.resumo.lucro} sub="vendas menos o custo"
                 />
               </div>
@@ -243,7 +246,7 @@ export default function Dashboard() {
                       <td className="px-3 py-2.5">
                         <span
                           className={`inline-flex items-center gap-1 text-xs font-medium ${
-                            l.natureza === "entrada" ? "text-success" : "text-rose-600"
+                            l.natureza === "entrada" ? "text-success" : "text-destructive"
                           }`}
                         >
                           {l.natureza === "entrada" ? (
@@ -258,7 +261,7 @@ export default function Dashboard() {
                       <td className="px-3 py-2.5 text-right text-muted-foreground">{l.quantidade}</td>
                       <td
                         className={`px-3 py-2.5 text-right font-semibold ${
-                          l.natureza === "entrada" ? "text-success" : "text-rose-600"
+                          l.natureza === "entrada" ? "text-success" : "text-destructive"
                         }`}
                       >
                         {l.natureza === "entrada" ? "+" : "−"} {dinheiro(l.valor)}
@@ -389,11 +392,18 @@ export default function Dashboard() {
 
 function CardValor({
   icone: Icone, cor, titulo, valor, sub,
-}: { icone: any; cor: "marca" | "rose" | "brand"; titulo: string; valor: number; sub: string }) {
+}: { icone: any; cor: "entrada" | "saida" | "resultado"; titulo: string; valor: number; sub: string }) {
+  // Sem verde na paleta, a distinção entre os três números não pode vir do
+  // matiz — os cards ficariam todos no mesmo tom de vinho. A hierarquia usa
+  // CONTRASTE e peso:
+  //   entrada   → vinho da marca
+  //   saída     → vermelho (convenção universal para dinheiro que sai)
+  //   resultado → quase preto: é o número que mais importa, então é o de
+  //               maior contraste da tela, com fundo levemente destacado
   const estilos = {
-    marca: { borda: "border-success/20 bg-success/5", texto: "text-success" },
-    rose: { borda: "border-rose-500/20 bg-rose-500/5", texto: "text-rose-600" },
-    brand: { borda: "border-brand/20 bg-brand/5", texto: "text-brand" },
+    entrada:   { borda: "border-brand/20 bg-brand/5",              texto: "text-brand" },
+    saida:     { borda: "border-destructive/20 bg-destructive/5",  texto: "text-destructive" },
+    resultado: { borda: "border-brand/30 bg-brand/10",             texto: "text-foreground" },
   }[cor];
   return (
     <div className={`rounded-xl border p-4 ${estilos.borda}`}>
@@ -401,7 +411,7 @@ function CardValor({
         <Icone className={`h-4 w-4 shrink-0 ${estilos.texto}`} />
         <span className="text-xs font-medium text-muted-foreground">{titulo}</span>
       </div>
-      <p className={`mt-2 text-xl font-bold ${valor < 0 ? "text-rose-600" : estilos.texto}`}>
+      <p className={`mt-2 text-xl font-bold ${valor < 0 ? "text-destructive" : estilos.texto}`}>
         {dinheiro(valor)}
       </p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>

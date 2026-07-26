@@ -101,22 +101,22 @@ export default function MeiCashFlow() {
           </p>
         </div>
 
-        <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4">
+        <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4">
           <div className="flex items-center gap-2">
-            <TrendingDown className="h-4 w-4 text-rose-600 shrink-0" />
+            <TrendingDown className="h-4 w-4 text-destructive shrink-0" />
             <span className="text-xs font-medium text-muted-foreground">Saiu (compras)</span>
           </div>
-          <p className="mt-2 text-xl font-bold text-rose-600">
+          <p className="mt-2 text-xl font-bold text-destructive">
             {dinheiro(mes_atual.saidas)}
           </p>
         </div>
 
-        <div className="rounded-xl border border-brand/20 bg-brand/5 p-4">
+        <div className="rounded-xl border border-brand/30 bg-brand/10 p-4">
           <div className="flex items-center gap-2">
             <Wallet className="h-4 w-4 text-brand shrink-0" />
             <span className="text-xs font-medium text-muted-foreground">Sobrou</span>
           </div>
-          <p className={`mt-2 text-xl font-bold ${mes_atual.sobra < 0 ? "text-rose-600" : "text-brand"}`}>
+          <p className={`mt-2 text-xl font-bold ${mes_atual.sobra < 0 ? "text-destructive" : "text-foreground"}`}>
             {dinheiro(mes_atual.sobra)}
           </p>
         </div>

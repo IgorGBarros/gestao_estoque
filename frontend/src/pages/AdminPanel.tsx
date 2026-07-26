@@ -1098,7 +1098,9 @@ export default function AdminPanel() {
   // ==========================================
 
   return (
-    <div className="min-h-screen bg-background">
+    // Painel interno: sempre no tema claro. São muitas tabelas densas e não
+    // vale manter duas versões de cada estilo. Ver .tema-claro no index.css.
+    <div className="tema-claro min-h-screen bg-background">
       {/* Modais */}
       <PlanConfigModal
         isOpen={showPlanModal}

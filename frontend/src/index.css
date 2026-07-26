@@ -149,3 +149,75 @@
     font-family: 'Space Grotesk', system-ui, sans-serif;
   }
 }
+
+/* ══════════════════════════════════════════
+   ESCOPO DE TEMA CLARO FORÇADO
+   ══════════════════════════════════════════
+   Algumas telas ficam melhores sempre claras, independentemente da
+   preferência do usuário:
+
+   • Painel administrativo — é ferramenta interna, com muita tabela densa;
+     não vale manter duas versões de cada estilo.
+   • Relatórios — os valores em destaque (Entrou / Saiu / Lucro) perdem
+     legibilidade em vinho sobre fundo escuro. Como a paleta não tem verde,
+     sobra pouca margem de contraste no escuro.
+
+   Uso: <div className="tema-claro"> ... </div>
+   As variáveis abaixo repetem as do :root e, por serem declaradas em um
+   elemento mais interno, vencem as do .dark herdadas do <html>. */
+.tema-claro {
+  --color-brand: #871745;
+  --color-brand-hover: #A91B60;
+  --color-brand-soft: #FDF2F7;
+  --color-brand-peach: #FDF2F7;
+  --color-brand-lavender: #D8BFD8;
+  --color-brand-rose: #B76E79;
+  --color-success: #871745;
+  --color-text-main: #2D292E;
+  --background: 335 15% 97%;
+  --foreground: 335 30% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 335 30% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 335 30% 10%;
+  --primary: 335 71% 31%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 335 20% 92%;
+  --secondary-foreground: 335 30% 15%;
+  --muted: 335 12% 93%;
+  --muted-foreground: 335 10% 45%;
+  --accent: 38 80% 55%;
+  --accent-foreground: 38 90% 15%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 335 15% 88%;
+  --input: 335 15% 88%;
+  --ring: 335 55% 28%;
+  --radius: 0.75rem;
+  --chat-user: 335 55% 28%;
+  --chat-user-foreground: 0 0% 100%;
+  --chat-assistant: 335 15% 95%;
+  --chat-assistant-foreground: 335 30% 10%;
+  --chat-gradient: linear-gradient(135deg, hsl(152, 55%, 28%), hsl(160, 45%, 38%));
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 240 5.3% 26.1%;
+  --sidebar-primary: 335 55% 28%;
+  --sidebar-primary-foreground: 0 0% 98%;
+  --sidebar-accent: 335 20% 92%;
+  --sidebar-accent-foreground: 335 30% 15%;
+  --sidebar-border: 335 15% 88%;
+  --sidebar-ring: 335 55% 28%;
+  color-scheme: light;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* Opções de <select> no tema escuro.
+   O menu suspenso nativo é desenhado pelo sistema operacional: sem estas
+   regras ele herda o texto claro do tema e desenha sobre fundo branco,
+   deixando as opções quase invisíveis (foi o que aconteceu no filtro de
+   período). */
+.dark select option {
+  background-color: #2A1720;
+  color: #F2E8EC;
+}
