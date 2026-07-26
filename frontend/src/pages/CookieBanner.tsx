@@ -132,7 +132,7 @@ export default function CookieBanner() {
                   <div className="mb-5 space-y-3 rounded-xl bg-[#FDF2F7]/60 border border-[#871745]/10 p-4">
                     {/* Necessários - bloqueado */}
                     <CookieCategory
-                      icon={<Shield className="h-4 w-4 text-[#2E8B57]" />}
+                      icon={<Shield className="h-4 w-4 text-[#871745]" />}
                       title="Cookies Necessários"
                       description="Essenciais para o funcionamento do aplicativo: autenticação, segurança e preferências básicas. Não podem ser desativados."
                       enabled={true}
@@ -262,11 +262,11 @@ function CookieCategory({ icon, title, description, enabled, locked, onToggle }:
         </div>
         <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">{description}</p>
         {locked && (
-          <span className="mt-1 inline-block text-[10px] font-semibold text-[#2E8B57] bg-[#2E8B57]/10 px-1.5 py-0.5 rounded">
+          <span className="mt-1 inline-block text-[10px] font-semibold text-[#871745] bg-[#871745]/10 px-1.5 py-0.5 rounded">
             Sempre ativo
           </span>
         )}
       </div>
     </div>
   );
-}
+} 

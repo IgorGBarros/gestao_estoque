@@ -189,7 +189,7 @@ export default function Dashboard() {
               {/* 1. Cards: entrou, saiu, lucro */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <CardValor
-                  icone={TrendingUp} cor="emerald"
+                  icone={TrendingUp} cor="marca"
                   titulo="Entrou" valor={dados.resumo.entradas} sub="vendas no período"
                 />
                 <CardValor
@@ -215,8 +215,12 @@ export default function Dashboard() {
                         contentStyle={{ borderRadius: 8, fontSize: 12 }}
                       />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="entradas" name="Entrou" fill="#10b981" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="saidas" name="Saiu" fill="#f43f5e" radius={[4, 4, 0, 0]} />
+                      {/* Cores da paleta da marca. Entrada usa o vinho cheio e
+                          saída a versão rosa, bem mais clara: como não há
+                          verde no sistema, a distinção entre as barras vem do
+                          contraste de luminosidade, não do matiz. */}
+                      <Bar dataKey="entradas" name="Entrou" fill="var(--color-brand)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="saidas" name="Saiu" fill="var(--color-brand-rose)" radius={[4, 4, 0, 0]} />
                       <Line
                         type="monotone" dataKey="saldo" name="Saldo"
                         stroke="hsl(var(--brand))" strokeWidth={2} dot={false}
@@ -385,9 +389,9 @@ export default function Dashboard() {
 
 function CardValor({
   icone: Icone, cor, titulo, valor, sub,
-}: { icone: any; cor: "emerald" | "rose" | "brand"; titulo: string; valor: number; sub: string }) {
+}: { icone: any; cor: "marca" | "rose" | "brand"; titulo: string; valor: number; sub: string }) {
   const estilos = {
-    emerald: { borda: "border-success/20 bg-success/5", texto: "text-success" },
+    marca: { borda: "border-success/20 bg-success/5", texto: "text-success" },
     rose: { borda: "border-rose-500/20 bg-rose-500/5", texto: "text-rose-600" },
     brand: { borda: "border-brand/20 bg-brand/5", texto: "text-brand" },
   }[cor];

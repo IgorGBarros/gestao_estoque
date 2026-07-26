@@ -14,21 +14,19 @@
     --color-brand-peach: #FDF2F7;
     --color-brand-lavender: #D8BFD8;
     --color-brand-rose: #B76E79;
-    /* ⚠️ Era #871745 — a MESMA cor da marca. Ou seja, "text-success"
-       renderizava vinho, não verde. Foi por isso que o código passou a usar
-       green-600/emerald-600 na mão para conseguir verde de verdade, criando
-       três verdes diferentes pelo app. */
-    --color-success: #2E8B57;
+    /* A paleta do produto é VINHO. "success" usa a cor da marca de
+       propósito: não existe verde no sistema. */
+    --color-success: #871745;
     --color-text-main: #2D292E;
-    --background: 140 15% 97%;
-    --foreground: 150 30% 10%;
+    --background: 335 15% 97%;
+    --foreground: 335 30% 10%;
 
 
     --card: 0 0% 100%;
-    --card-foreground: 150 30% 10%;
+    --card-foreground: 335 30% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 150 30% 10%;
+    --popover-foreground: 335 30% 10%;
 
     /* ⚠️ Era 152 55% 28% (verde). Como o <Button> do shadcn usa bg-primary,
        os botões dele saíam VERDES enquanto os botões manuais usavam bg-brand
@@ -36,11 +34,11 @@
     --primary: 335 71% 31%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 145 20% 92%;
-    --secondary-foreground: 150 30% 15%;
+    --secondary: 335 20% 92%;
+    --secondary-foreground: 335 30% 15%;
 
-    --muted: 140 12% 93%;
-    --muted-foreground: 150 10% 45%;
+    --muted: 335 12% 93%;
+    --muted-foreground: 335 10% 45%;
 
     --accent: 38 80% 55%;
     --accent-foreground: 38 90% 15%;
@@ -48,48 +46,48 @@
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 145 15% 88%;
-    --input: 145 15% 88%;
-    --ring: 152 55% 28%;
+    --border: 335 15% 88%;
+    --input: 335 15% 88%;
+    --ring: 335 55% 28%;
 
     --radius: 0.75rem;
 
-    --chat-user: 152 55% 28%;
+    --chat-user: 335 55% 28%;
     --chat-user-foreground: 0 0% 100%;
-    --chat-assistant: 140 15% 95%;
-    --chat-assistant-foreground: 150 30% 10%;
+    --chat-assistant: 335 15% 95%;
+    --chat-assistant-foreground: 335 30% 10%;
     --chat-gradient: linear-gradient(135deg, hsl(152, 55%, 28%), hsl(160, 45%, 38%));
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 152 55% 28%;
+    --sidebar-primary: 335 55% 28%;
     --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 145 20% 92%;
-    --sidebar-accent-foreground: 150 30% 15%;
-    --sidebar-border: 145 15% 88%;
-    --sidebar-ring: 152 55% 28%;
+    --sidebar-accent: 335 20% 92%;
+    --sidebar-accent-foreground: 335 30% 15%;
+    --sidebar-border: 335 15% 88%;
+    --sidebar-ring: 335 55% 28%;
 
     font-family: 'DM Sans', system-ui, sans-serif;
   }
 
   .dark {
-    --background: 150 20% 6%;
-    --foreground: 140 15% 95%;
+    --background: 335 20% 6%;
+    --foreground: 335 15% 95%;
 
-    --card: 150 20% 9%;
-    --card-foreground: 140 15% 95%;
+    --card: 335 20% 9%;
+    --card-foreground: 335 15% 95%;
 
-    --popover: 150 20% 9%;
-    --popover-foreground: 140 15% 95%;
+    --popover: 335 20% 9%;
+    --popover-foreground: 335 15% 95%;
 
     --primary: 335 65% 45%;  /* marca, versão mais clara para o tema escuro */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 150 15% 15%;
-    --secondary-foreground: 140 15% 90%;
+    --secondary: 335 15% 15%;
+    --secondary-foreground: 335 15% 90%;
 
-    --muted: 150 15% 15%;
-    --muted-foreground: 140 10% 55%;
+    --muted: 335 15% 15%;
+    --muted-foreground: 335 10% 55%;
 
     --accent: 38 70% 50%;
     --accent-foreground: 38 90% 90%;
@@ -97,23 +95,23 @@
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 150 15% 18%;
-    --input: 150 15% 18%;
-    --ring: 152 50% 45%;
+    --border: 335 15% 18%;
+    --input: 335 15% 18%;
+    --ring: 335 50% 45%;
 
-    --chat-user: 152 50% 40%;
+    --chat-user: 335 50% 40%;
     --chat-user-foreground: 0 0% 100%;
-    --chat-assistant: 150 15% 12%;
-    --chat-assistant-foreground: 140 15% 90%;
+    --chat-assistant: 335 15% 12%;
+    --chat-assistant-foreground: 335 15% 90%;
 
-    --sidebar-background: 150 20% 8%;
-    --sidebar-foreground: 140 15% 90%;
-    --sidebar-primary: 152 50% 45%;
+    --sidebar-background: 335 20% 8%;
+    --sidebar-foreground: 335 15% 90%;
+    --sidebar-primary: 335 50% 45%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 150 15% 15%;
-    --sidebar-accent-foreground: 140 15% 90%;
-    --sidebar-border: 150 15% 18%;
-    --sidebar-ring: 152 50% 45%;
+    --sidebar-accent: 335 15% 15%;
+    --sidebar-accent-foreground: 335 15% 90%;
+    --sidebar-border: 335 15% 18%;
+    --sidebar-ring: 335 50% 45%;
   }
 }
 

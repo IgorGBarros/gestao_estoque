@@ -20,7 +20,7 @@ const fadeUp = {
 const BRAND_COLORS = {
   primary: '#871745',
   primaryLight: '#FDF2F7',
-  success: '#2E8B57',
+  success: '#871745',
   text: '#2D292E'
 };
 
@@ -627,7 +627,7 @@ export default function LandingPage() {
                 {FREE_FEATURES.map((f) => (
                   <li key={f.text} className="flex items-center gap-2 text-sm">
                     {f.ok ? (
-                      <Check className="h-4 w-4 text-[#2E8B57] shrink-0" />
+                      <Check className="h-4 w-4 text-[#871745] shrink-0" />
                     ) : (
                       <X className="h-4 w-4 text-muted-foreground/40 shrink-0" />
                     )}
@@ -677,7 +677,7 @@ export default function LandingPage() {
               <ul className="space-y-2.5">
                 {PRO_FEATURES.map((f) => (
                   <li key={f.text} className="flex items-center gap-2 text-sm">
-                    <Check className="h-4 w-4 text-[#2E8B57] shrink-0" />
+                    <Check className="h-4 w-4 text-[#871745] shrink-0" />
                     <span className="text-foreground font-medium">{f.text}</span>
                   </li>
                 ))}
@@ -871,5 +871,3 @@ export default function LandingPage() {
     </div>
   );
 }
-
-                
