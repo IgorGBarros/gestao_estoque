@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import {
   TrendingUp, TrendingDown, Wallet, Crown, Loader2, AlertTriangle, ArrowLeft,
   ArrowDownRight, ArrowUpRight, Trophy, Package, BarChart3, Receipt,
+  ChevronDown, ChevronUp,
 } from "lucide-react";
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -20,9 +21,13 @@ import {
 import { api } from "../services/api";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import MeicashFlow from "../components/MeicashFlow";
+import PeriodoSelect from "../components/PeriodoSelect";
+import type { PeriodoRelatorio } from "../lib/api";
 
-type Periodo = "dia" | "mes" | "ano";
 type Aba = "relatorios" | "mei";
+
+// Linhas mostradas antes de expandir.
+const LINHAS_VISIVEIS = 5;
 
 const dinheiro = (v: number) =>
   (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -62,9 +67,14 @@ export default function Dashboard() {
   const bloqueado = !gatesLoading && isLocked("dashboard_charts");
 
   const [aba, setAba] = useState<Aba>("relatorios");
-  const [periodo, setPeriodo] = useState<Periodo>("mes");
+  const [periodo, setPeriodo] = useState<PeriodoRelatorio>("30d");
   const [dados, setDados] = useState<Relatorio | null>(null);
   const [carregando, setCarregando] = useState(true);
+  // Quais tabelas estão expandidas. Colapsadas por padrão para a tela não
+  // virar uma rolagem sem fim no celular.
+  const [expandido, setExpandido] = useState<Record<string, boolean>>({});
+  const alternar = (k: string) =>
+    setExpandido((e) => ({ ...e, [k]: !e[k] }));
 
   const carregar = useCallback(() => {
     setCarregando(true);
@@ -152,23 +162,8 @@ export default function Dashboard() {
       ) : (
         <>
           {/* Filtro de período */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Período:</span>
-            {([["dia", "Hoje"], ["mes", "Este mês"], ["ano", "Este ano"]] as [Periodo, string][]).map(
-              ([k, label]) => (
-                <button
-                  key={k}
-                  onClick={() => setPeriodo(k)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                    periodo === k
-                      ? "bg-brand text-white"
-                      : "border border-border text-muted-foreground hover:bg-secondary"
-                  }`}
-                >
-                  {label}
-                </button>
-              )
-            )}
+          <div className="flex items-center justify-end">
+            <PeriodoSelect valor={periodo} onChange={setPeriodo} />
           </div>
 
           {carregando ? (
@@ -225,10 +220,13 @@ export default function Dashboard() {
               )}
 
               {/* 3. Tabela de fluxo de caixa */}
-              <Bloco titulo="Fluxo de caixa" vazio={dados.fluxo.length === 0}
+              <Bloco titulo="Fluxo de caixa"
+                     ocultos={Math.max(0, dados.fluxo.length - LINHAS_VISIVEIS)}
+                     expandido={!!expandido.fluxo}
+                     onAlternar={() => alternar("fluxo")} vazio={dados.fluxo.length === 0}
                      msgVazio="Nenhuma movimentação de dinheiro no período.">
                 <Tabela cabecalho={["Data", "Movimento", "Produto", "Qtd", "Valor"]}>
-                  {dados.fluxo.map((l) => (
+                  {(expandido.fluxo ? dados.fluxo : dados.fluxo.slice(0, LINHAS_VISIVEIS)).map((l) => (
                     <tr key={l.id} className="border-t border-border">
                       <td className="px-3 py-2.5 text-muted-foreground">{dataBR(l.data)}</td>
                       <td className="px-3 py-2.5">
@@ -260,10 +258,13 @@ export default function Dashboard() {
               </Bloco>
 
               {/* 4. Top 10 mais vendidos */}
-              <Bloco titulo="10 mais vendidos" vazio={dados.top_produtos.length === 0}
+              <Bloco titulo="10 mais vendidos"
+                     ocultos={Math.max(0, dados.top_produtos.length - LINHAS_VISIVEIS)}
+                     expandido={!!expandido.top}
+                     onAlternar={() => alternar("top")} vazio={dados.top_produtos.length === 0}
                      msgVazio="Nenhuma venda registrada no período.">
                 <ul>
-                  {dados.top_produtos.map((p, i) => (
+                  {(expandido.top ? dados.top_produtos : dados.top_produtos.slice(0, LINHAS_VISIVEIS)).map((p, i) => (
                     <li
                       key={p.produto}
                       className="flex items-center gap-3 border-t border-border px-4 py-2.5 first:border-0"
@@ -295,9 +296,12 @@ export default function Dashboard() {
                 subtitulo="Inclui vendas, presentes, brindes e uso próprio"
                 vazio={dados.saidas.length === 0}
                 msgVazio="Nenhuma saída registrada no período."
+                ocultos={Math.max(0, dados.saidas.length - LINHAS_VISIVEIS)}
+                expandido={!!expandido.saidas}
+                onAlternar={() => alternar("saidas")}
               >
                 <Tabela cabecalho={["Data", "Produto", "Tipo", "Valor", "Qtd", "Total", "Descrição"]}>
-                  {dados.saidas.map((s) => (
+                  {(expandido.saidas ? dados.saidas : dados.saidas.slice(0, LINHAS_VISIVEIS)).map((s) => (
                     <tr key={s.id} className="border-t border-border">
                       <td className="whitespace-nowrap px-3 py-2.5 text-muted-foreground">{dataBR(s.data)}</td>
                       <td className="max-w-[160px] truncate px-3 py-2.5 text-foreground">{s.produto}</td>
@@ -331,9 +335,12 @@ export default function Dashboard() {
 
               {/* 6. Produtos acabando */}
               {dados.acabando.length > 0 && (
-                <Bloco titulo="Produtos acabando">
+                <Bloco titulo="Produtos acabando"
+                     ocultos={Math.max(0, dados.acabando.length - LINHAS_VISIVEIS)}
+                     expandido={!!expandido.acabando}
+                     onAlternar={() => alternar("acabando")}>
                   <ul>
-                    {dados.acabando.map((a) => (
+                    {(expandido.acabando ? dados.acabando : dados.acabando.slice(0, LINHAS_VISIVEIS)).map((a) => (
                       <li
                         key={a.id}
                         className="flex items-center justify-between gap-3 border-t border-border px-4 py-2.5 first:border-0"
@@ -392,10 +399,14 @@ function CardValor({
 }
 
 function Bloco({
-  titulo, subtitulo, children, vazio, msgVazio,
+  titulo, subtitulo, children, vazio, msgVazio, ocultos = 0, expandido, onAlternar,
 }: {
   titulo: string; subtitulo?: string; children: React.ReactNode;
   vazio?: boolean; msgVazio?: string;
+  /** Quantas linhas estão escondidas (0 = nada a expandir). */
+  ocultos?: number;
+  expandido?: boolean;
+  onAlternar?: () => void;
 }) {
   return (
     <section className="space-y-2">
@@ -410,7 +421,29 @@ function Bloco({
             <p className="text-sm text-muted-foreground">{msgVazio}</p>
           </div>
         ) : (
-          children
+          <>
+            {children}
+            {/* Só aparece quando há linhas escondidas ou a lista está aberta.
+                Manter as tabelas curtas evita rolagem infinita no celular. */}
+            {(ocultos > 0 || expandido) && onAlternar && (
+              <button
+                onClick={onAlternar}
+                className="flex w-full items-center justify-center gap-1.5 border-t border-border py-2.5 text-xs font-medium text-brand transition-colors hover:bg-brand/5"
+                aria-expanded={!!expandido}
+              >
+                {expandido ? (
+                  <>
+                    Ver menos <ChevronUp className="h-3.5 w-3.5" />
+                  </>
+                ) : (
+                  <>
+                    Ver mais {ocultos} {ocultos === 1 ? "linha" : "linhas"}
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </button>
+            )}
+          </>
         )}
       </div>
     </section>

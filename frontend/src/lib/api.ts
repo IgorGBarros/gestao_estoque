@@ -814,6 +814,9 @@ export const plansApi = {
   list: () => apiRequest<any[]>("/plans/"),
 };
 
+/** Janelas de período usadas nos relatórios e no painel do MEI. */
+export type PeriodoRelatorio = "30d" | "60d" | "90d";
+
 // ── Fluxo de caixa simplificado (MEI) ──
 export interface MeiSummary {
   ano: number;
@@ -832,7 +835,7 @@ export interface MeiSummary {
 }
 
 export const meiApi = {
-  getSummary: (period: "dia" | "mes" | "ano" = "mes", year?: number) => {
+  getSummary: (period: PeriodoRelatorio = "30d", year?: number) => {
     const p = new URLSearchParams({ period });
     if (year) p.set("year", String(year));
     return apiRequest<MeiSummary>(`/mei/summary/?${p.toString()}`);
@@ -1008,7 +1011,7 @@ export const movementsReportApi = {
    * <a href>) porque o endpoint exige o token JWT — link simples não envia
    * o cabeçalho Authorization.
    */
-  download: async (period: "dia" | "mes" | "ano" | "tudo" = "mes") => {
+  download: async (period: PeriodoRelatorio | "tudo" = "tudo") => {
     const resp = await api.get(`/movements/report/?period=${period}`, {
       responseType: "blob",
     });

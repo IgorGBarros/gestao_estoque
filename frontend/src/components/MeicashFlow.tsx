@@ -6,9 +6,9 @@
 // estoque gera saída. Isso elimina o erro de "esqueci de lançar" e mantém a
 // tela compreensível para quem não é da área contábil.
 import { useState, useEffect } from "react";
-type PeriodoMei = "dia" | "mes" | "ano";
 import { TrendingUp, TrendingDown, Wallet, Download, AlertTriangle, Loader2 } from "lucide-react";
-import { meiApi, type MeiSummary } from "../lib/api";
+import { meiApi, type MeiSummary, type PeriodoRelatorio } from "../lib/api";
+import PeriodoSelect from "./PeriodoSelect";
 import { useToast } from "./ui/use-toast";
 
 const dinheiro = (v: number) =>
@@ -20,16 +20,14 @@ export default function MeiCashFlow() {
   const [carregando, setCarregando] = useState(true);
   const [baixando, setBaixando] = useState(false);
   // ⚠️ TODOS os hooks ficam aqui em cima, antes de qualquer `return`.
-  // O React exige que a quantidade de hooks seja a mesma em toda
-  // renderização; um useState depois de um `return` condicional quebra a
-  // tela com o erro #310 assim que a condição muda.
+  // O React exige o mesmo número de hooks em toda renderização; um useState
+  // depois de um `return` condicional derruba a tela com o erro #310.
   //
   // O filtro afeta só os cards de caixa. O teto do MEI é anual por definição
   // legal e não muda com o período escolhido.
-  const [periodo, setPeriodo] = useState<PeriodoMei>("mes");
+  const [periodo, setPeriodo] = useState<PeriodoRelatorio>("30d");
 
   useEffect(() => {
-    setCarregando(true);
     meiApi.getSummary(periodo)
       .then(setDados)
       .catch(() => setDados(null))
@@ -81,23 +79,7 @@ export default function MeiCashFlow() {
         <h2 className="font-display text-base font-bold text-foreground">
           Meu caixa
         </h2>
-        <div className="flex gap-1.5">
-          {([["dia", "Hoje"], ["mes", "Mês"], ["ano", "Ano"]] as [PeriodoMei, string][]).map(
-            ([k, label]) => (
-              <button
-                key={k}
-                onClick={() => setPeriodo(k)}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  periodo === k
-                    ? "bg-brand text-white"
-                    : "border border-border text-muted-foreground hover:bg-secondary"
-                }`}
-              >
-                {label}
-              </button>
-            )
-          )}
-        </div>
+        <PeriodoSelect valor={periodo} onChange={setPeriodo} compacto />
       </div>
 
       {/* Os três números que importam */}

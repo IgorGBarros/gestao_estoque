@@ -3700,9 +3700,9 @@ def mei_summary(request):
     # O TETO do MEI continua sendo sempre anual — é assim na lei. O filtro
     # afeta só os cards de entrada/saída/sobra, para ela poder olhar o dia,
     # o mês ou o ano.
-    periodo = request.GET.get('period', 'mes')
-    if periodo not in ('dia', 'mes', 'ano'):
-        periodo = 'mes'
+    periodo = request.GET.get('period', '30d')
+    if periodo not in PERIODOS_ACEITOS:
+        periodo = '30d'
     ini_p, fim_p, rotulo_p = _intervalo_periodo(periodo)
     entradas_mes = _receita_periodo(store, ini_p, fim_p)
     saidas_mes = _compras_periodo(store, ini_p, fim_p)
@@ -3850,19 +3850,42 @@ def mei_report_csv(request):
 #
 # Períodos: 'dia' (hoje), 'mes' (mês corrente), 'ano' (ano corrente).
 
+# Períodos aceitos pelos relatórios. A chave é o que o frontend envia.
+PERIODOS_EM_DIAS = {'30d': 30, '60d': 60, '90d': 90}
+PERIODOS_ACEITOS = set(PERIODOS_EM_DIAS) | {'dia', 'mes', 'ano'}
+
+
 def _intervalo_periodo(periodo: str):
-    """Devolve (inicio, fim, rotulo) para o período pedido."""
+    """
+    Devolve (inicio, fim, rotulo) para o período pedido.
+
+    Aceita janelas em dias ('30d', '60d', '90d') — que é o que o filtro da
+    tela usa — e também os períodos de calendário ('dia', 'mes', 'ano'),
+    mantidos para não quebrar chamadas antigas.
+    """
     agora = timezone.localtime()
+
+    # Janela em dias corridos, terminando agora.
+    dias = PERIODOS_EM_DIAS.get(periodo)
+    if dias:
+        inicio_do_dia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+        ini = inicio_do_dia - timedelta(days=dias - 1)
+        return ini, agora + timedelta(seconds=1), f'Últimos {dias} dias'
+
     if periodo == 'dia':
         ini = agora.replace(hour=0, minute=0, second=0, microsecond=0)
         return ini, ini + timedelta(days=1), 'Hoje'
     if periodo == 'ano':
         ini = agora.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
         return ini, ini.replace(year=ini.year + 1), f'{agora.year}'
-    # padrão: mês corrente
-    ini = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    fim = ini.replace(year=ini.year + 1, month=1) if ini.month == 12 else ini.replace(month=ini.month + 1)
-    return ini, fim, ini.strftime('%m/%Y')
+    if periodo == 'mes':
+        ini = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        fim = ini.replace(year=ini.year + 1, month=1) if ini.month == 12 else ini.replace(month=ini.month + 1)
+        return ini, fim, ini.strftime('%m/%Y')
+
+    # Desconhecido: cai no padrão de 30 dias.
+    inicio_do_dia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+    return inicio_do_dia - timedelta(days=29), agora + timedelta(seconds=1), 'Últimos 30 dias'
 
 
 @api_view(['GET'])
@@ -3887,9 +3910,9 @@ def consultant_reports(request):
     if bloqueio:
         return bloqueio
 
-    periodo = request.GET.get('period', 'mes')
-    if periodo not in ('dia', 'mes', 'ano'):
-        periodo = 'mes'
+    periodo = request.GET.get('period', '30d')
+    if periodo not in PERIODOS_ACEITOS:
+        periodo = '30d'
     inicio, fim, rotulo = _intervalo_periodo(periodo)
 
     txs = (StockTransaction.objects
@@ -3965,17 +3988,24 @@ def consultant_reports(request):
                 'saldo': float(ent - sai),
             })
     else:
-        dias = 7 if periodo == 'dia' else (fim - inicio).days
+        dias = 7 if periodo == 'dia' else max(1, (fim - inicio).days)
         base = (timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
                 - timedelta(days=6)) if periodo == 'dia' else inicio
         # Para 'dia' precisamos olhar além do intervalo do resumo.
         origem = (StockTransaction.objects
                   .filter(store=store, created_at__gte=base)
                   .select_related('product')) if periodo == 'dia' else txs
-        for d in range(dias):
+
+        # Acima de ~45 dias, agrupamos por semana: 90 barras diárias ficam
+        # ilegíveis na tela de um celular.
+        passo = 7 if dias > 45 else 1
+        agora_local = timezone.localtime()
+
+        d = 0
+        while d < dias:
             ini_d = base + timedelta(days=d)
-            fim_d = ini_d + timedelta(days=1)
-            if ini_d > timezone.localtime():
+            fim_d = min(ini_d + timedelta(days=passo), base + timedelta(days=dias))
+            if ini_d > agora_local:
                 break
             ent = sai = Decimal('0')
             for t in origem:
@@ -3991,6 +4021,7 @@ def consultant_reports(request):
                 'saidas': float(sai),
                 'saldo': float(ent - sai),
             })
+            d += passo
 
     # ── Top 10 mais vendidos ──
     por_produto = {}
