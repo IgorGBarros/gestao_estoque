@@ -1215,7 +1215,7 @@ export default function AdminPanel() {
                       label: "Ativas Hoje", 
                       value: dashboardStats.active_today, 
                       icon: Activity, 
-                      color: "text-green-500",
+                      color: "text-success",
                       change: "Últimas 24h"
                     },
                     { 
@@ -1229,7 +1229,7 @@ export default function AdminPanel() {
                       label: "Receita Total", 
                       value: formatCurrency(dashboardStats.total_revenue), 
                       icon: DollarSign, 
-                      color: "text-emerald-500",
+                      color: "text-success",
                       change: `${formatCurrency(dashboardStats.monthly_revenue)} este mês`
                     },
                     { 
@@ -1688,7 +1688,7 @@ export default function AdminPanel() {
                       ].map(({ key, label }) => (
                         <div key={key} className="flex items-center gap-2 text-xs">
                           {plan[key as keyof PlanConfig] ? (
-                            <Check className="h-3 w-3 text-green-500" />
+                            <Check className="h-3 w-3 text-success" />
                           ) : (
                             <X className="h-3 w-3 text-gray-400" />
                           )}
@@ -1804,7 +1804,7 @@ export default function AdminPanel() {
                           onClick={() => togglePromotionStatus(promotion)}
                           className={`p-2 rounded-lg transition-colors ${
                             promotion.is_active
-                              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                              ? 'bg-success/10 text-success hover:bg-success/10'
                               : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                           }`}
                           title={promotion.is_active ? 'Desativar' : 'Ativar'}
@@ -1849,7 +1849,7 @@ export default function AdminPanel() {
                         <p className="text-xs text-muted-foreground">Visualizações</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-2xl font-bold text-green-600">
+                        <p className="text-2xl font-bold text-success">
                           {Math.floor(Math.random() * 15) + 1}
                         </p>
                         <p className="text-xs text-muted-foreground">Conversões</p>
@@ -1916,10 +1916,10 @@ export default function AdminPanel() {
                   
                   <div className="rounded-xl border border-border bg-card p-4">
                     <div className="flex items-center gap-2 mb-2">
-                      <Check className="h-4 w-4 text-green-500" />
+                      <Check className="h-4 w-4 text-success" />
                       <span className="text-xs text-muted-foreground font-medium">Com Código</span>
                     </div>
-                    <p className="text-2xl font-bold text-green-500">{productAnalytics.overview.products_with_barcode}</p>
+                    <p className="text-2xl font-bold text-success">{productAnalytics.overview.products_with_barcode}</p>
                     <p className="text-xs text-muted-foreground">
                       {((productAnalytics.overview.products_with_barcode / productAnalytics.overview.total_products) * 100).toFixed(1)}%
                     </p>
@@ -2154,7 +2154,7 @@ export default function AdminPanel() {
                         <p className="text-sm text-muted-foreground mb-2">{rec.description}</p>
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-primary font-medium">→ {rec.action}</span>
-                          <span className="text-green-600 font-medium">{rec.impact}</span>
+                          <span className="text-success font-medium">{rec.impact}</span>
                         </div>
                       </div>
                     ))}
@@ -2172,7 +2172,7 @@ export default function AdminPanel() {
                       <p className="text-xs text-muted-foreground">Lojas Analisadas</p>
                     </div>
                     <div className="p-3 bg-secondary/30 rounded-lg">
-                      <p className="text-2xl font-bold text-green-600">
+                      <p className="text-2xl font-bold text-success">
                         {behaviorAnalytics.data_summary.consent_coverage_pct}%
                       </p>
                       <p className="text-xs text-muted-foreground">Cobertura de Consentimento</p>
@@ -2243,11 +2243,11 @@ export default function AdminPanel() {
                         <p className="font-semibold text-sm">{s.label}</p>
                         <p className="text-xs text-muted-foreground">{s.sub}</p>
                       </div>
-                      <s.icon className={`h-5 w-5 ${ok ? 'text-green-500' : degraded ? 'text-amber-500' : 'text-destructive'}`} />
+                      <s.icon className={`h-5 w-5 ${ok ? 'text-success' : degraded ? 'text-amber-500' : 'text-destructive'}`} />
                     </div>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className={`h-2 w-2 rounded-full ${ok ? 'bg-green-500 animate-pulse' : degraded ? 'bg-amber-500' : 'bg-destructive'}`} />
-                      <span className={`text-sm font-medium ${ok ? 'text-green-600' : degraded ? 'text-amber-600' : 'text-destructive'}`}>
+                      <span className={`h-2 w-2 rounded-full ${ok ? 'bg-success animate-pulse' : degraded ? 'bg-amber-500' : 'bg-destructive'}`} />
+                      <span className={`text-sm font-medium ${ok ? 'text-success' : degraded ? 'text-amber-600' : 'text-destructive'}`}>
                         {ok ? 'Operacional' : degraded ? 'Degradado' : 'Indisponível'}
                       </span>
                     </div>
@@ -2283,7 +2283,7 @@ export default function AdminPanel() {
                             toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
                             setSystemHealth(h => h ? { ...h } : h);
                           }}
-                          className={active ? 'text-green-600' : 'text-muted-foreground'}
+                          className={active ? 'text-success' : 'text-muted-foreground'}
                         >
                           {active ? <ToggleRight className="h-7 w-7" /> : <ToggleLeft className="h-7 w-7" />}
                         </button>
@@ -2359,7 +2359,7 @@ export default function AdminPanel() {
                       <TableCell className="text-xs font-mono hidden md:table-cell">{log.ip_address}</TableCell>
                       <TableCell className="text-right">
                         {log.status === 'success'
-                          ? <Badge className="bg-green-500/10 text-green-600 hover:bg-green-500/20"><Check className="h-3 w-3 mr-1" />OK</Badge>
+                          ? <Badge className="bg-success/10 text-success hover:bg-success/20"><Check className="h-3 w-3 mr-1" />OK</Badge>
                           : <Badge variant="destructive"><AlertTriangle className="h-3 w-3 mr-1" />Falhou</Badge>}
                       </TableCell>
                     </TableRow>

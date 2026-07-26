@@ -23,6 +23,7 @@ import { useFeatureGates } from "../hooks/useFeatureGates";
 import MeicashFlow from "../components/MeicashFlow";
 import PeriodoSelect from "../components/PeriodoSelect";
 import type { PeriodoRelatorio, IntervaloDatas } from "../lib/api";
+import { btn } from "../lib/ui";
 import { queryPeriodo } from "../lib/api";
 
 type Aba = "relatorios" | "mei";
@@ -113,7 +114,7 @@ export default function Dashboard() {
         </p>
         <button
           onClick={() => navigate("/plans")}
-          className="mt-6 w-full rounded-xl bg-brand py-3 text-sm font-bold text-white transition-opacity hover:opacity-90"
+          className={`mt-6 ${btn.primarioBloco}`}
         >
           Ver planos
         </button>
@@ -238,7 +239,7 @@ export default function Dashboard() {
                       <td className="px-3 py-2.5">
                         <span
                           className={`inline-flex items-center gap-1 text-xs font-medium ${
-                            l.natureza === "entrada" ? "text-emerald-600" : "text-rose-600"
+                            l.natureza === "entrada" ? "text-success" : "text-rose-600"
                           }`}
                         >
                           {l.natureza === "entrada" ? (
@@ -253,7 +254,7 @@ export default function Dashboard() {
                       <td className="px-3 py-2.5 text-right text-muted-foreground">{l.quantidade}</td>
                       <td
                         className={`px-3 py-2.5 text-right font-semibold ${
-                          l.natureza === "entrada" ? "text-emerald-600" : "text-rose-600"
+                          l.natureza === "entrada" ? "text-success" : "text-rose-600"
                         }`}
                       >
                         {l.natureza === "entrada" ? "+" : "−"} {dinheiro(l.valor)}
@@ -315,7 +316,7 @@ export default function Dashboard() {
                         <span
                           className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
                             s.tipo === "Venda"
-                              ? "bg-emerald-500/10 text-emerald-600"
+                              ? "bg-success/10 text-success"
                               : s.tipo === "Perda"
                               ? "bg-destructive/10 text-destructive"
                               : "bg-muted text-muted-foreground"
@@ -386,7 +387,7 @@ function CardValor({
   icone: Icone, cor, titulo, valor, sub,
 }: { icone: any; cor: "emerald" | "rose" | "brand"; titulo: string; valor: number; sub: string }) {
   const estilos = {
-    emerald: { borda: "border-emerald-500/20 bg-emerald-500/5", texto: "text-emerald-600" },
+    emerald: { borda: "border-success/20 bg-success/5", texto: "text-success" },
     rose: { borda: "border-rose-500/20 bg-rose-500/5", texto: "text-rose-600" },
     brand: { borda: "border-brand/20 bg-brand/5", texto: "text-brand" },
   }[cor];

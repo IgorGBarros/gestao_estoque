@@ -8,6 +8,7 @@
 import { useState, useEffect } from "react";
 import { TrendingUp, TrendingDown, Wallet, Download, AlertTriangle, Loader2 } from "lucide-react";
 import { meiApi, type MeiSummary, type PeriodoRelatorio, type IntervaloDatas } from "../lib/api";
+import { btn } from "../lib/ui";
 import PeriodoSelect from "./PeriodoSelect";
 import { useToast } from "./ui/use-toast";
 
@@ -72,7 +73,7 @@ export default function MeiCashFlow() {
   // largura negativa é CSS inválido e o navegador renderizava a barra CHEIA,
   // dando a impressão de teto estourado quando o número era o oposto disso.
   const larguraBarra = Math.max(0, Math.min(mei.percentual_usado, 100));
-  const corBarra = excedeu ? "bg-destructive" : atencao ? "bg-amber-500" : "bg-emerald-500";
+  const corBarra = excedeu ? "bg-destructive" : atencao ? "bg-amber-500" : "bg-success";
 
   return (
     <section className="space-y-4">
@@ -90,12 +91,12 @@ export default function MeiCashFlow() {
 
       {/* Os três números que importam */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+        <div className="rounded-xl border border-success/20 bg-success/5 p-4">
           <div className="flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-emerald-600 shrink-0" />
+            <TrendingUp className="h-4 w-4 text-success shrink-0" />
             <span className="text-xs font-medium text-muted-foreground">Entrou (vendas)</span>
           </div>
-          <p className="mt-2 text-xl font-bold text-emerald-600">
+          <p className="mt-2 text-xl font-bold text-success">
             {dinheiro(mes_atual.entradas)}
           </p>
         </div>
@@ -176,7 +177,7 @@ export default function MeiCashFlow() {
       <button
         onClick={baixarRelatorio}
         disabled={baixando}
-        className="flex w-full items-center justify-center gap-2 rounded-xl border border-brand/30 bg-brand/5 py-3 text-sm font-semibold text-brand transition-colors hover:bg-brand/10 disabled:opacity-60"
+        className={`w-full ${btn.base} ${btn.lg} ${btn.suave}`}
       >
         {baixando ? (
           <>

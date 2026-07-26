@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { movementsApi, formatMoney, movementsReportApi } from "../lib/api";
+import { btn } from "../lib/ui";
 import { useAuth } from "../hooks/useAuth";
 
 const TYPE_LABELS: Record<string, { label: string; emoji: string }> = {
@@ -128,7 +129,7 @@ export default function MovementHistory() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-brand border-t-transparent" />
+        <Loader2 className="h-8 w-8 animate-spin text-brand" />
       </div>
     );
   }
@@ -156,7 +157,7 @@ export default function MovementHistory() {
           <button
             onClick={baixarRelatorio}
             disabled={baixandoRel}
-            className="ml-auto flex items-center gap-1.5 rounded-lg border border-brand/30 bg-brand/5 px-3 py-2 text-xs font-semibold text-brand transition-colors hover:bg-brand/10 disabled:opacity-60"
+            className={`ml-auto ${btn.base} ${btn.sm} ${btn.suave}`}
             title="Baixar relatório de movimentação"
           >
             {baixandoRel ? (

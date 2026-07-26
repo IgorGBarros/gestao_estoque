@@ -55,7 +55,7 @@ export default function ConsultantsHealthTab() {
   );
 
   const corSaude = (s: number) =>
-    s >= 80 ? "text-emerald-600" : s >= 60 ? "text-amber-600" : "text-destructive";
+    s >= 80 ? "text-success" : s >= 60 ? "text-amber-600" : "text-destructive";
 
   return (
     <div className="space-y-5">
@@ -122,7 +122,7 @@ export default function ConsultantsHealthTab() {
                 <td className="px-3 py-3 text-right font-semibold text-foreground">
                   {dinheiro(c.receita_30d)}
                 </td>
-                <td className={`px-3 py-3 text-right ${c.lucro_30d >= 0 ? "text-emerald-600" : "text-destructive"}`}>
+                <td className={`px-3 py-3 text-right ${c.lucro_30d >= 0 ? "text-success" : "text-destructive"}`}>
                   {dinheiro(c.lucro_30d)}
                 </td>
                 <td className="px-3 py-3 text-right text-muted-foreground">{c.roi_percent}%</td>

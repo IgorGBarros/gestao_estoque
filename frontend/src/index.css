@@ -14,7 +14,11 @@
     --color-brand-peach: #FDF2F7;
     --color-brand-lavender: #D8BFD8;
     --color-brand-rose: #B76E79;
-    --color-success: #871745;
+    /* ⚠️ Era #871745 — a MESMA cor da marca. Ou seja, "text-success"
+       renderizava vinho, não verde. Foi por isso que o código passou a usar
+       green-600/emerald-600 na mão para conseguir verde de verdade, criando
+       três verdes diferentes pelo app. */
+    --color-success: #2E8B57;
     --color-text-main: #2D292E;
     --background: 140 15% 97%;
     --foreground: 150 30% 10%;
@@ -26,7 +30,10 @@
     --popover: 0 0% 100%;
     --popover-foreground: 150 30% 10%;
 
-    --primary: 152 55% 28%;
+    /* ⚠️ Era 152 55% 28% (verde). Como o <Button> do shadcn usa bg-primary,
+       os botões dele saíam VERDES enquanto os botões manuais usavam bg-brand
+       (vinho) — dois padrões de cor na mesma tela. Agora primary = marca. */
+    --primary: 335 71% 31%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 145 20% 92%;
@@ -75,7 +82,7 @@
     --popover: 150 20% 9%;
     --popover-foreground: 140 15% 95%;
 
-    --primary: 152 50% 45%;
+    --primary: 335 65% 45%;  /* marca, versão mais clara para o tema escuro */
     --primary-foreground: 0 0% 100%;
 
     --secondary: 150 15% 15%;
