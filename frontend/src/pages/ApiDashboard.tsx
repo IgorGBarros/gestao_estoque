@@ -210,7 +210,7 @@ export default function ApiDashboard() {
                               {key.plan}
                             </Badge>
                             {key.is_active ? (
-                              <Badge variant="outline" className="text-green-600 border-green-200 text-xs">
+                              <Badge variant="outline" className="text-success border-success/20 text-xs">
                                 Ativa
                               </Badge>
                             ) : (
@@ -300,7 +300,7 @@ export default function ApiDashboard() {
                       <CardTitle className="text-sm text-muted-foreground">Taxa de Sucesso</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-3xl font-bold text-green-600">{usage.success_rate}%</p>
+                      <p className="text-3xl font-bold text-success">{usage.success_rate}%</p>
                       <p className="text-xs text-muted-foreground">Últimos 7 dias</p>
                     </CardContent>
                   </Card>
@@ -321,8 +321,8 @@ export default function ApiDashboard() {
                     </CardHeader>
                     <CardContent>
                       <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse" />
-                        <span className="font-medium text-green-600">Operacional</span>
+                        <div className="w-3 h-3 rounded-full bg-success animate-pulse" />
+                        <span className="font-medium text-success">Operacional</span>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">99.99% uptime</p>
                     </CardContent>

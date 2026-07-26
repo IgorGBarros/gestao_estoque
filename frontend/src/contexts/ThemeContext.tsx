@@ -20,7 +20,7 @@ const ThemeContext = createContext<ThemeContextValue>({
 const DEFAULT_THEME: ThemeConfig = {
   color_primary: '#871745',
   color_primary_light: '#FDF2F7',
-  color_success: '#2E8B57',
+  color_success: '#871745',
   color_text: '#2D292E',
   color_accent: '#A91B60',
   color_destructive: '#DC2626',

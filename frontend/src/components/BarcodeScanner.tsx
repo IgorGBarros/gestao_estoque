@@ -178,7 +178,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
           {isIOS ? (
             <span className="text-xs text-blue-400">📱</span>
           ) : (
-            <span className="text-xs text-green-400">🤖</span>
+            <span className="text-xs text-success">🤖</span>
           )}
         </div>
         
@@ -219,9 +219,9 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
           <motion.div 
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-green-600/90 px-4 py-2 rounded-full text-sm flex items-center gap-2 backdrop-blur-sm"
+            className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-success/90 px-4 py-2 rounded-full text-sm flex items-center gap-2 backdrop-blur-sm"
           >
-            <div className="w-2 h-2 bg-green-300 rounded-full animate-pulse" />
+            <div className="w-2 h-2 bg-success/10 rounded-full animate-pulse" />
             {isIOS ? 'Focando câmera...' : 'Procurando código...'}
           </motion.div>
         )}
@@ -235,7 +235,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
             className={`absolute top-16 left-1/2 transform -translate-x-1/2 px-3 py-1 rounded-full text-xs backdrop-blur-sm ${
               isIOS 
                 ? 'bg-blue-600/80' 
-                : 'bg-emerald-600/80'
+                : 'bg-success/80'
             }`}
           >
             {isIOS ? '💡 Aproxime devagar para focar' : '🎯 Mantenha o código na mira'}
@@ -257,7 +257,7 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       <div className="p-6 bg-zinc-900 z-20 pb-10">
         <button 
           onClick={() => fileInputRef.current?.click()}
-          className="w-full bg-white text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
+          className="w-full bg-card text-black font-bold py-3 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-all"
         >
           <ImagePlus size={20} />
           {isIOS ? 'Enviar Foto (Alternativa)' : 'Enviar Foto (Melhor Foco)'}

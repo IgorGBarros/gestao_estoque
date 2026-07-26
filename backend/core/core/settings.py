@@ -496,6 +496,13 @@ LGPD_ESSENTIAL_PURPOSES = ["essential", "authentication", "legal_compliance", "s
 LGPD_CONSENT_VERSION = "v1.0_2026-05"
 
 # ==========================================
+# 🎁 PERÍODO DE TESTE
+# ==========================================
+# Dias de acesso completo para toda loja nova, sem exigir cartão.
+# Terminado o prazo, a loja perde os recursos até assinar.
+TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "14"))
+
+# ==========================================
 # 🔐 ADMINISTRADORES DO SISTEMA (acesso ao painel)
 # ==========================================
 # Lista de emails autorizados a acessar o /admin-panel. Definida por variável

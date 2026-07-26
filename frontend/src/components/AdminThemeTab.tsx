@@ -28,7 +28,7 @@ const COLOR_FIELDS: ColorField[] = [
 const DEFAULT_PALETTE: Partial<ThemeConfig> = {
   color_primary: '#871745',
   color_primary_light: '#FDF2F7',
-  color_success: '#2E8B57',
+  color_success: '#871745',
   color_text: '#2D292E',
   color_accent: '#A91B60',
   color_destructive: '#DC2626',
@@ -204,7 +204,7 @@ export default function AdminThemeTab() {
             </button>
             <span
               className="px-3 py-1 rounded-full text-xs font-bold text-white"
-              style={{ backgroundColor: formData.color_success || '#2E8B57' }}
+              style={{ backgroundColor: formData.color_success || '#871745' }}
             >
               +R$ 150,00
             </span>

@@ -12,6 +12,9 @@ nas próprias views).
 from django.urls import path
 
 from .admin_views import (
+    admin_consultants_health,
+    admin_impersonate_user,
+    admin_toggle_block_user,
     list_plan_configs,
     update_plan_config,
     list_promotions,
@@ -39,6 +42,11 @@ urlpatterns = [
     path('api-monitor/', monitor_api_usage, name='admin_api_monitor'),
 
     # Analytics (filtrado por consentimento LGPD — ver admin_views.py)
+    # 📊 Saúde de todas as consultoras (indicadores de gestão)
+    path('analytics/consultants/', admin_consultants_health, name='admin_consultants_health'),
+    # 🔐 Suporte: acessar como consultora / bloquear acesso
+    path('users/<int:user_id>/impersonate/', admin_impersonate_user, name='admin_impersonate'),
+    path('users/<int:user_id>/toggle-block/', admin_toggle_block_user, name='admin_toggle_block'),
     path('analytics/products/', get_product_analytics, name='admin_product_analytics'),
     path('analytics/behavior/', get_store_behavior_analytics, name='admin_behavior_analytics'),
     path('ai-training/summary/', get_ai_training_summary, name='admin_ai_training_summary'),

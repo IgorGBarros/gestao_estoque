@@ -400,6 +400,10 @@ class SaleSerializer(serializers.Serializer):
 class StockTransactionSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name', read_only=True)
     batch_code = serializers.CharField(source='batch.batch_code', read_only=True)
+    # ⚠️ O frontend (StockHistory) já somava `profit` para o card "Lucro", mas
+    # o serializer nunca enviava esse campo — o card mostrava R$ 0,00 sempre.
+    profit = serializers.SerializerMethodField()
+    total_value = serializers.SerializerMethodField()
     formatted_date = serializers.SerializerMethodField()
     
     class Meta:
@@ -407,12 +411,30 @@ class StockTransactionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'product', 'product_name', 'batch', 'batch_code',
             'transaction_type', 'quantity', 'unit_cost', 'unit_price',
-            'description', 'created_at', 'formatted_date'
+            'description', 'created_at', 'formatted_date',
+            'profit', 'total_value',
         ]
         read_only_fields = ['id', 'created_at', 'product_name', 'batch_code']
     
     def get_formatted_date(self, obj):
         return obj.created_at.strftime('%d/%m/%Y %H:%M')
+
+    def get_profit(self, obj):
+        """
+        Lucro da movimentação. Só faz sentido em VENDA: é o que sobrou depois
+        de descontar o custo do produto. Nos demais tipos devolve None, para o
+        frontend não somar coisa que não é lucro.
+        """
+        if obj.transaction_type != 'VENDA':
+            return None
+        qtd = abs(obj.quantity or 0)
+        return float(((obj.unit_price or 0) - (obj.unit_cost or 0)) * qtd)
+
+    def get_total_value(self, obj):
+        """Valor total da movimentação: preço em vendas, custo nos demais."""
+        qtd = abs(obj.quantity or 0)
+        base = obj.unit_price if obj.transaction_type == 'VENDA' else obj.unit_cost
+        return float((base or 0) * qtd)
 
 
 # ==========================================
@@ -499,8 +521,15 @@ class ProfileSerializer(serializers.ModelSerializer):
         return obj.get_active_promotions()
     
     def get_subscription_status(self, obj):
-        """Status da assinatura"""
+        """Status da assinatura + período de teste"""
         return {
+            # 🎁 Trial: o frontend usa `access_status` para decidir entre
+            # contagem regressiva, tela de expiração ou nada.
+            'access_status': obj.access_status,
+            'is_in_trial': obj.is_in_trial,
+            'trial_days_left': obj.trial_days_left,
+            'trial_ends_at': obj.trial_ends_at,
+            'has_pro_access': obj.has_pro_access,
             'status': obj.subscription_status,
             'days_until_expiry': obj.days_until_expiry,
             'is_active': obj.plan == 'pro' and obj.subscription_status == 'active',

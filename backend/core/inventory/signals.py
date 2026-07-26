@@ -1,6 +1,8 @@
 # backend/core/inventory/signals.py
 import uuid
+from datetime import timedelta
 from django.conf import settings
+from django.utils import timezone
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.contrib.auth import get_user_model
@@ -58,10 +60,18 @@ def create_store_for_new_user(sender, instance, created, **kwargs):
         unique_slug = f"{base_name.lower().replace(' ', '-')}-{str(uuid.uuid4())[:6]}"
         
         # Cria a Loja vinculada ao novo Usuário
+        # 🎁 Trial: toda loja nova nasce com acesso completo por alguns dias,
+        # sem pedir cartão. A duração vem do settings (TRIAL_DAYS) para poder
+        # ser ajustada sem alterar código.
+        agora = timezone.now()
+        dias_trial = getattr(settings, 'TRIAL_DAYS', 14)
+
         Store.objects.create(
             owner=instance,
             name=f"Espaço de {base_name.capitalize()}",
             slug=unique_slug,
+            trial_started_at=agora,
+            trial_ends_at=agora + timedelta(days=dias_trial),
             whatsapp="", # A consultora preenche depois
             # storefront_enabled=False (Se você tiver esse campo no model, inicie desativado)
         )

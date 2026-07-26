@@ -814,6 +814,66 @@ export const plansApi = {
   list: () => apiRequest<any[]>("/plans/"),
 };
 
+/** Janelas de período usadas nos relatórios e no painel do MEI. */
+export type PeriodoRelatorio = "30d" | "60d" | "90d" | "ano" | "custom";
+
+/** Intervalo escolhido no calendário (só usado quando período = "custom"). */
+export interface IntervaloDatas {
+  start: string; // AAAA-MM-DD
+  end: string;   // AAAA-MM-DD
+}
+
+/** Monta a querystring de período para os endpoints de relatório. */
+export function queryPeriodo(period: PeriodoRelatorio, datas?: IntervaloDatas): string {
+  const p = new URLSearchParams({ period });
+  if (period === "custom" && datas?.start && datas?.end) {
+    p.set("start", datas.start);
+    p.set("end", datas.end);
+  }
+  return p.toString();
+}
+
+// ── Fluxo de caixa simplificado (MEI) ──
+export interface MeiSummary {
+  ano: number;
+  periodo?: string;
+  periodo_rotulo?: string;
+  mes_atual: { entradas: number; saidas: number; sobra: number };
+  ano_atual: { receita_bruta: number; compras: number; sobra: number };
+  mei: {
+    limite: number;
+    percentual_usado: number;
+    restante: number;
+    situacao: "ok" | "atencao" | "excedido" | "excedido_grave";
+  };
+  meses: { mes: number; entradas: number; saidas: number }[];
+  aviso: string;
+}
+
+export const meiApi = {
+  getSummary: (period: PeriodoRelatorio = "30d", datas?: IntervaloDatas) =>
+    apiRequest<MeiSummary>(`/mei/summary/?${queryPeriodo(period, datas)}`),
+
+  /**
+   * Baixa o relatório CSV para o contador.
+   * Precisa passar pelo axios (e não por um <a href>) porque o endpoint exige
+   * o token JWT — um link simples não envia o cabeçalho Authorization.
+   */
+  downloadReport: async (year?: number) => {
+    const resp = await api.get(`/mei/report/${year ? `?year=${year}` : ""}`, {
+      responseType: "blob",
+    });
+    const url = window.URL.createObjectURL(new Blob([resp.data]));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio-mei-${year || new Date().getFullYear()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+};
+
 export const statsApi = {
   getDashboard: async (forceRefresh = false): Promise<DashboardStats> => {
     const fresh = statsCache && (Date.now() - statsCacheAt) < STATS_CACHE_MS;
@@ -895,6 +955,90 @@ function normalizeConsentRecord(raw: any): ConsentRecord {
   };
 }
 
+// ── Admin: saúde das consultoras e suporte ──
+export interface ConsultantHealth {
+  store_id: number;
+  name: string;
+  email: string;
+  plan: string;
+  produtos: number;
+  capital_investido: number;
+  receita_30d: number;
+  lucro_30d: number;
+  margem_percent: number;
+  roi_percent: number;
+  giro_estoque: number;
+  ticket_medio: number;
+  vendas_30d: number;
+  estoque_baixo: number;
+  lotes_vencidos: number;
+  lotes_vencendo: number;
+  saude: number;
+}
+
+export const adminHealthApi = {
+  getConsultants: () =>
+    apiRequest<{
+      periodo: string;
+      totais: {
+        consultoras: number; ativas_30d: number; inativas_30d: number;
+        receita_total_30d: number; capital_investido_total: number;
+        receita_media_por_consultora: number; em_risco: number;
+      };
+      consultoras: ConsultantHealth[];
+    }>("/admin/analytics/consultants/"),
+
+  /** Emite token de suporte para ver o app como a consultora. */
+  impersonate: (userId: number) =>
+    apiRequest<{
+      access: string;
+      user: { id: number; email: string; display_name: string };
+      expires_in_minutes: number;
+    }>(`/admin/users/${userId}/impersonate/`, { method: "POST" }),
+
+  toggleBlock: (userId: number) =>
+    apiRequest<{ user_id: number; email: string; is_active: boolean; status: string }>(
+      `/admin/users/${userId}/toggle-block/`, { method: "POST" }
+    ),
+};
+
+// ── Relatório de movimentações (CSV) ──
+export const stockReportApi = {
+  /** Relatório do estoque atual (o que tem hoje) em CSV. */
+  download: async () => {
+    const resp = await api.get("/stock/report/", { responseType: "blob" });
+    const url = window.URL.createObjectURL(new Blob([resp.data]));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `estoque-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+};
+
+export const movementsReportApi = {
+  /**
+   * Baixa o CSV de movimentações. Precisa passar pelo axios (e não por um
+   * <a href>) porque o endpoint exige o token JWT — link simples não envia
+   * o cabeçalho Authorization.
+   */
+  download: async (period: PeriodoRelatorio | "tudo" = "tudo") => {
+    const resp = await api.get(`/movements/report/?period=${period}`, {
+      responseType: "blob",
+    });
+    const url = window.URL.createObjectURL(new Blob([resp.data]));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `movimentacoes-${period}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  },
+};
+
 export const consentApi = {
   record: async (data: ConsentRequest): Promise<ConsentRecord> => {
     const response = await apiRequest<ConsentRecord>("/consent/", {
@@ -906,6 +1050,12 @@ export const consentApi = {
 
   revoke: async (purpose: string): Promise<{ status: string; purpose: string }> => {
     return apiRequest(`/consent/revoke/${purpose}/`, { method: "DELETE" });
+  },
+
+  /** Portabilidade LGPD: baixa os dados da titular. Disponível mesmo com o
+   *  teste expirado — é direito, não recurso de plano. */
+  exportData: async (): Promise<unknown> => {
+    return apiRequest("/consent/export/");
   },
 
   getMyConsents: async (): Promise<{

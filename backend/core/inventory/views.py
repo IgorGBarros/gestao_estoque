@@ -44,11 +44,14 @@ from .serializers import (
     ProfileSerializer, ThemeConfigSerializer,
     ProductSerializer, InventoryItemSerializer,
     StockEntrySerializer, SaleSerializer, StockTransactionSerializer,
-    ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer  # ✅ Novos serializers LGPD
+    ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer,  # ✅ Serializers LGPD
+    PlanConfigSerializer,
 )
 
 from .scraper import search_google_shopping
 from .consent_utils import has_consent_for_purpose as _has_consent_for_purpose
+from decimal import Decimal
+from django.db.models.functions import Abs  # usado no fluxo de caixa MEI
 
 User = get_user_model()
 # ============================================================================
@@ -3616,3 +3619,719 @@ def export_my_data(request):
         "transactions": StockTransactionSerializer(transactions, many=True).data,
         "note": "Dados exportados conforme Art. 18, V da LGPD"
     })
+
+# ==========================================
+# 💰 FLUXO DE CAIXA SIMPLIFICADO (MEI)
+# ==========================================
+# Princípio de design: "se não é produto cadastrado, não gera movimento
+# financeiro". A consultora nunca lança despesa manualmente — o caixa é um
+# subproduto automático da gestão de estoque. Isso elimina o erro de
+# "esqueci de lançar" e mantém a adoção alta.
+#
+# Entradas  = vendas          (quantidade × preço de venda)
+# Saídas    = compras de estoque (quantidade × custo)
+# Sobra     = entradas − saídas
+#
+# ⚠️ Os números são estimativas de gestão baseadas no que foi registrado no
+# sistema. Não substituem contabilidade: vendas feitas fora do app, taxas de
+# maquininha e outras despesas não aparecem aqui.
+
+# Teto de receita bruta anual do MEI. Em vigor desde 2018, mantido em 2026.
+# Se a lei mudar, basta atualizar esta constante.
+MEI_LIMITE_ANUAL = Decimal('81000.00')
+# Acima de 20% de excesso o desenquadramento é retroativo ao início do ano.
+MEI_TOLERANCIA_20 = MEI_LIMITE_ANUAL * Decimal('1.20')
+
+
+def _receita_periodo(store, inicio=None, fim=None):
+    """
+    Receita bruta (vendas) no período.
+
+    ⚠️ CORREÇÃO: antes o cálculo era `unit_price * (quantity * -1)`, partindo
+    do princípio de que TODA venda é gravada com quantidade negativa. Bastava
+    um registro com quantidade positiva para a receita virar NEGATIVA — foi o
+    que aconteceu em produção ("-R$ 919,50 de R$ 81.000").
+
+    Agora usamos o valor absoluto: vender 5 unidades é 5 unidades,
+    independentemente de como o sinal foi gravado.
+    """
+    qs = StockTransaction.objects.filter(store=store, transaction_type='VENDA')
+    if inicio:
+        qs = qs.filter(created_at__gte=inicio)
+    if fim:
+        qs = qs.filter(created_at__lt=fim)
+    total = qs.aggregate(
+        s=Sum(F('unit_price') * Abs(F('quantity')))
+    )['s']
+    return Decimal(total or 0)
+
+
+def _compras_periodo(store, inicio=None, fim=None):
+    """Saída de caixa: compras de estoque (ENTRADA), quantidade positiva."""
+    qs = StockTransaction.objects.filter(store=store, transaction_type='ENTRADA')
+    if inicio:
+        qs = qs.filter(created_at__gte=inicio)
+    if fim:
+        qs = qs.filter(created_at__lt=fim)
+    # Valor absoluto pelo mesmo motivo da receita: o sinal não é confiável.
+    total = qs.aggregate(s=Sum(F('unit_cost') * Abs(F('quantity'))))['s']
+    return Decimal(total or 0)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def mei_summary(request):
+    """
+    GET /api/mei/summary/ → Fluxo de caixa simplificado + controle do teto MEI.
+
+    Parâmetro opcional `year` (padrão: ano corrente).
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    agora = timezone.localtime()
+    try:
+        ano = int(request.GET.get('year', agora.year))
+    except (TypeError, ValueError):
+        ano = agora.year
+
+    # ── Período escolhido (cards de caixa) ──
+    # O TETO do MEI continua sendo sempre anual — é assim na lei. O filtro
+    # afeta só os cards de entrada/saída/sobra, para ela poder olhar o dia,
+    # o mês ou o ano.
+    periodo, ini_p, fim_p, rotulo_p = _intervalo_da_requisicao(request)
+    entradas_mes = _receita_periodo(store, ini_p, fim_p)
+    saidas_mes = _compras_periodo(store, ini_p, fim_p)
+
+    # ── Ano ──
+    inicio_ano = agora.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    if ano != agora.year:
+        inicio_ano = inicio_ano.replace(year=ano)
+    fim_ano = inicio_ano.replace(year=ano + 1)
+
+    receita_ano = _receita_periodo(store, inicio_ano, fim_ano)
+    compras_ano = _compras_periodo(store, inicio_ano, fim_ano)
+
+    # ── Detalhamento mês a mês (base do Relatório Mensal de Receitas) ──
+    meses = []
+    for m in range(1, 13):
+        ini = inicio_ano.replace(month=m)
+        fim = ini.replace(year=ano + 1, month=1) if m == 12 else ini.replace(month=m + 1)
+        if ini > agora:
+            break
+        meses.append({
+            'mes': m,
+            'entradas': float(_receita_periodo(store, ini, fim)),
+            'saidas': float(_compras_periodo(store, ini, fim)),
+        })
+
+    # ── Situação frente ao teto ──
+    percentual = float(receita_ano / MEI_LIMITE_ANUAL * 100) if MEI_LIMITE_ANUAL else 0.0
+    if receita_ano > MEI_TOLERANCIA_20:
+        situacao = 'excedido_grave'
+    elif receita_ano > MEI_LIMITE_ANUAL:
+        situacao = 'excedido'
+    elif percentual >= 80:
+        situacao = 'atencao'
+    else:
+        situacao = 'ok'
+
+    return Response({
+        'ano': ano,
+        'periodo': periodo,
+        'periodo_rotulo': rotulo_p,
+        # `mes_atual` mantém o nome por compatibilidade, mas agora reflete o
+        # período escolhido no filtro.
+        'mes_atual': {
+            'entradas': float(entradas_mes),
+            'saidas': float(saidas_mes),
+            'sobra': float(entradas_mes - saidas_mes),
+        },
+        'ano_atual': {
+            'receita_bruta': float(receita_ano),
+            'compras': float(compras_ano),
+            'sobra': float(receita_ano - compras_ano),
+        },
+        'mei': {
+            'limite': float(MEI_LIMITE_ANUAL),
+            'percentual_usado': round(percentual, 1),
+            'restante': float(max(MEI_LIMITE_ANUAL - receita_ano, Decimal('0'))),
+            'situacao': situacao,
+        },
+        'meses': meses,
+        'aviso': (
+            'Valores calculados a partir das movimentações registradas no '
+            'sistema. São estimativas de gestão e não substituem orientação '
+            'contábil.'
+        ),
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def mei_report_csv(request):
+    """
+    GET /api/mei/report/?year=2026 → Relatório para o contador (CSV).
+
+    Formato CSV de propósito: abre no Excel e no Google Sheets, é aceito por
+    qualquer contador e não depende de biblioteca de PDF no servidor.
+    """
+    import csv
+    from django.http import HttpResponse
+
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    agora = timezone.localtime()
+    try:
+        ano = int(request.GET.get('year', agora.year))
+    except (TypeError, ValueError):
+        ano = agora.year
+
+    inicio_ano = agora.replace(year=ano, month=1, day=1, hour=0, minute=0,
+                               second=0, microsecond=0)
+    fim_ano = inicio_ano.replace(year=ano + 1)
+
+    receita_ano = _receita_periodo(store, inicio_ano, fim_ano)
+    compras_ano = _compras_periodo(store, inicio_ano, fim_ano)
+
+    resp = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    resp['Content-Disposition'] = f'attachment; filename="relatorio-mei-{ano}.csv"'
+    w = csv.writer(resp, delimiter=';')  # ; abre direto no Excel em pt-BR
+
+    nome = getattr(store, 'name', '') or ''
+    email = getattr(getattr(store, 'owner', None), 'email', '') or ''
+
+    w.writerow([f'Relatório de Receitas — {ano}'])
+    w.writerow(['Consultora', nome])
+    w.writerow(['E-mail', email])
+    w.writerow(['Gerado em', agora.strftime('%d/%m/%Y %H:%M')])
+    w.writerow([])
+    w.writerow(['RECEITA BRUTA ANUAL (valor da DASN-SIMEI)',
+                f'{receita_ano:.2f}'.replace('.', ',')])
+    w.writerow(['Compras de estoque no ano', f'{compras_ano:.2f}'.replace('.', ',')])
+    w.writerow(['Sobra (receita - compras)',
+                f'{(receita_ano - compras_ano):.2f}'.replace('.', ',')])
+    w.writerow([])
+    w.writerow(['Mês', 'Entradas (vendas)', 'Saídas (compras de estoque)', 'Sobra'])
+
+    nomes_meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
+    for m in range(1, 13):
+        ini = inicio_ano.replace(month=m)
+        fim = fim_ano if m == 12 else inicio_ano.replace(month=m + 1)
+        ent = _receita_periodo(store, ini, fim)
+        sai = _compras_periodo(store, ini, fim)
+        w.writerow([
+            nomes_meses[m - 1],
+            f'{ent:.2f}'.replace('.', ','),
+            f'{sai:.2f}'.replace('.', ','),
+            f'{(ent - sai):.2f}'.replace('.', ','),
+        ])
+
+    w.writerow([])
+    w.writerow(['Observação: este relatório reflete apenas movimentações de '
+                'produtos cadastrados no sistema. Vendas fora do aplicativo, '
+                'taxas e outras despesas não estão incluídas.'])
+    w.writerow(['Não substitui orientação contábil.'])
+    return resp
+
+# ==========================================
+# 📊 RELATÓRIOS DA CONSULTORA (dashboard)
+# ==========================================
+# Endpoint único que alimenta o Dashboard inteiro, com filtro de período.
+# Evita 4 ou 5 chamadas em paralelo — no celular, cada requisição extra é
+# latência que a consultora sente.
+#
+# Períodos: 'dia' (hoje), 'mes' (mês corrente), 'ano' (ano corrente).
+
+# Períodos aceitos pelos relatórios. A chave é o que o frontend envia.
+PERIODOS_EM_DIAS = {'30d': 30, '60d': 60, '90d': 90}
+PERIODOS_ACEITOS = set(PERIODOS_EM_DIAS) | {'dia', 'mes', 'ano', 'custom'}
+
+
+def _intervalo_da_requisicao(request):
+    """
+    Resolve o intervalo a partir da querystring.
+
+    Aceita:
+      • period=30d|60d|90d|ano|mes|dia  → janelas prontas
+      • period=custom&start=AAAA-MM-DD&end=AAAA-MM-DD → intervalo escolhido
+        pela consultora no calendário
+
+    Datas inválidas ou invertidas caem no padrão de 30 dias, para a tela nunca
+    quebrar por causa de um parâmetro malformado.
+    """
+    from datetime import datetime as _dt
+
+    periodo = request.GET.get('period', '30d')
+
+    if periodo == 'custom':
+        bruto_ini = request.GET.get('start')
+        bruto_fim = request.GET.get('end')
+        try:
+            d_ini = _dt.strptime(bruto_ini, '%Y-%m-%d').date()
+            d_fim = _dt.strptime(bruto_fim, '%Y-%m-%d').date()
+            if d_fim < d_ini:
+                d_ini, d_fim = d_fim, d_ini
+            tz = timezone.get_current_timezone()
+            ini = timezone.make_aware(_dt.combine(d_ini, _dt.min.time()), tz)
+            # fim exclusivo: inclui o dia inteiro escolhido
+            fim = timezone.make_aware(
+                _dt.combine(d_fim, _dt.min.time()), tz) + timedelta(days=1)
+            rotulo = f'{d_ini:%d/%m/%Y} a {d_fim:%d/%m/%Y}'
+            return periodo, ini, fim, rotulo
+        except (TypeError, ValueError):
+            periodo = '30d'
+
+    if periodo not in PERIODOS_ACEITOS:
+        periodo = '30d'
+    ini, fim, rotulo = _intervalo_periodo(periodo)
+    return periodo, ini, fim, rotulo
+
+
+def _intervalo_periodo(periodo: str):
+    """
+    Devolve (inicio, fim, rotulo) para o período pedido.
+
+    Aceita janelas em dias ('30d', '60d', '90d') — que é o que o filtro da
+    tela usa — e também os períodos de calendário ('dia', 'mes', 'ano'),
+    mantidos para não quebrar chamadas antigas.
+    """
+    agora = timezone.localtime()
+
+    # Janela em dias corridos, terminando agora.
+    dias = PERIODOS_EM_DIAS.get(periodo)
+    if dias:
+        inicio_do_dia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+        ini = inicio_do_dia - timedelta(days=dias - 1)
+        return ini, agora + timedelta(seconds=1), f'Últimos {dias} dias'
+
+    if periodo == 'dia':
+        ini = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+        return ini, ini + timedelta(days=1), 'Hoje'
+    if periodo == 'ano':
+        ini = agora.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        return ini, ini.replace(year=ini.year + 1), f'{agora.year}'
+    if periodo == 'mes':
+        ini = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        fim = ini.replace(year=ini.year + 1, month=1) if ini.month == 12 else ini.replace(month=ini.month + 1)
+        return ini, fim, ini.strftime('%m/%Y')
+
+    # Desconhecido: cai no padrão de 30 dias.
+    inicio_do_dia = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+    return inicio_do_dia - timedelta(days=29), agora + timedelta(seconds=1), 'Últimos 30 dias'
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def consultant_reports(request):
+    """
+    GET /api/reports/?period=dia|mes|ano
+
+    Retorna, em uma só resposta:
+      • resumo      — entradas, saídas e lucro do período
+      • fluxo       — linhas de entrada/saída para a tabela
+      • evolucao    — série para o gráfico (por dia, mês ou mês do ano)
+      • top_produtos— 10 mais vendidos no período
+      • saidas      — saídas detalhadas com a descrição da consultora
+      • acabando    — produtos com estoque baixo
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    bloqueio = _require_pro_feature(store, 'analytics')
+    if bloqueio:
+        return bloqueio
+
+    periodo, inicio, fim, rotulo = _intervalo_da_requisicao(request)
+
+    txs = (StockTransaction.objects
+           .filter(store=store, created_at__gte=inicio, created_at__lt=fim)
+           .select_related('product')
+           .order_by('-created_at'))
+
+    # ── Resumo ──
+    # Entrada de caixa = venda. Saída de caixa = compra de estoque.
+    # Presente, brinde, uso próprio e perda NÃO entram no caixa: não houve
+    # dinheiro trocando de mão. Eles aparecem na tabela de saídas de produto,
+    # que é outra coisa.
+    entradas = Decimal('0')
+    saidas_caixa = Decimal('0')
+    custo_vendido = Decimal('0')
+
+    for t in txs:
+        qtd = t.quantity or 0
+        if t.transaction_type == 'VENDA':
+            entradas += (t.unit_price or 0) * abs(qtd)
+            custo_vendido += (t.unit_cost or 0) * abs(qtd)
+        elif t.transaction_type == 'ENTRADA':
+            saidas_caixa += (t.unit_cost or 0) * qtd
+
+    lucro = entradas - custo_vendido
+
+    # ── Tabela de fluxo de caixa ──
+    fluxo = []
+    for t in txs:
+        qtd = abs(t.quantity or 0)
+        if t.transaction_type == 'VENDA':
+            valor = float((t.unit_price or 0) * qtd)
+            tipo, natureza = 'Venda', 'entrada'
+        elif t.transaction_type == 'ENTRADA':
+            valor = float((t.unit_cost or 0) * qtd)
+            tipo, natureza = 'Compra de estoque', 'saida'
+        else:
+            continue  # só movimento de dinheiro nesta tabela
+        fluxo.append({
+            'id': t.id,
+            'data': t.created_at.date(),
+            'tipo': tipo,
+            'natureza': natureza,
+            'produto': t.product.name if t.product else '—',
+            'quantidade': qtd,
+            'valor': valor,
+            'descricao': t.description or '',
+        })
+
+    # ── Evolução (gráfico) ──
+    # dia  → por hora não ajuda; usamos os últimos 7 dias para dar contexto
+    # mes  → dia a dia do mês
+    # ano  → mês a mês
+    evolucao = []
+    if periodo == 'ano':
+        for m in range(1, 13):
+            ini_m = inicio.replace(month=m)
+            fim_m = fim if m == 12 else inicio.replace(month=m + 1)
+            if ini_m > timezone.localtime():
+                break
+            ent = sai = Decimal('0')
+            for t in txs:
+                if ini_m <= t.created_at < fim_m:
+                    q = abs(t.quantity or 0)
+                    if t.transaction_type == 'VENDA':
+                        ent += (t.unit_price or 0) * q
+                    elif t.transaction_type == 'ENTRADA':
+                        sai += (t.unit_cost or 0) * q
+            evolucao.append({
+                'rotulo': ini_m.strftime('%b'),
+                'entradas': float(ent),
+                'saidas': float(sai),
+                'saldo': float(ent - sai),
+            })
+    else:
+        dias = 7 if periodo == 'dia' else max(1, (fim - inicio).days)
+        base = (timezone.localtime().replace(hour=0, minute=0, second=0, microsecond=0)
+                - timedelta(days=6)) if periodo == 'dia' else inicio
+        # Para 'dia' precisamos olhar além do intervalo do resumo.
+        origem = (StockTransaction.objects
+                  .filter(store=store, created_at__gte=base)
+                  .select_related('product')) if periodo == 'dia' else txs
+
+        # Agrupamento conforme o tamanho da janela: um gráfico com 90 barras
+        # diárias (ou 700, num intervalo personalizado longo) fica ilegível
+        # na tela de um celular.
+        if dias > 120:
+            passo = 30      # blocos de ~1 mês
+        elif dias > 45:
+            passo = 7       # blocos de 1 semana
+        else:
+            passo = 1       # dia a dia
+        agora_local = timezone.localtime()
+
+        d = 0
+        while d < dias:
+            ini_d = base + timedelta(days=d)
+            fim_d = min(ini_d + timedelta(days=passo), base + timedelta(days=dias))
+            if ini_d > agora_local:
+                break
+            ent = sai = Decimal('0')
+            for t in origem:
+                if ini_d <= t.created_at < fim_d:
+                    q = abs(t.quantity or 0)
+                    if t.transaction_type == 'VENDA':
+                        ent += (t.unit_price or 0) * q
+                    elif t.transaction_type == 'ENTRADA':
+                        sai += (t.unit_cost or 0) * q
+            evolucao.append({
+                'rotulo': ini_d.strftime('%d/%m'),
+                'entradas': float(ent),
+                'saidas': float(sai),
+                'saldo': float(ent - sai),
+            })
+            d += passo
+
+    # ── Top 10 mais vendidos ──
+    por_produto = {}
+    for t in txs:
+        if t.transaction_type != 'VENDA':
+            continue
+        nome = t.product.name if t.product else '—'
+        q = abs(t.quantity or 0)
+        d = por_produto.setdefault(nome, {'produto': nome, 'quantidade': 0, 'receita': Decimal('0')})
+        d['quantidade'] += q
+        d['receita'] += (t.unit_price or 0) * q
+    top = sorted(por_produto.values(), key=lambda x: x['quantidade'], reverse=True)[:10]
+    top_produtos = [
+        {'produto': i['produto'], 'quantidade': i['quantidade'], 'receita': float(i['receita'])}
+        for i in top
+    ]
+
+    # ── Saídas de produto (com a descrição da consultora) ──
+    # Aqui entram TODAS as saídas — venda, presente, brinde, uso próprio,
+    # perda — porque a pergunta é "para onde foi meu produto".
+    rotulos_tipo = {
+        'VENDA': 'Venda', 'PRESENTE': 'Presente', 'BRINDE': 'Brinde',
+        'USO_PROPRIO': 'Uso próprio', 'PERDA': 'Perda', 'AJUSTE': 'Ajuste',
+    }
+    saidas = []
+    for t in txs:
+        if t.transaction_type == 'ENTRADA' or (t.quantity or 0) >= 0:
+            continue
+        q = abs(t.quantity or 0)
+        # Presente/uso próprio não têm receita: mostramos o custo, que é o
+        # valor que saiu do bolso dela.
+        unit = (t.unit_price if t.transaction_type == 'VENDA' else t.unit_cost) or 0
+        saidas.append({
+            'id': t.id,
+            'data': t.created_at.date(),
+            'produto': t.product.name if t.product else '—',
+            'tipo': rotulos_tipo.get(t.transaction_type, t.transaction_type),
+            'valor_unitario': float(unit),
+            'quantidade': q,
+            'total': float(unit * q),
+            'descricao': t.description or '',
+        })
+
+    # ── Produtos acabando ──
+    acabando = [
+        {
+            'id': it.id,
+            'produto': it.product.name if it.product else '—',
+            'estoque': it.total_quantity or 0,
+            'minimo': it.min_quantity if it.min_quantity is not None else 0,
+        }
+        for it in InventoryItem.objects.filter(store=store).select_related('product')
+        if (it.total_quantity or 0) <= (it.min_quantity if it.min_quantity is not None else 0)
+    ][:20]
+
+    return Response({
+        'periodo': periodo,
+        'rotulo': rotulo,
+        'resumo': {
+            'entradas': float(entradas),
+            'saidas': float(saidas_caixa),
+            'lucro': float(lucro),
+            'custo_vendido': float(custo_vendido),
+        },
+        'fluxo': fluxo[:100],
+        'evolucao': evolucao,
+        'top_produtos': top_produtos,
+        'saidas': saidas[:100],
+        'acabando': acabando,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_plans_view(request):
+    """
+    GET /api/plans/ → planos visíveis com preços reais (público).
+
+    Estava declarada dentro de core/urls.py, o que é lugar de roteamento e
+    não de view. Trazida para cá junto com a limpeza das URLs duplicadas.
+    """
+    plans = PlanConfig.objects.filter(is_visible=True).order_by('sort_order')
+    return Response(PlanConfigSerializer(plans, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def movements_report_csv(request):
+    """
+    GET /api/movements/report/?period=dia|mes|ano|tudo
+
+    Relatório de movimentação de estoque em CSV — entradas, saídas, valores,
+    lucro e a descrição preenchida pela consultora.
+
+    CSV (e não PDF) porque abre no Excel e no Google Sheets sem depender de
+    biblioteca extra no servidor.
+    """
+    import csv
+    from django.http import HttpResponse
+
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    periodo = request.GET.get('period', 'tudo')
+    qs = StockTransaction.objects.filter(store=store).select_related('product')
+    if periodo != 'tudo':
+        periodo, inicio, fim, rotulo = _intervalo_da_requisicao(request)
+        qs = qs.filter(created_at__gte=inicio, created_at__lt=fim)
+    else:
+        rotulo = 'completo'
+    qs = qs.order_by('-created_at')
+
+    agora = timezone.localtime()
+    resp = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    resp['Content-Disposition'] = (
+        f'attachment; filename="movimentacoes-{periodo}-{agora:%Y%m%d}.csv"'
+    )
+    w = csv.writer(resp, delimiter=';')  # ; abre direto no Excel em pt-BR
+
+    rotulos = {
+        'ENTRADA': 'Entrada de estoque', 'VENDA': 'Venda', 'PRESENTE': 'Presente',
+        'BRINDE': 'Brinde', 'USO_PROPRIO': 'Uso próprio', 'PERDA': 'Perda',
+        'AJUSTE': 'Ajuste',
+    }
+    fmt = lambda v: f'{v:.2f}'.replace('.', ',')
+
+    w.writerow([f'Movimentações de estoque — {rotulo}'])
+    w.writerow(['Loja', store.name])
+    w.writerow(['Gerado em', agora.strftime('%d/%m/%Y %H:%M')])
+    w.writerow([])
+    w.writerow(['Data', 'Tipo', 'Produto', 'Quantidade', 'Valor unitário',
+                'Total', 'Lucro', 'Descrição'])
+
+    tot_ent = tot_sai = tot_lucro = Decimal('0')
+    for t in qs:
+        qtd = abs(t.quantity or 0)
+        eh_venda = t.transaction_type == 'VENDA'
+        unit = (t.unit_price if eh_venda else t.unit_cost) or Decimal('0')
+        total = unit * qtd
+        lucro = ((t.unit_price or 0) - (t.unit_cost or 0)) * qtd if eh_venda else None
+
+        if t.transaction_type == 'ENTRADA':
+            tot_sai += total
+        elif eh_venda:
+            tot_ent += total
+            tot_lucro += lucro or 0
+
+        w.writerow([
+            t.created_at.strftime('%d/%m/%Y %H:%M'),
+            rotulos.get(t.transaction_type, t.transaction_type),
+            t.product.name if t.product else '—',
+            qtd,
+            fmt(unit),
+            fmt(total),
+            fmt(lucro) if lucro is not None else '',
+            t.description or '',
+        ])
+
+    w.writerow([])
+    w.writerow(['RESUMO'])
+    w.writerow(['Total de vendas (entrou)', fmt(tot_ent)])
+    w.writerow(['Total de compras (saiu)', fmt(tot_sai)])
+    w.writerow(['Lucro das vendas', fmt(tot_lucro)])
+    w.writerow([])
+    w.writerow(['Observação: valores calculados a partir das movimentações '
+                'registradas no sistema.'])
+    return resp
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def stock_report_csv(request):
+    """
+    GET /api/stock/report/
+
+    Relatório do estoque ATUAL (foto do momento) em CSV: o que tem, quanto
+    tem, quanto custou, quanto vale e o que está para vencer.
+
+    Diferente de /api/movements/report/, que é o histórico do que entrou e
+    saiu. Aqui a pergunta é "o que eu tenho hoje".
+    """
+    import csv
+    from django.http import HttpResponse
+
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    agora = timezone.localtime()
+    hoje = agora.date()
+
+    itens = (InventoryItem.objects
+             .filter(store=store)
+             .select_related('product')
+             .prefetch_related('batches')
+             .order_by('product__name'))
+
+    resp = HttpResponse(content_type='text/csv; charset=utf-8-sig')
+    resp['Content-Disposition'] = f'attachment; filename="estoque-{agora:%Y%m%d}.csv"'
+    w = csv.writer(resp, delimiter=';')  # ; abre direto no Excel em pt-BR
+    fmt = lambda v: f'{v:.2f}'.replace('.', ',')
+
+    w.writerow([f'Relatório de estoque — {agora:%d/%m/%Y %H:%M}'])
+    w.writerow(['Loja', store.name])
+    w.writerow([])
+    w.writerow([
+        'Produto', 'Marca', 'Quantidade', 'Estoque mínimo', 'Custo unitário',
+        'Preço de venda', 'Total investido', 'Valor de venda',
+        'Lucro previsto', 'Validade mais próxima', 'Situação',
+    ])
+
+    tot_investido = tot_potencial = Decimal('0')
+    n_baixo = n_vencendo = n_vencido = 0
+
+    for it in itens:
+        qtd = it.total_quantity or 0
+        minimo = it.min_quantity if it.min_quantity is not None else 0
+        custo = it.cost_price or Decimal('0')
+        venda = it.sale_price or Decimal('0')
+        investido = custo * qtd
+        potencial = venda * qtd
+
+        tot_investido += investido
+        tot_potencial += potencial
+
+        # Validade mais próxima entre os lotes com data
+        datas = [b.expiration_date for b in it.batches.all() if b.expiration_date]
+        proxima = min(datas) if datas else None
+
+        situacao = []
+        if qtd == 0:
+            situacao.append('Sem estoque')
+            n_baixo += 1
+        elif qtd <= minimo:
+            situacao.append('Estoque baixo')
+            n_baixo += 1
+        if proxima:
+            dias = (proxima - hoje).days
+            if dias < 0:
+                situacao.append('Vencido')
+                n_vencido += 1
+            elif dias <= 30:
+                situacao.append(f'Vence em {dias} dias')
+                n_vencendo += 1
+
+        w.writerow([
+            it.product.name if it.product else '—',
+            getattr(it.product, 'brand', '') or '',
+            qtd,
+            minimo,
+            fmt(custo),
+            fmt(venda),
+            fmt(investido),
+            fmt(potencial),
+            fmt(potencial - investido),
+            proxima.strftime('%d/%m/%Y') if proxima else '',
+            ' / '.join(situacao) if situacao else 'OK',
+        ])
+
+    w.writerow([])
+    w.writerow(['RESUMO'])
+    w.writerow(['Produtos cadastrados', itens.count()])
+    w.writerow(['Total investido no estoque', fmt(tot_investido)])
+    w.writerow(['Valor se vender tudo', fmt(tot_potencial)])
+    w.writerow(['Lucro previsto', fmt(tot_potencial - tot_investido)])
+    w.writerow(['Produtos acabando ou zerados', n_baixo])
+    w.writerow(['Lotes vencendo em 30 dias', n_vencendo])
+    w.writerow(['Lotes vencidos', n_vencido])
+    w.writerow([])
+    w.writerow(['Observação: "Valor se vender tudo" e "Lucro previsto" são '
+                'projeções sobre o estoque parado, não dinheiro recebido.'])
+    return resp

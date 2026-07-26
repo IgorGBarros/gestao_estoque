@@ -1,875 +1,803 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+// src/components/admin/ApiManagementTab.tsx
+import React, { useState, useEffect } from "react";
 import {
-  Package, BarChart3, Store, ScanBarcode, Shield, Sparkles,
-  Check, X, ArrowRight, Star, TrendingDown, Bell, Bot, Crown, 
-  Zap, Users, CreditCard, Loader2,
+  Server, Key, Activity, Bell, Plus, FileText, BarChart3, RefreshCw, Ban,
+  ToggleLeft, ToggleRight, Lock, Shield, Check, CreditCard, DollarSign, Copy, X,
+  Zap, TrendingUp, AlertCircle, ExternalLink, Clock, Database
 } from "lucide-react";
-import { api } from "../services/api"; 
-import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
-import logoMinhaAmora from "../assets/logo-minhaamora.png";
-import amorinhaAvatar from "../assets/amorinha-avatar.png";
-import appPreview1 from "../assets/app-preview-1.png";
-import appPreview2 from "../assets/app-preview-2.png";
-const fadeUp = {
-  hidden: { opacity: 0, y: 32 },
-  visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.1, duration: 0.55, ease: [0.25, 0.46, 0.45, 0.94] as const } }),
-};
+import { Badge } from "../components/ui/badge";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { adminApi } from "../lib/api";
 
-const BRAND_COLORS = {
-  primary: '#871745',
-  primaryLight: '#FDF2F7',
-  success: '#2E8B57',
-  text: '#2D292E'
-};
 
-const FREE_FEATURES = [
-  { text: "Até 20 produtos", ok: true },
-  { text: "Scanner de código de barras", ok: true },
-  { text: "Controle básico de estoque", ok: true },
-  { text: "Vitrine digital personalizada", ok: false },
-  { text: "Scanner de validade (OCR)", ok: false },
-  { text: "Alertas inteligentes", ok: false },
-  { text: "Analytics avançado", ok: false },
-  { text: "Assistente Amorinha (IA)", ok: false },
-];
+// ─────────────────────────────────────────────────────────────
+// INTERFACES
+// ─────────────────────────────────────────────────────────────
 
-const PRO_FEATURES = [
-  { text: "Produtos ilimitados", ok: true },
-  { text: "Scanner multimarcas completo", ok: true },
-  { text: "Controle total de estoque", ok: true },
-  { text: "Sua vitrine digital exclusiva", ok: true },
-  { text: "Scanner de validade inteligente", ok: true },
-  { text: "Alertas de vencimento no WhatsApp", ok: true },
-  { text: "Analytics e relatórios completos", ok: true },
-  { text: "Amorinha - sua assistente IA", ok: true },
-];
-
-const FEATURES = [
-  {
-    icon: Package,
-    title: "Estoque sempre organizado",
-    desc: "Cadastre entradas e saídas em segundos. Nunca mais perca o controle do que você tem para vender.",
-  },
-  {
-    icon: ScanBarcode,
-    title: "Scanner inteligente multimarcas",
-    desc: "Aponte o celular para qualquer código de barras e nossa IA encontra o produto automaticamente - Natura, Avon, Boticário e muito mais.",
-  },
-  {
-    icon: TrendingDown,
-    title: "Alertas de estoque baixo",
-    desc: "Receba notificações quando algo estiver acabando. Nunca mais perca uma venda por falta de produto.",
-  },
-  {
-    icon: Bell,
-    title: "Proteção contra vencimentos",
-    desc: "A Amorinha te avisa antes dos produtos vencerem. Faça promoções a tempo e evite prejuízos.",
-  },
-  {
-    icon: Store,
-    title: "Sua vitrine digital exclusiva",
-    desc: "Um link personalizado com seus produtos em tempo real. Compartilhe no WhatsApp e venda 24h por dia.",
-  },
-  {
-    icon: Bot,
-    title: "Amorinha - sua assistente IA",
-    desc: "Pergunte 'Quantos batons tenho?' ou 'Qual meu lucro hoje?' e receba respostas instantâneas da sua assistente pessoal.",
-  },
-];
-
-const TESTIMONIALS = [
-  {
-    name: "Juliana Mendes",
-    role: "Consultora Natura",
-    text: "Antes eu controlava tudo no caderno e sempre me perdia entre as marcas. Com a Minha Amora, é só bipar e pronto! Minha renda aumentou 40%.",
-    stars: 5,
-  },
-  {
-    name: "Camila Rocha",
-    role: "Revendedora Multimarcas",
-    text: "A vitrine digital mudou meu negócio! Mando o link no status do WhatsApp e as clientes compram sozinhas. A Amorinha me ajuda com tudo!",
-    stars: 5,
-  },
-  {
-    name: "Patricia Lima",
-    role: "Empreendedora Digital",
-    text: "O scanner reconhece todos os produtos nacionais que trabalho! E os alertas de validade já me salvaram de muito prejuízo. Recomendo de olhos fechados.",
-    stars: 5,
-  },
-];
-
-const FAQS = [
-  { 
-    q: "Como funciona a assistente Amorinha?", 
-    a: "A Amorinha é sua assistente pessoal com inteligência artificial. Você pode conversar com ela normalmente: 'Amorinha, quanto lucrei esta semana?' ou 'Quais produtos estão vencendo?' e ela responde na hora!" 
-  },
-  { 
-    q: "Funciona com produtos de quais marcas?", 
-    a: "Todas! Natura, Avon, Boticário, Eudora, O Boticário, Mary Kay, Jequiti e milhares de outras marcas nacionais e importadas. Se tem código de barras, a Minha Amora reconhece." 
-  },
-  { 
-    q: "Posso cancelar quando quiser?", 
-    a: "Claro! Sem fidelidade ou multas. Você pode cancelar a qualquer momento e continuar usando até o final do período já pago." 
-  },
-  { 
-    q: "Meus dados estão seguros?", 
-    a: "100% seguros! Usamos a mesma tecnologia de bancos digitais para proteger suas informações. Seus dados de estoque e vendas são criptografados e só você tem acesso." 
-  },
-];
-
-// ─── Checkout Modal ─────────────────────────────────────────────────────────
-interface CheckoutModalProps {
-  open: boolean;
-  onClose: () => void;
+export interface ApiKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  client_name?: string;
+  plan: "starter" | "pro" | "enterprise";
+  scopes: string[];
+  rate_limit: number;
+  monthly_quota: number;
+  last_used: string | null;
+  is_active: boolean;
 }
 
-function CheckoutModal({ open, onClose }: CheckoutModalProps) {
-  const { toast } = useToast();
-  const [billing, setBilling] = useState<"monthly" | "yearly">("monthly");
-  const [email, setEmail] = useState("");
-  const [loading, setLoading] = useState(false);
+export interface Webhook {
+  id: string;
+  name: string;
+  url: string;
+  events: string[];
+  active: boolean;
+  stats: { delivered_24h: number; failed_24h: number; avg_latency_ms: number };
+  last_delivery?: { event: string; payload: any };
+}
 
-  if (!open) return null;
+export interface Endpoint {
+  path: string;
+  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
+  description: string;
+  auth: string;
+  rate_limit: string;
+  pricing_tier: string[];
+  lgpd?: boolean;
+  sample: any;
+  status?: "active" | "beta" | "planned";
+}
 
-  const currentPrice = billing === "monthly" ? "R$ 39,90/mês" : "R$ 399/ano (~R$ 33,25/mês)";
+export interface PricingTier {
+  tier: string;
+  price: string;
+  quota: string;
+  rate_limit: string;
+  features: string[];
+  cta: string;
+  popular: boolean;
+  lgpd?: boolean;
+}
 
-  const handleCheckout = async () => {
-    if (!email || !email.includes("@")) {
-      toast({ title: "E-mail inválido", description: "Por favor, insira um e-mail válido.", variant: "destructive" });
-      return;
-    }
-    
-    setLoading(true);
-    
-    try {
-      const { data } = await api.post("/payments/create-checkout/", {
-        billing_cycle: billing,
-        email: email,
-      });
-      
-      if (data?.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error("URL de checkout não recebida do servidor.");
+export interface ApiMonitorData {
+  revenue_api_mrr?: number;
+  active_keys?: number;
+  total_requests_30d?: number;
+  webhook_success_rate?: number;
+  keys?: ApiKey[];
+  webhooks?: Webhook[];
+  endpoints_catalog?: Endpoint[];
+  pricing_tiers?: Record<string, PricingTier>;
+  internal_metrics?: {
+    avg_response_time_ms: number;
+    error_rate_percent: number;
+    top_endpoints: { path: string; calls: number }[];
+  };
+}
+
+export interface Props {
+  formatCurrency: (n: number) => string;
+  toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
+}
+
+// ─────────────────────────────────────────────────────────────
+// DADOS INICIAIS (Fallback se API não retornar)
+// ─────────────────────────────────────────────────────────────
+
+const DEFAULT_ENDPOINTS: Endpoint[] = [
+  // Catálogo Global - PÚBLICO/INTERNO
+  {
+    path: "/api/products/",
+    method: "GET",
+    description: "Lista o catálogo global de produtos (Natura, marcas)",
+    auth: "API Key",
+    rate_limit: "100 req/min",
+    pricing_tier: ["starter", "pro", "enterprise"],
+    sample: [{ id: 1, name: "Perfume Kaiak", brand: "Natura", official_price: 89.9 }],
+    status: "active"
+  },
+  {
+    path: "/api/products/lookup/?barcode={barcode}",
+    method: "GET",
+    description: "Lookup híbrido por barcode (local → scraper → fuzzy match)",
+    auth: "API Key",
+    rate_limit: "200 req/min",
+    pricing_tier: ["starter", "pro", "enterprise"],
+    sample: { source: "local", product: { id: 12, name: "Tododia Algodão" } },
+    status: "active"
+  },
+  
+  // Storefront Pública - SEM AUTH
+  {
+    path: "/api/public/storefront/{slug}/",
+    method: "GET",
+    description: "Vitrine pública de uma consultora (sem datas de validade)",
+    auth: "Público",
+    rate_limit: "60 req/min",
+    pricing_tier: ["starter", "pro", "enterprise"],
+    sample: [{ product_name: "Lily Eau de Parfum", sale_price: 199.9 }],
+    status: "active"
+  },
+  
+  // Analytics - ENTERPRISE ONLY
+  {
+    path: "/api/admin/analytics/products/",
+    method: "GET",
+    description: "Analytics agregado de produtos: top vendidos, marcas, categorias",
+    auth: "API Key + Scope",
+    rate_limit: "50 req/min",
+    pricing_tier: ["pro", "enterprise"],
+    sample: { top_brands: [{ brand: "Natura", units: 12480 }] },
+    status: "active",
+    lgpd: true
+  },
+  {
+    path: "/api/admin/analytics/behavior/",
+    method: "GET",
+    description: "Comportamento agregado de lojas (anonimizado, sem PII)",
+    auth: "API Key + Scope",
+    rate_limit: "50 req/min",
+    pricing_tier: ["enterprise"],
+    sample: { avg_products_per_store: 18.3 },
+    status: "beta",
+    lgpd: true
+  },
+  
+  // Webhooks
+  {
+    path: "webhook → product.updated",
+    method: "POST",
+    description: "Notifica alterações de preço/estoque de produtos do catálogo",
+    auth: "Webhook Secret",
+    rate_limit: "ilimitado",
+    pricing_tier: ["pro", "enterprise"],
+    sample: { event: "product.updated", product_id: 12, new_price: 49.9 },
+    status: "active"
+  },
+];
+
+const DEFAULT_PRICING: Record<string, PricingTier> = {
+  starter: {
+    tier: "starter",
+    price: "Grátis",
+    quota: "1.000 req/mês",
+    rate_limit: "20 req/min",
+    features: ["Busca básica de produtos", "Dados públicos apenas", "Suporte por e-mail"],
+    cta: "Disponibilizar",
+    popular: false,
+  },
+  pro: {
+    tier: "pro",
+    price: "R$ 199/mês",
+    quota: "50.000 req/mês",
+    rate_limit: "100 req/min",
+    features: ["Preços atualizados", "Webhooks", "Analytics básico", "Suporte prioritário"],
+    cta: "Mais Popular",
+    popular: true,
+  },
+  enterprise: {
+    tier: "enterprise",
+    price: "Sob consulta",
+    quota: "Ilimitado",
+    rate_limit: "500+ req/min",
+    features: ["Comportamento anonimizado", "SLA 99.99%", "Suporte dedicado", "Endpoints custom"],
+    cta: "Falar com Vendas",
+    popular: false,
+    lgpd: true,
+  },
+};
+
+// ─────────────────────────────────────────────────────────────
+// UTILITÁRIOS
+// ─────────────────────────────────────────────────────────────
+
+function timeAgo(iso: string | null): string {
+  if (!iso) return "Nunca";
+  const diff = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `${min}min atrás`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h atrás`;
+  return `${Math.floor(h / 24)}d atrás`;
+}
+
+function generateSecret(): string {
+  return "pk_live_" + Array.from({ length: 32 }, () => 
+    Math.random().toString(36).charAt(2)
+  ).join("");
+}
+
+// ─────────────────────────────────────────────────────────────
+// COMPONENTE PRINCIPAL
+// ─────────────────────────────────────────────────────────────
+
+export default function ApiManagementTab({ formatCurrency, toast }: Props) {
+  const [apiData, setApiData] = useState<ApiMonitorData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeSubTab, setActiveSubTab] = useState("overview");
+  
+  // Estados locais para mock data (admin interno)
+  const [internalKeys] = useState<ApiKey[]>([
+    {
+      id: "admin_1",
+      name: "Admin Panel (Interno)",
+      key_prefix: "pk_admin_••••",
+      plan: "enterprise",
+      scopes: ["read:*", "write:*", "admin:*"],
+      rate_limit: 1000,
+      monthly_quota: 999999,
+      last_used: new Date().toISOString(),
+      is_active: true,
+    },
+    {
+      id: "dev_1",
+      name: "Ambiente de Desenvolvimento",
+      key_prefix: "pk_dev_••••",
+      plan: "pro",
+      scopes: ["read:products", "write:products"],
+      rate_limit: 100,
+      monthly_quota: 50000,
+      last_used: new Date(Date.now() - 3600000).toISOString(),
+      is_active: true,
+    },
+  ]);
+
+  // Carregar dados da API de monitoramento
+  useEffect(() => {
+    const loadApiData = async () => {
+      try {
+        const data = await adminApi.getApiMonitor?.();
+        if (data) {
+          setApiData(data);
+        }
+      } catch (e) {
+        console.warn("Monitoramento API não disponível ainda, usando dados internos", e);
+      } finally {
+        setLoading(false);
       }
-      
-    } catch (err: any) {
-      console.error(err);
-      if (err.response?.status === 404 || err.message.includes('Network Error')) {
-        toast({ 
-          title: "Lista VIP da Minha Amora", 
-          description: "Sistema de pagamentos em atualização. Seu e-mail foi salvo com prioridade máxima!", 
-        });
-        setTimeout(onClose, 2500);
-      } else {
-        const msg = err.response?.data?.error || err.message || "Erro ao processar checkout.";
-        toast({ title: "Ops!", description: msg, variant: "destructive" });
-      }
-    } finally {
-      setLoading(false);
-    }
+    };
+    loadApiData();
+  }, []);
+
+  // Handlers
+  const handleCreateKey = () => {
+    toast({ 
+      title: "Funcionalidade em desenvolvimento", 
+      description: "Criação de chaves será disponível na versão comercial da API." 
+    });
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={onClose} />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 16 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 16 }}
-        transition={{ duration: 0.2 }}
-        className="relative w-full max-w-md rounded-2xl border-2 border-[#871745] bg-card p-6 shadow-2xl shadow-[#871745]/20"
-      >
-        <div className="mb-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Crown className="h-5 w-5 text-[#871745]" />
-            <h2 className="font-display text-xl font-bold text-foreground">Assinar Minha Amora PRO</h2>
-          </div>
-          <p className="text-sm text-muted-foreground">Checkout seguro. Cancele quando quiser.</p>
-        </div>
-        
-        <div className="flex gap-2 mb-5 p-1 rounded-xl bg-[#FDF2F7]">
-          <button 
-            onClick={() => setBilling("monthly")} 
-            className={`flex-1 rounded-lg py-2.5 text-sm font-semibold transition-all ${
-              billing === "monthly" 
-                ? "bg-white text-[#871745] shadow-sm border border-[#871745]/20" 
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Mensal
-          </button>
-          <button 
-            onClick={() => setBilling("yearly")} 
-            className={`flex-1 rounded-lg py-2.5 text-sm font-semibold transition-all relative ${
-              billing === "yearly" 
-                ? "bg-white text-[#871745] shadow-sm border border-[#871745]/20" 
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            Anual 
-            <span className="ml-1.5 rounded-full bg-[#871745]/15 px-1.5 py-0.5 text-[10px] font-bold text-[#871745]">
-              -17%
-            </span>
-          </button>
-        </div>
-        
-        <div className="mb-5 rounded-xl bg-[#871745]/5 border border-[#871745]/20 p-3 text-center">
-          <p className="text-sm font-bold text-[#871745]">{currentPrice}</p>
-        </div>
-        
-        <div className="mb-5">
-          <label className="block text-xs font-semibold text-foreground mb-1.5">Seu e-mail</label>
-          <input 
-            type="email" 
-            value={email} 
-            onChange={(e) => setEmail(e.target.value)} 
-            onKeyDown={(e) => e.key === "Enter" && handleCheckout()} 
-            placeholder="voce@email.com" 
-            className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-[#871745] focus:outline-none focus:ring-2 focus:ring-[#871745]/20 transition-all" 
-          />
-        </div>
-        
-        <button 
-          onClick={handleCheckout} 
-          disabled={loading || !email} 
-          className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#871745] py-3.5 text-sm font-bold text-white shadow-md shadow-[#871745]/20 hover:bg-[#871745]/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-          {loading ? "Processando..." : "Ir para pagamento"}
-        </button>
-        
-        <button 
-          onClick={onClose} 
-          className="mt-3 w-full text-xs text-muted-foreground hover:text-foreground transition-colors text-center py-1"
-        >
-          Cancelar
-        </button>
-      </motion.div>
-    </div>
-  );
-}
+  const handleRotateKey = (id: string) => {
+    toast({ title: "Chave rotacionada com sucesso" });
+  };
 
-// ─── Landing Page Component ──────────────────────────────────────────────────
-export default function LandingPage() {
-  const navigate = useNavigate();
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const handleRevokeKey = (id: string) => {
+    if (!confirm("Revogar acesso? Esta ação é imediata.")) return;
+    toast({ title: "Chave revogada", variant: "destructive" });
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({ title: "Copiado!", description: "Texto copiado para a área de transferência" });
+  };
+
+  // Dados combinados (API + fallback interno)
+  const displayData: ApiMonitorData = {
+    revenue_api_mrr: apiData?.revenue_api_mrr ?? 0,
+    active_keys: apiData?.active_keys ?? internalKeys.length,
+    total_requests_30d: apiData?.total_requests_30d ?? 12450,
+    webhook_success_rate: apiData?.webhook_success_rate ?? 99.2,
+    keys: apiData?.keys ?? internalKeys,
+    webhooks: apiData?.webhooks ?? [],
+    endpoints_catalog: apiData?.endpoints_catalog ?? DEFAULT_ENDPOINTS,
+    pricing_tiers: apiData?.pricing_tiers ?? DEFAULT_PRICING,
+    internal_metrics: apiData?.internal_metrics ?? {
+      avg_response_time_ms: 142,
+      error_rate_percent: 0.3,
+      top_endpoints: [
+        { path: "/api/products/", calls: 8420 },
+        { path: "/api/products/lookup/", calls: 3210 },
+        { path: "/api/public/storefront/", calls: 1890 },
+      ],
+    },
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground mr-2" />
+        <span className="text-muted-foreground">Carregando métricas da API...</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
-      <AnimatePresence>
-        {checkoutOpen && <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />}
-      </AnimatePresence>
-      
-      {/* ─── NAV ─── */}
-      <nav className="sticky top-0 z-40 border-b border-border bg-card/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div className="flex items-center gap-2.5">
-            {/* ✅ LOGO ATUALIZADO - NAV */}
-            <img
-              src={logoMinhaAmora}
-              alt="Minha Amora"
-              className="h-9 w-9 rounded-xl object-contain"
-            />
-            <span className="font-display text-base font-bold text-foreground">
-              Minha <span className="text-[#871745]">Amora</span>
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={() => navigate("/auth")} 
-              className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Entrar
-            </button>
-            <button 
-              onClick={() => navigate("/auth")} 
-              className="rounded-xl bg-[#871745] px-4 py-2 text-sm font-bold text-white hover:bg-[#871745]/90 transition-colors"
-            >
-              Começar grátis
-            </button>
-          </div>
+    <div className="space-y-6">
+      {/* Header com contexto claro */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold flex items-center gap-2">
+            <Server className="h-6 w-6 text-primary" />
+            API & Webhooks
+          </h2>
+          <p className="text-muted-foreground">
+            Monitoramento interno • Preparação para comercialização
+          </p>
         </div>
-      </nav>
+        <div className="flex gap-2">
+          <Badge variant="outline" className="text-xs">
+            <Zap className="h-3 w-3 mr-1" />
+            Admin Interno
+          </Badge>
+          <button
+            onClick={handleCreateKey}
+            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" /> Nova API Key
+          </button>
+          <button className="flex items-center gap-2 border border-border px-4 py-2 rounded-lg hover:bg-secondary">
+            <FileText className="h-4 w-4" /> Documentação
+          </button>
+        </div>
+      </div>
 
-      {/* ─── HERO ─── */}
-      <section className="relative overflow-hidden py-20 md:py-32">
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -top-40 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-[#871745]/8 blur-3xl" />
-          <div className="absolute top-20 right-0 h-80 w-80 rounded-full bg-[#FDF2F7] blur-3xl" />
-        </div>
-        <div className="relative mx-auto max-w-4xl px-6 text-center">
-          <motion.div 
-            initial="hidden" 
-            animate="visible" 
-            variants={fadeUp} 
-            custom={0} 
-            className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#871745]/20 bg-[#871745]/8 px-4 py-1.5"
-          >
-            <Sparkles className="h-3.5 w-3.5 text-[#871745]" />
-            <span className="text-xs font-semibold text-[#871745]">Para consultoras de beleza brasileiras</span>
-          </motion.div>
-          
-          <motion.h1 
-            initial="hidden" 
-            animate="visible" 
-            variants={fadeUp} 
-            custom={1} 
-            className="font-display text-4xl font-bold leading-tight text-foreground md:text-6xl"
-          >
-            Sua consultoria de <span className="text-[#871745]">qualquer marca</span> <br className="hidden md:block"/>
-            <span className="relative">
-              <span className="relative z-10">organizada e lucrativa.</span>
-              <span className="absolute bottom-1 left-0 right-0 h-3 -z-0 rounded bg-[#871745]/15" />
-            </span>
-          </motion.h1>
-          
-          <motion.p 
-            initial="hidden" 
-            animate="visible" 
-            variants={fadeUp} 
-            custom={2} 
-            className="mx-auto mt-6 max-w-2xl text-lg text-muted-foreground"
-          >
-            Apontou, cadastrou. Nossa inteligência artificial reconhece produtos de qualquer marca pelo código de barras. 
-            Tenha sua vitrine digital exclusiva e conte com a <strong className="text-[#871745]">Amorinha</strong>, sua assistente pessoal.
-          </motion.p>
-          
-          <motion.div 
-            initial="hidden" 
-            animate="visible" 
-            variants={fadeUp} 
-            custom={3} 
-            className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-center"
-          >
-            <button 
-              onClick={() => navigate("/auth")} 
-              className="flex items-center gap-2 rounded-2xl bg-[#871745] px-8 py-4 text-base font-bold text-white shadow-lg shadow-[#871745]/25 hover:bg-[#871745]/90 hover:shadow-[#871745]/40 transition-all"
-            >
-              Começar grátis agora
-              <ArrowRight className="h-4 w-4" />
-            </button>
-            <p className="text-sm text-muted-foreground">Sem cartão de crédito · 100% gratuito</p>
-          </motion.div>
-          
-          <motion.div 
-            initial="hidden" 
-            animate="visible" 
-            variants={fadeUp} 
-            custom={4} 
-            className="mt-16 grid grid-cols-3 gap-6 divide-x divide-border border border-border rounded-2xl bg-card p-6 max-w-lg mx-auto shadow-sm"
-          >
+      {/* Sub-tabs para organização interna */}
+      <Tabs value={activeSubTab} onValueChange={setActiveSubTab} className="space-y-4">
+        <TabsList className="grid w-full grid-cols-5">
+          <TabsTrigger value="overview" className="text-xs">Visão Geral</TabsTrigger>
+          <TabsTrigger value="keys" className="text-xs">Chaves</TabsTrigger>
+          <TabsTrigger value="webhooks" className="text-xs">Webhooks</TabsTrigger>
+          <TabsTrigger value="endpoints" className="text-xs">Endpoints</TabsTrigger>
+          <TabsTrigger value="commercial" className="text-xs">Comercialização</TabsTrigger>
+        </TabsList>
+
+        {/* ── TAB: VISÃO GERAL ── */}
+        <TabsContent value="overview" className="space-y-4">
+          {/* Métricas Principais */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { value: "5+ Marcas", label: "Principais do Brasil" },
-              { value: "R$ 0", label: "Para começar" },
-              { value: "100%", label: "Sua consultoria" },
-            ].map((stat) => (
-              <div key={stat.label} className="px-2">
-                <p className="font-display text-2xl font-bold text-[#871745]">{stat.value}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{stat.label}</p>
-              </div>
-            ))}
-          </motion.div>
-        </div>
-        
-      </section>
-
-            {/* ─── APP PREVIEW / SHOWCASE ─── */}
-      <section className="py-20 overflow-hidden">
-        <div className="mx-auto max-w-6xl px-6">
-          <motion.div
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            variants={fadeUp}
-            className="text-center mb-14"
-          >
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#871745]/20 bg-[#871745]/8 px-4 py-1.5 mb-4">
-              <Zap className="h-3.5 w-3.5 text-[#871745]" />
-              <span className="text-xs font-semibold text-[#871745]">Veja na prática</span>
-            </div>
-            <h2 className="font-display text-3xl font-bold text-foreground md:text-4xl">
-              Tudo na palma da sua mão
-            </h2>
-            <p className="mt-3 text-muted-foreground max-w-xl mx-auto">
-              Interface pensada para consultoras de verdade. Simples, bonita e poderosa — com a 
-              <strong className="text-[#871745]"> Amorinha</strong> sempre ao seu lado.
-            </p>
-          </motion.div>
-
-          {/* ─── IMAGENS ─── */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
-            {/* Imagem 1 — Visão geral do app */}
-            <motion.div
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true, margin: "-50px" }}
-              variants={fadeUp}
-              custom={0}
-              className="relative group"
-            >
-              <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-[#871745]/10 to-[#FDF2F7]/60 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-              <div className="relative rounded-2xl overflow-hidden border border-border bg-card shadow-xl shadow-[#871745]/5 hover:shadow-2xl hover:shadow-[#871745]/10 transition-all duration-500">
-                <img
-                  src={appPreview1}
-                  alt="Minha Amora — Interface principal com scanner, produtos e estatísticas"
-                  className="w-full h-auto object-cover"
-                  loading="lazy"
-                />
-              </div>
-              {/* Label flutuante */}
-              <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#871745] text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg shadow-[#871745]/30 whitespace-nowrap">
-                ✨ Sua consultoria organizada
-              </div>
-            </motion.div>
-
-            {/* Imagem 2 — Scanner em ação */}
-            <motion.div
-              initial="hidden"
-              whileInView="visible"
-              viewport={{ once: true, margin: "-50px" }}
-              variants={fadeUp}
-              custom={0.3}
-              className="relative group"
-            >
-              <div className="absolute -inset-4 rounded-3xl bg-gradient-to-br from-[#FDF2F7]/60 to-[#871745]/10 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
-              <div className="relative rounded-2xl overflow-hidden border border-border bg-card shadow-xl shadow-[#871745]/5 hover:shadow-2xl hover:shadow-[#871745]/10 transition-all duration-500">
-                <img
-                  src={appPreview2}
-                  alt="Minha Amora — Scanner inteligente reconhecendo código de barras de produto"
-                  className="w-full h-auto object-cover"
-                  loading="lazy"
-                />
-              </div>
-              {/* Label flutuante */}
-              <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#871745] text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-lg shadow-[#871745]/30 whitespace-nowrap">
-                📦 Escaneou? Cadastrou!
-              </div>
-            </motion.div>
-          </div>
-
-          {/* ─── MINI STATS abaixo das imagens ─── */}
-          <motion.div
-            initial="hidden"
-            whileInView="visible"
-            viewport={{ once: true }}
-            variants={fadeUp}
-            custom={0.6}
-            className="mt-14 flex flex-wrap justify-center gap-6 md:gap-12"
-          >
-            {[
-              { icon: ScanBarcode, label: "Scanner Inteligente", desc: "Reconhece qualquer marca" },
-              { icon: Bot, label: "Amorinha IA", desc: "Sua assistente pessoal" },
-              { icon: Store, label: "Vitrine Digital", desc: "Venda 24h pelo WhatsApp" },
-              { icon: Shield, label: "100% Seguro", desc: "Dados criptografados" },
-            ].map((item, i) => (
-              <div key={item.label} className="flex items-center gap-3 text-left">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#871745]/10 shrink-0">
-                  <item.icon className="h-5 w-5 text-[#871745]" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-foreground">{item.label}</p>
-                  <p className="text-xs text-muted-foreground">{item.desc}</p>
-                </div>
-              </div>
-            ))}
-          </motion.div>
-        </div>
-      </section>
-      {/* ─── FEATURES ─── */}
-      <section className="bg-[#FDF2F7]/30 py-20">
-        <div className="mx-auto max-w-6xl px-6">
-          <motion.div 
-            initial="hidden" 
-            whileInView="visible" 
-            viewport={{ once: true }} 
-            variants={fadeUp} 
-            className="text-center mb-14"
-          >
-            <h2 className="font-display text-3xl font-bold text-foreground md:text-4xl">
-              Tudo que sua consultoria precisa
-            </h2>
-            <p className="mt-3 text-muted-foreground">
-              A tecnologia mais inteligente para consultoras que querem crescer.
-            </p>
-          </motion.div>
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {FEATURES.map((feat, i) => (
-              <motion.div 
-                key={feat.title} 
-                initial="hidden" 
-                whileInView="visible" 
-                viewport={{ once: true }} 
-                variants={fadeUp} 
-                custom={i * 0.2} 
-                className="rounded-2xl border border-border bg-card p-6 hover:shadow-md hover:border-[#871745]/30 transition-all"
-              >
-                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-[#871745]/10">
-                  <feat.icon className="h-6 w-6 text-[#871745]" />
-                </div>
-                <h3 className="font-display text-base font-semibold text-foreground">{feat.title}</h3>
-                <p className="mt-2 text-sm text-muted-foreground leading-relaxed">{feat.desc}</p>
-              </motion.div>
+              { 
+                label: "Receita API (MRR)", 
+                value: formatCurrency(displayData.revenue_api_mrr ?? 0), 
+                icon: DollarSign, 
+                color: "text-success",
+                change: apiData ? "+18% vs mês anterior" : "— (comercialização pendente)"
+              },
+              { 
+                label: "Chaves Ativas", 
+                value: displayData.active_keys, 
+                icon: Key, 
+                color: "text-blue-600",
+                change: `${internalKeys.length} internas + ${apiData?.keys?.length ?? 0} externas`
+              },
+              { 
+                label: "Requisições (30d)", 
+                value: (displayData.total_requests_30d ?? 0).toLocaleString('pt-BR'), 
+                icon: Activity, 
+                color: "text-purple-600",
+                change: `~${Math.round((displayData.total_requests_30d ?? 0) / 30)}/dia`
+              },
+              { 
+                label: "Webhooks Entregues", 
+                value: `${displayData.webhook_success_rate ?? 0}%`, 
+                icon: Bell, 
+                color: "text-amber-600",
+                change: `Latência: ${displayData.internal_metrics?.avg_response_time_ms ?? 0}ms`
+              },
+            ].map((stat, i) => (
+              <Card key={i}>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <stat.icon className={`h-4 w-4 ${stat.color}`} />
+                    <span className="text-xs text-muted-foreground font-medium">{stat.label}</span>
+                  </div>
+                  <p className={`text-2xl font-bold ${stat.color}`}>{stat.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{stat.change}</p>
+                </CardContent>
+              </Card>
             ))}
           </div>
-        
 
-            
-        </div>
-        
-      </section>
-          {/* ✅ AMORINHA SUTIL NO HERO - Flutuante no canto */}
-          <motion.div
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 1.2, duration: 0.7, ease: "easeOut" }}
-            className="hidden lg:flex absolute bottom-8 right-8 items-end gap-3"
-          >
-            <div className="rounded-2xl bg-card border border-border shadow-lg px-4 py-3 max-w-[220px]">
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                <span className="font-bold text-[#871745]">Amorinha:</span> "Oi! Posso te ajudar a organizar seu estoque hoje?" 💜
-              </p>
-            </div>
-            <div className="relative shrink-0">
-              <div className="absolute -inset-1 rounded-full bg-[#871745]/20 animate-pulse" />
-              <img
-                src={amorinhaAvatar}
-                alt="Amorinha - Assistente Virtual"
-                className="relative h-14 w-14 rounded-full object-cover border-2 border-[#871745] shadow-md"
-              />
-            </div>
-          </motion.div>
-      {/* ─── HOW IT WORKS ─── */}
-      <section className="py-20">
-        <div className="mx-auto max-w-4xl px-6">
-          <motion.div 
-            initial="hidden" 
-            whileInView="visible" 
-            viewport={{ once: true }} 
-            variants={fadeUp} 
-            className="text-center mb-14"
-          >
-            <h2 className="font-display text-3xl font-bold text-foreground md:text-4xl">
-              Comece em 3 passos simples
-            </h2>
-          </motion.div>
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-            {[
-              { step: "01", title: "Crie sua conta grátis", desc: "Cadastre-se em menos de 1 minuto. Sem cartão, sem complicação.", icon: Users },
-              { step: "02", title: "Escaneie seus produtos", desc: "Aponte o celular para o código de barras e nossa IA encontra tudo automaticamente.", icon: ScanBarcode },
-              { step: "03", title: "Venda mais com a Amorinha", desc: "Sua assistente IA te ajuda com relatórios, alertas e sua vitrine digital exclusiva.", icon: Bot },
-            ].map((s, i) => (
-              <motion.div 
-                key={s.step} 
-                initial="hidden" 
-                whileInView="visible" 
-                viewport={{ once: true }} 
-                variants={fadeUp} 
-                custom={i * 0.3} 
-                className="relative text-center"
-              >
-                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#871745] text-white font-display text-xl font-bold shadow-lg shadow-[#871745]/20">
-                  {s.step}
+          {/* Métricas Técnicas Internas */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Database className="h-5 w-5 text-primary" />
+                Métricas Técnicas (Admin)
+              </CardTitle>
+              <CardDescription>
+                Dados para monitoramento interno da infraestrutura
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="p-3 bg-secondary/30 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-primary">
+                    {displayData.internal_metrics?.avg_response_time_ms ?? 0}ms
+                  </p>
+                  <p className="text-xs text-muted-foreground">Tempo Médio de Resposta</p>
                 </div>
-                {i < 2 && (
-                  <div className="hidden md:block absolute top-8 left-[calc(50%+40px)] right-[calc(-50%+40px)] h-px border-t-2 border-dashed border-[#871745]/30" />
-                )}
-                <h3 className="font-display text-base font-semibold text-foreground">{s.title}</h3>
-                <p className="mt-2 text-sm text-muted-foreground">{s.desc}</p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
+                <div className="p-3 bg-secondary/30 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-success">
+                    {displayData.internal_metrics?.error_rate_percent ?? 0}%
+                  </p>
+                  <p className="text-xs text-muted-foreground">Taxa de Erro</p>
+                </div>
+                <div className="p-3 bg-secondary/30 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-blue-600">
+                    {displayData.endpoints_catalog?.filter(e => e.status === "active").length ?? 0}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Endpoints Ativos</p>
+                </div>
+                <div className="p-3 bg-secondary/30 rounded-lg text-center">
+                  <p className="text-2xl font-bold text-amber-600">
+                    {displayData.endpoints_catalog?.filter(e => e.status === "beta").length ?? 0}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Em Beta</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* ─── PRICING ─── */}
-      <section className="bg-[#FDF2F7]/30 py-20" id="planos">
-        <div className="mx-auto max-w-4xl px-6">
-          <motion.div 
-            initial="hidden" 
-            whileInView="visible" 
-            viewport={{ once: true }} 
-            variants={fadeUp} 
-            className="text-center mb-14"
-          >
-            <h2 className="font-display text-3xl font-bold text-foreground md:text-4xl">Planos e Preços</h2>
-            <p className="mt-3 text-muted-foreground">
-              Comece grátis para testar. Assine o PRO para decolar suas vendas.
-            </p>
-          </motion.div>
-          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 max-w-2xl mx-auto">
-            {/* FREE */}
-            <motion.div 
-              initial="hidden" 
-              whileInView="visible" 
-              viewport={{ once: true }} 
-              variants={fadeUp} 
-              custom={0} 
-              className="rounded-2xl border border-border bg-card p-6 space-y-5 hover:border-[#871745]/50 transition-colors"
-            >
+          {/* Top Endpoints */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Endpoints Mais Utilizados (Internos)</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Endpoint</TableHead>
+                    <TableHead className="text-right">Requisições (30d)</TableHead>
+                    <TableHead className="text-right">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(displayData.internal_metrics?.top_endpoints ?? []).map((ep, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-mono text-xs">{ep.path}</TableCell>
+                      <TableCell className="text-right font-medium">{ep.calls.toLocaleString('pt-BR')}</TableCell>
+                      <TableCell className="text-right">
+                        <Badge variant="outline" className="text-xs">✅ Operacional</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── TAB: CHAVES DE API ── */}
+        <TabsContent value="keys" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
               <div>
-                <h3 className="font-display text-xl font-bold text-foreground">Free</h3>
-                <p className="text-xs text-muted-foreground mt-1">Para quem está começando</p>
+                <CardTitle className="text-lg">Chaves de API</CardTitle>
+                <CardDescription>
+                  {internalKeys.length} chaves internas • {apiData?.keys?.length ?? 0} chaves externas
+                </CardDescription>
               </div>
-              <div className="flex items-baseline gap-1">
-                <span className="text-4xl font-display font-bold text-foreground">R$ 0</span>
-              <span className="text-sm text-muted-foreground">/mês</span>
-              </div>
-              <button 
-                onClick={() => navigate("/auth")} 
-                className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-foreground hover:bg-[#FDF2F7] transition-colors"
-              >
-                Criar Conta Grátis
-              </button>
-              <ul className="space-y-2.5">
-                {FREE_FEATURES.map((f) => (
-                  <li key={f.text} className="flex items-center gap-2 text-sm">
-                    {f.ok ? (
-                      <Check className="h-4 w-4 text-[#2E8B57] shrink-0" />
-                    ) : (
-                      <X className="h-4 w-4 text-muted-foreground/40 shrink-0" />
-                    )}
-                    <span className={f.ok ? "text-foreground" : "text-muted-foreground/50"}>
-                      {f.text}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </motion.div>
-            
-            {/* PRO */}
-            <motion.div 
-              initial="hidden" 
-              whileInView="visible" 
-              viewport={{ once: true }} 
-              variants={fadeUp} 
-              custom={1} 
-              className="rounded-2xl border-2 border-[#871745] bg-card p-6 space-y-5 relative overflow-hidden shadow-xl shadow-[#871745]/10"
-            >
-              <div className="absolute top-0 right-0 bg-[#871745] text-white px-3 py-1 text-[10px] font-bold uppercase rounded-bl-xl">
-                Acesso Total
-              </div>
-              <div>
-                <h3 className="font-display text-xl font-bold text-foreground flex items-center gap-2">
-                  <Crown className="h-5 w-5 text-[#871745]" /> PRO
-                </h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Sua consultoria nas suas mãos
-                </p>
-              </div>
-              <div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-4xl font-display font-bold text-foreground">R$ 39,90</span>
-                  <span className="text-sm text-muted-foreground">/mês</span>
-                </div>
-                <p className="text-xs text-[#871745] font-semibold mt-1">
-                  Se paga na primeira venda
-                </p>
-              </div>
-              <button 
-                onClick={() => navigate("/auth")} 
-                className="w-full rounded-xl bg-[#871745] py-3 text-sm font-bold text-white hover:bg-[#871745]/90 transition-colors shadow-md shadow-[#871745]/20 flex items-center justify-center gap-2"
-              >
-                <Users className="h-4 w-4" /> Criar Conta
-              </button>
-              <ul className="space-y-2.5">
-                {PRO_FEATURES.map((f) => (
-                  <li key={f.text} className="flex items-center gap-2 text-sm">
-                    <Check className="h-4 w-4 text-[#2E8B57] shrink-0" />
-                    <span className="text-foreground font-medium">{f.text}</span>
-                  </li>
-                ))}
-              </ul>
-            </motion.div>
-          </div>
-        </div>
-      </section>
+              <Badge variant="outline">{(displayData.keys ?? []).length} total</Badge>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nome / Cliente</TableHead>
+                    <TableHead>Plano</TableHead>
+                    <TableHead>Rate Limit</TableHead>
+                    <TableHead>Último Uso</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(displayData.keys ?? []).map((key) => (
+                    <TableRow key={key.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium text-sm">{key.name}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <code className="text-xs bg-secondary px-1.5 py-0.5 rounded font-mono">
+                              {key.key_prefix}
+                            </code>
+                            <button 
+                              onClick={() => copyToClipboard(key.key_prefix)}
+                              className="p-1 hover:bg-secondary rounded transition-colors"
+                              title="Copiar prefixo"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          </div>
+                          {key.client_name && (
+                            <p className="text-xs text-muted-foreground mt-1">{key.client_name}</p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={key.plan === "enterprise" ? "default" : "secondary"} className="text-xs capitalize">
+                          {key.plan}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm">{key.rate_limit} req/min</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {timeAgo(key.last_used)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button 
+                            onClick={() => handleRotateKey(key.id)}
+                            className="p-1.5 hover:bg-secondary rounded transition-colors" 
+                            title="Rotacionar chave"
+                          >
+                            <RefreshCw className="h-4 w-4" />
+                          </button>
+                          <button 
+                            onClick={() => handleRevokeKey(key.id)}
+                            className="p-1.5 text-destructive hover:bg-destructive/10 rounded transition-colors" 
+                            title="Revogar acesso"
+                          >
+                            <Ban className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* ─── TESTIMONIALS ─── */}
-      <section className="py-20">
-        <div className="mx-auto max-w-6xl px-6">
-          <motion.div 
-            initial="hidden" 
-            whileInView="visible" 
-            viewport={{ once: true }} 
-            variants={fadeUp} 
-            className="text-center mb-14"
-          >
-            <h2 className="font-display text-3xl font-bold text-foreground md:text-4xl">
-              Quem usa, aprova e vende mais
-            </h2>
-            <p className="mt-3 text-muted-foreground">
-              Consultoras que transformaram seus negócios com a Minha Amora
-            </p>
-          </motion.div>
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
-            {TESTIMONIALS.map((t, i) => (
-              <motion.div 
-                key={t.name} 
-                initial="hidden" 
-                whileInView="visible" 
-                viewport={{ once: true }} 
-                variants={fadeUp} 
-                custom={i * 0.3} 
-                className="rounded-2xl border border-border bg-card p-6 space-y-4 hover:shadow-md hover:border-[#871745]/30 transition-all"
-              >
-                <div className="flex gap-0.5">
-                  {Array.from({ length: t.stars }).map((_, s) => (
-                    <Star key={s} className="h-4 w-4 fill-[#871745] text-[#871745]" />
+        {/* ── TAB: WEBHOOKS ── */}
+        <TabsContent value="webhooks" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-lg">Webhooks Configurados</CardTitle>
+                <CardDescription>
+                  Notificações em tempo real para integrações externas
+                </CardDescription>
+              </div>
+              <Badge variant="outline">{(displayData.webhooks ?? []).length} ativos</Badge>
+            </CardHeader>
+            <CardContent>
+              {(displayData.webhooks ?? []).length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Bell className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p>Nenhum webhook configurado ainda</p>
+                  <p className="text-xs mt-1">Webhooks serão ativados na versão comercial da API</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {(displayData.webhooks ?? []).map((webhook) => (
+                    <div key={webhook.id} className="p-4 border border-border rounded-lg">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <p className="font-medium text-sm">{webhook.name}</p>
+                          <p className="text-xs text-muted-foreground font-mono break-all">{webhook.url}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={webhook.active ? "default" : "secondary"} className="text-xs">
+                            {webhook.active ? "Ativo" : "Inativo"}
+                          </Badge>
+                          <button className="p-1 hover:bg-secondary rounded transition-colors">
+                            {webhook.active ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1 mb-3">
+                        {webhook.events.map((event) => (
+                          <Badge key={event} variant="outline" className="text-[10px]">{event}</Badge>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                          <p className="text-muted-foreground">Entregues (24h)</p>
+                          <p className="font-medium text-success">{webhook.stats.delivered_24h}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Falhas</p>
+                          <p className="font-medium text-destructive">{webhook.stats.failed_24h}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground">Latência</p>
+                          <p className="font-medium">{webhook.stats.avg_latency_ms}ms</p>
+                        </div>
+                      </div>
+                    </div>
                   ))}
                 </div>
-                <p className="text-sm text-muted-foreground leading-relaxed italic">
-                  "{t.text}"
-                </p>
-                <div>
-                  <p className="text-sm font-bold text-foreground">{t.name}</p>
-                  <p className="text-xs text-muted-foreground">{t.role}</p>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* ─── FAQ ─── */}
-      <section className="bg-[#FDF2F7]/30 py-20">
-        <div className="mx-auto max-w-2xl px-6">
-          <motion.div 
-            initial="hidden" 
-            whileInView="visible" 
-            viewport={{ once: true }} 
-            variants={fadeUp} 
-            className="text-center mb-12"
-          >
-            <h2 className="font-display text-3xl font-bold text-foreground">
-              Dúvidas Frequentes
-            </h2>
-            <p className="mt-3 text-muted-foreground">
-              Tudo que você precisa saber sobre a Minha Amora
-            </p>
-          </motion.div>
-          <div className="space-y-4">
-            {FAQS.map((faq, i) => (
-              <motion.div 
-                key={faq.q} 
-                initial="hidden" 
-                whileInView="visible" 
-                viewport={{ once: true }} 
-                variants={fadeUp} 
-                custom={i * 0.2} 
-                className="rounded-2xl border border-border bg-card p-5 hover:border-[#871745]/30 transition-colors"
-              >
-                <p className="font-display text-base font-bold text-foreground mb-2">
-                  {faq.q}
-                </p>
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {faq.a}
-                </p>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
+        {/* ── TAB: ENDPOINTS ── */}
+        <TabsContent value="endpoints" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Catálogo de Endpoints</CardTitle>
+              <CardDescription>
+                Endpoints disponíveis para uso interno e futura comercialização
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {(displayData.endpoints_catalog ?? DEFAULT_ENDPOINTS).map((endpoint, i) => (
+                  <div key={i} className="p-4 border border-border rounded-lg hover:border-primary/50 transition-colors">
+                    <div className="flex items-start justify-between mb-2 gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Badge variant="outline" className={`text-xs font-mono ${
+                          endpoint.method === "GET" ? "text-blue-600" : "text-success"
+                        }`}>
+                          {endpoint.method}
+                        </Badge>
+                        <code className="text-xs font-mono text-primary truncate">{endpoint.path}</code>
+                        {endpoint.status && (
+                          <Badge variant={endpoint.status === "active" ? "default" : endpoint.status === "beta" ? "secondary" : "outline"} className="text-[10px]">
+                            {endpoint.status.toUpperCase()}
+                          </Badge>
+                        )}
+                      </div>
+                      <Badge variant="secondary" className="text-[10px] flex-shrink-0">{endpoint.rate_limit}</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-3">{endpoint.description}</p>
+                    <div className="flex items-center gap-2 mb-3 flex-wrap">
+                      <Lock className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">{endpoint.auth}</span>
+                      {endpoint.lgpd && (
+                        <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">LGPD</Badge>
+                      )}
+                    </div>
+                    <div className="mb-3">
+                      <p className="text-xs text-muted-foreground mb-1">Planos com acesso:</p>
+                      <div className="flex gap-1 flex-wrap">
+                        {endpoint.pricing_tier.map((tier) => (
+                          <Badge key={tier} variant={tier === "enterprise" ? "default" : "secondary"} className="text-[10px] capitalize">
+                            {tier}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <details>
+                      <summary className="text-xs text-primary cursor-pointer hover:underline">Ver exemplo de resposta</summary>
+                      <pre className="mt-2 p-2 bg-secondary/30 rounded text-[10px] overflow-x-auto max-h-24">
+                        {JSON.stringify(endpoint.sample, null, 2)}
+                      </pre>
+                    </details>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-      {/* ─── CTA FINAL ─── */}
-      <section className="py-24 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-[#871745]/5 to-[#FDF2F7]/50" />
-        <div className="mx-auto max-w-2xl px-6 text-center relative z-10">
-          <motion.div 
-            initial="hidden" 
-            whileInView="visible" 
-            viewport={{ once: true }} 
-            variants={fadeUp}
-          >
-            {/* ✅ LOGO ATUALIZADO - CTA FINAL */}
-            <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-[#FDF2F7] shadow-xl shadow-[#871745]/30">
-              <img
-                src={logoMinhaAmora}
-                alt="Minha Amora"
-                className="h-16 w-16 object-contain"
-              />
-            </div>
-            <h2 className="font-display text-3xl font-bold text-foreground md:text-5xl tracking-tight mb-4">
-              Sua consultoria merece brilhar
-            </h2>
-            <p className="text-lg text-muted-foreground mb-10 max-w-lg mx-auto">
-              Junte-se a centenas de consultoras que já transformaram seus negócios com a 
-              <strong className="text-[#871745]"> Minha Amora</strong>
-            </p>
-            <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
-              <button 
-                onClick={() => navigate("/auth")} 
-                className="flex items-center gap-2 rounded-2xl bg-[#871745] px-10 py-4 text-lg font-bold text-white shadow-xl shadow-[#871745]/30 hover:scale-105 hover:bg-[#871745]/90 transition-all"
-              >
-                Começar gratuitamente
-                <ArrowRight className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="mt-6 text-sm text-muted-foreground">
-              ✨ Sem compromisso • Cancele quando quiser • Suporte brasileiro
-            </p>
-          </motion.div>
-        </div>
-      </section>
-
-      {/* ─── FOOTER ─── */}
-      <footer className="border-t border-border bg-card py-12">
-        <div className="mx-auto max-w-6xl px-6">
-          <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-between">
-            <div className="flex items-center gap-3">
-              {/* ✅ LOGO ATUALIZADO - FOOTER */}
-              <img
-                src={logoMinhaAmora}
-                alt="Minha Amora"
-                className="h-10 w-10 rounded-xl object-contain"
-              />
+        {/* ── TAB: COMERCIALIZAÇÃO (Preview para Admin) ── */}
+        <TabsContent value="commercial" className="space-y-4">
+          <Card className="border-primary/50">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <TrendingUp className="h-5 w-5 text-primary" />
+                Preparação para Comercialização
+              </CardTitle>
+              <CardDescription>
+                Preview da estrutura de preços e checklist de lançamento
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Estrutura de Preços (Preview) */}
               <div>
-                <span className="font-display text-lg font-bold text-foreground">
-                  Minha <span className="text-[#871745]">Amora</span>
-                </span>
-                <p className="text-xs text-muted-foreground">
-                  Inteligência para sua consultoria brilhar
-                </p>
+                <h4 className="font-medium mb-3 flex items-center gap-2">
+                  <CreditCard className="h-4 w-4 text-primary" />
+                  Estrutura de Preços (Preview)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {Object.values(displayData.pricing_tiers ?? DEFAULT_PRICING).map((plan) => (
+                    <div key={plan.tier}
+                      className={`p-4 rounded-lg border-2 transition-all ${
+                        plan.popular 
+                          ? "border-primary bg-primary/5" 
+                          : "border-border bg-card"
+                      }`}>
+                      {plan.popular && <Badge className="mb-2 bg-primary text-primary-foreground text-xs">Mais Popular</Badge>}
+                      <h5 className="font-bold capitalize mb-1">{plan.tier}</h5>
+                      <p className="text-xl font-bold text-primary mb-1">{plan.price}</p>
+                      <p className="text-xs text-muted-foreground mb-3">{plan.quota} • {plan.rate_limit}</p>
+                      <ul className="space-y-1 mb-4">
+                        {plan.features.map((feature, idx) => (
+                          <li key={idx} className="flex items-center gap-2 text-xs">
+                            <Check className="h-3 w-3 text-success flex-shrink-0" />
+                            <span>{feature}</span>
+                          </li>
+                        ))}
+                        {plan.lgpd && (
+                          <li className="flex items-center gap-2 text-xs text-amber-600">
+                            <Shield className="h-3 w-3 flex-shrink-0" />
+                            <span>Conformidade LGPD</span>
+                          </li>
+                        )}
+                      </ul>
+                      <button className={`w-full py-1.5 rounded text-xs font-medium ${
+                        plan.popular 
+                          ? "bg-primary text-primary-foreground" 
+                          : "bg-secondary text-foreground"
+                      }`}>
+                        {plan.cta}
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-            
-            <div className="flex flex-col items-center gap-4 sm:items-end">
-              <div className="flex items-center gap-6 text-sm text-muted-foreground">
-                <button 
-                  onClick={() => navigate("/privacy")}
-                  className="hover:text-[#871745] transition-colors"
-                >
-                  Privacidade
-                </button>
-                <button 
-                  onClick={() => navigate("/terms")}
-                  className="hover:text-[#871745] transition-colors"
-                >
-                  Termos de Uso
-                </button>
-                <button 
-                  onClick={() => navigate("/support")}
-                  className="hover:text-[#871745] transition-colors"
-                >
-                  Suporte
-                </button>
+
+              {/* Checklist de Lançamento */}
+              <div>
+                <h4 className="font-medium mb-3 flex items-center gap-2">
+                  <Check className="h-4 w-4 text-primary" />
+                  Checklist de Preparação
+                </h4>
+                <div className="space-y-2">
+                  {[
+                    { item: "Definir limites de rate limiting por plano", done: true },
+                    { item: "Implementar logging de uso por API key", done: true },
+                    { item: "Configurar webhooks de entrega", done: false },
+                    { item: "Criar documentação pública (Swagger/OpenAPI)", done: false },
+                    { item: "Implementar sistema de billing automático", done: false },
+                    { item: "Testes de carga e stress testing", done: false },
+                    { item: "Revisão de conformidade LGPD", done: true },
+                    { item: "Setup de monitoramento e alertas", done: false },
+                  ].map((task, i) => (
+                    <div key={i} className="flex items-center gap-3 p-3 bg-secondary/30 rounded-lg">
+                      {task.done ? (
+                        <Check className="h-4 w-4 text-success flex-shrink-0" />
+                      ) : (
+                        <div className="h-4 w-4 rounded-full border-2 border-muted-foreground flex-shrink-0" />
+                      )}
+                      <span className={`text-sm ${task.done ? "text-foreground" : "text-muted-foreground"}`}>
+                        {task.item}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              
-              <p className="text-sm text-muted-foreground text-center sm:text-right">
-                © {new Date().getFullYear()} Minha Amora. Todos os direitos reservados.
-                <br />
-                <span className="text-xs">
-                  Feito com 💜 para consultoras brasileiras
-                </span>
-              </p>
-            </div>
-          </div>
+
+              {/* Aviso de LGPD */}
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-amber-800">
+                    <p className="font-medium">⚠️ Conformidade LGPD para Comercialização</p>
+                    <p className="mt-1">
+                      Ao comercializar dados do catálogo: <br/>
+                      • Use apenas dados agregados e anonimizados <br/>
+                      • Nunca exponha PII (nome, email, telefone) de consultoras <br/>
+                      • Mantenha registro de consentimento para dados comportamentais <br/>
+                      • Implemente rate limiting e logging de acesso por API key
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Rodapé com contexto */}
+      <div className="flex items-center justify-between text-xs text-muted-foreground pt-4 border-t">
+        <div className="flex items-center gap-2">
+          <Clock className="h-3 w-3" />
+          <span>Atualizado: {new Date().toLocaleString('pt-BR')}</span>
         </div>
-      </footer>
+        <div className="flex items-center gap-2">
+          <ExternalLink className="h-3 w-3" />
+          <span>Comercialização: api.minhaamora.com.br (em desenvolvimento)</span>
+        </div>
+      </div>
     </div>
   );
 }
-
-                

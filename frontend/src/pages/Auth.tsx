@@ -151,7 +151,7 @@ export default function Auth() {
           type="button"
           onClick={handleGoogleSignIn}
           disabled={googleLoading}
-          className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-white py-3 text-sm font-medium text-foreground shadow-sm transition-all hover:shadow-md active:scale-[0.98] disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-card py-3 text-sm font-medium text-foreground shadow-sm transition-all hover:shadow-md active:scale-[0.98] disabled:opacity-50"
         >
           {googleLoading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -199,7 +199,7 @@ export default function Auth() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Seu nome"
                 required={!isLogin}
-                className="w-full rounded-xl border border-brand/15 bg-white py-3 pl-10 pr-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-brand focus:ring-2 focus:ring-brand/20"
+                className="w-full rounded-xl border border-brand/15 bg-card py-3 pl-10 pr-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-brand focus:ring-2 focus:ring-brand/20"
               />
             </div>
           )}
@@ -212,7 +212,7 @@ export default function Auth() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email"
               required
-              className="w-full rounded-xl border border-brand/15 bg-white py-3 pl-10 pr-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-brand focus:ring-2 focus:ring-brand/20"
+              className="w-full rounded-xl border border-brand/15 bg-card py-3 pl-10 pr-4 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-brand focus:ring-2 focus:ring-brand/20"
             />
           </div>
 
@@ -226,7 +226,7 @@ export default function Auth() {
               required
               minLength={8}
               title="Mínimo 8 caracteres, 1 maiúscula e 1 número"
-              className="w-full rounded-xl border border-brand/15 bg-white py-3 pl-10 pr-10 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-brand focus:ring-2 focus:ring-brand/20"
+              className="w-full rounded-xl border border-brand/15 bg-card py-3 pl-10 pr-10 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-brand focus:ring-2 focus:ring-brand/20"
             />
             <button
               type="button"

@@ -34,7 +34,7 @@ export default {
         },
         api: {
           primary: '#871745',    // Cor da marca
-          success: '#2E8B57',     // Verde para sucesso
+          success: '#871745',     // Cor da marca — o sistema não usa verde
           warning: '#F59E0B',     // Âmbar para alertas
         },
         secondary: {

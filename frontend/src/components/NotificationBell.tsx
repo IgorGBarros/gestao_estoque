@@ -4,7 +4,7 @@ import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, Trend
 import { useNavigate } from "react-router-dom";
 import { useExpiryAlerts, ExpiryAlert } from "../hooks/useExpiryAlerts";
 import { useSalesNotifications, SalesMilestone, WeeklyInsight } from "../hooks/useSalesNotifications";
-import { useSubscriptionAlert } from "../hooks/Usesubscriptionalert";
+import { useSubscriptionAlert } from "../hooks/useSubscriptionAlert";
 import { formatMoney } from "../lib/api";
 import { AnimatePresence, motion } from "framer-motion";
 
