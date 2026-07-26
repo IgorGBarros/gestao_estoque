@@ -1269,9 +1269,9 @@ export default function AdminPanel() {
                       <div className="flex justify-between items-center">
                         <span className="text-sm">Plano Free</span>
                         <div className="flex items-center gap-2">
-                          <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
                             <div 
-                              className="h-full bg-gray-500 transition-all duration-500"
+                              className="h-full bg-muted-foreground transition-all duration-500"
                               style={{ 
                                 width: `${(dashboardStats.free_stores / dashboardStats.total_stores) * 100}%` 
                               }}
@@ -1373,7 +1373,7 @@ export default function AdminPanel() {
                     key={f}
                     onClick={() => setPlanFilter(f)}
                     className={`rounded-lg px-3 py-2 text-xs font-semibold ${
-                      planFilter === f ? "bg-primary text-white" : "bg-secondary text-gray-600"
+                      planFilter === f ? "bg-primary text-white" : "bg-secondary text-foreground"
                     }`}
                   >
                     {f.toUpperCase()}
@@ -1387,7 +1387,7 @@ export default function AdminPanel() {
               {[
                 { label: "Usuários", value: stats.total, icon: Users, color: "text-primary" },
                 { label: "Plano PRO", value: stats.pro, icon: Crown, color: "text-amber-500" },
-                { label: "Plano Free", value: stats.free, icon: User, color: "text-gray-500" },
+                { label: "Plano Free", value: stats.free, icon: User, color: "text-muted-foreground" },
                 { label: "Dados Incompletos", value: stats.incomplete, icon: AlertTriangle, color: "text-destructive" },
               ].map((s) => (
                 <div key={s.label} className="rounded-xl border border-border bg-card p-4">
@@ -1690,7 +1690,7 @@ export default function AdminPanel() {
                           {plan[key as keyof PlanConfig] ? (
                             <Check className="h-3 w-3 text-success" />
                           ) : (
-                            <X className="h-3 w-3 text-gray-400" />
+                            <X className="h-3 w-3 text-muted-foreground" />
                           )}
                           <span className={plan[key as keyof PlanConfig] ? 'text-foreground' : 'text-muted-foreground'}>
                             {label}
@@ -1728,7 +1728,7 @@ export default function AdminPanel() {
                       className={`px-3 py-2 rounded-lg text-sm ${
                         plan.is_visible
                           ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : 'bg-secondary text-foreground hover:bg-muted'
                       }`}
                     >
                       {plan.is_visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
@@ -1805,7 +1805,7 @@ export default function AdminPanel() {
                           className={`p-2 rounded-lg transition-colors ${
                             promotion.is_active
                               ? 'bg-success/10 text-success hover:bg-success/10'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                              : 'bg-secondary text-foreground hover:bg-muted'
                           }`}
                           title={promotion.is_active ? 'Desativar' : 'Ativar'}
                         >
@@ -1964,7 +1964,7 @@ export default function AdminPanel() {
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <div className="w-24 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-primary transition-all duration-500"
                                 style={{
@@ -1991,7 +1991,7 @@ export default function AdminPanel() {
                           <span className="text-sm font-medium">{cat.name}</span>
                           <div className="flex items-center gap-2">
                             <Badge variant="secondary">{cat.count}</Badge>
-                            <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div className="w-20 h-2 bg-muted rounded-full overflow-hidden">
                               <div
                                 className="h-full bg-amber-500 transition-all duration-500"
                                 style={{

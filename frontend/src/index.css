@@ -71,6 +71,26 @@
   }
 
   .dark {
+    /* ══════════════════════════════════════════
+       PALETA DA MARCA NO TEMA ESCURO
+       ══════════════════════════════════════════
+       ⚠️ Estas variáveis existiam APENAS no tema claro. Como
+       --color-brand-soft e --color-brand-peach são #FDF2F7 (quase branco) e
+       aparecem 93 vezes no app (fundo das bolhas do chat, cards, bordas),
+       no tema escuro tudo isso continuava BRANCO — foi o que apareceu no
+       chat da Amorinha e nos cards do início.
+
+       Agora cada uma tem a versão escura correspondente, mantendo o mesmo
+       papel: "soft" e "peach" são superfícies sutis, "lavender" e "rose" são
+       destaques secundários. */
+    --color-brand: #A91B60;          /* mais claro: precisa de contraste no escuro */
+    --color-brand-hover: #C42472;
+    --color-brand-soft: #2A1720;     /* superfície sutil (era quase branca) */
+    --color-brand-peach: #2A1720;
+    --color-brand-lavender: #6B4A63;
+    --color-brand-rose: #C48A93;
+    --color-success: #A91B60;
+    --color-text-main: #F2E8EC;
     --background: 335 20% 6%;
     --foreground: 335 15% 95%;
 

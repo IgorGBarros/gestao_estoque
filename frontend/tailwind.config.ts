@@ -1,5 +1,3 @@
-declare const require: any;
-
 /** @type {import('tailwindcss').Config} */
 
 export default {
