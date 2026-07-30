@@ -406,55 +406,63 @@ export default function Storefront() {
           </div>
         </motion.div>
 
-        {/* Abas de marca — a mesma lógica de filtro de antes (client-side,
-            state selectedBrand/availableBrands), só que com visual de aba em
-            vez de pílula: linha inferior indicando a aba ativa, sem "pular"
-            a tela quando a consultora vende mais de uma marca. */}
+        {/* Abas de marca — mesma lógica de filtro de antes (client-side,
+            state selectedBrand/availableBrands), agora com o mesmo padrão
+            visual usado no resto do sistema (Dashboard, Relatórios/Meu MEI):
+            cartão com borda, segmento ativo preenchido na cor da marca. A
+            versão anterior era só texto sublinhado, sem "corpo" nenhum —
+            por isso destoava do resto do app. */}
         {availableBrands.length > 1 && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mb-6 border-b border-border"
+            className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1 scrollbar-hide"
             role="tablist"
             aria-label="Filtrar por marca"
           >
-            <div className="flex gap-1 overflow-x-auto scrollbar-hide">
-              <button
-                role="tab"
-                aria-selected={selectedBrand === ""}
-                onClick={() => setSelectedBrand("")}
-                className={`relative shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors ${
-                  selectedBrand === ""
-                    ? "text-brand"
-                    : "text-muted-foreground hover:text-foreground"
+            <button
+              role="tab"
+              aria-selected={selectedBrand === ""}
+              onClick={() => setSelectedBrand("")}
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                selectedBrand === ""
+                  ? "bg-brand text-white"
+                  : "text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              Todas
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none ${
+                  selectedBrand === "" ? "bg-white/20" : "bg-secondary"
                 }`}
               >
-                Todas <span className="ml-1.5 text-xs opacity-70">({items.length})</span>
-                {selectedBrand === "" && (
-                  <motion.div layoutId="aba-marca-ativa" className="absolute inset-x-0 -bottom-px h-0.5 bg-brand" />
-                )}
-              </button>
-              {availableBrands.map((brand: string) => {
-                const brandCount = items.filter((item: StorefrontItem) => getProductBrand(item) === brand).length;
-                const ativa = selectedBrand === brand;
-                return (
-                  <button
-                    key={brand}
-                    role="tab"
-                    aria-selected={ativa}
-                    onClick={() => setSelectedBrand(brand)}
-                    className={`relative shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors ${
-                      ativa ? "text-brand" : "text-muted-foreground hover:text-foreground"
+                {items.length}
+              </span>
+            </button>
+            {availableBrands.map((brand: string) => {
+              const brandCount = items.filter((item: StorefrontItem) => getProductBrand(item) === brand).length;
+              const ativa = selectedBrand === brand;
+              return (
+                <button
+                  key={brand}
+                  role="tab"
+                  aria-selected={ativa}
+                  onClick={() => setSelectedBrand(brand)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                    ativa ? "bg-brand text-white" : "text-muted-foreground hover:bg-secondary"
+                  }`}
+                >
+                  {brand}
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none ${
+                      ativa ? "bg-white/20" : "bg-secondary"
                     }`}
                   >
-                    {brand} <span className="ml-1.5 text-xs opacity-70">({brandCount})</span>
-                    {ativa && (
-                      <motion.div layoutId="aba-marca-ativa" className="absolute inset-x-0 -bottom-px h-0.5 bg-brand" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                    {brandCount}
+                  </span>
+                </button>
+              );
+            })}
           </motion.div>
         )}
 

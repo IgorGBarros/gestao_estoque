@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Search, Download, MessageCircle, Trash2, ShieldOff, Loader2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag, QrCode, CreditCard, Check } from "lucide-react";
+import { ArrowLeft, Search, Download, MessageCircle, Trash2, Loader2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag, QrCode, CreditCard, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { listLeads, getLead, anonymizeLead, deleteLead, exportLeadsCsv, downloadCsv, updateCartPayment, deleteCart, Lead, Purchase } from "../lib/leads";
+import { listLeads, getLead, deleteLead, exportLeadsCsv, downloadCsv, updateCartPayment, deleteCart, Lead, Purchase } from "../lib/leads";
 import { WA_TEMPLATES, WaTemplateKey, buildWaLink, renderTemplate } from "@/lib/whatsapp";
 
 export default function CRM() {
@@ -25,6 +25,13 @@ export default function CRM() {
   // nativo do navegador (aquele popup feio com a URL do site no título).
   const [pedidoParaExcluir, setPedidoParaExcluir] = useState<Purchase | null>(null);
   const [excluindoPedido, setExcluindoPedido] = useState(false);
+  // 🔹 Modal de exclusão de CLIENTE (diferente do de exclusão de pedido) —
+  // mesmo padrão, substitui o confirm() nativo.
+  const [clienteParaExcluir, setClienteParaExcluir] = useState<Lead | null>(null);
+  const [excluindoCliente, setExcluindoCliente] = useState(false);
+  // 🔹 Modal de confirmação do envio em massa (quando ela seleciona várias
+  // clientes e clica em "Mandar mensagem").
+  const [confirmandoEnvioMassa, setConfirmandoEnvioMassa] = useState(false);
   // 🔹 Seleção múltipla: quem vai receber a mensagem em massa.
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [optInFilter, setOptInFilter] = useState<"all" | "yes" | "no">("all");
@@ -146,18 +153,31 @@ export default function CRM() {
     window.open(link, "_blank", "noopener,noreferrer");
   };
 
-  const handleAnonymize = async (l: Lead) => {
-    if (!confirm(`Anonimizar ${l.name}? Esta ação é irreversível.`)) return;
-    await anonymizeLead(l.id);
-    toast.success("Lead anonimizado");
-    load();
+  // ⚠️ Removido o "Anonimizar (LGPD)" desta tela: a consultora não tem uso
+  // prático pra esse botão — ela não vai decidir sozinha quando anonimizar
+  // um cliente. O endpoint de anonimização continua existindo no backend
+  // (crm_lead_anonymize), pronto pra ser usado por uma política de retenção
+  // automática ou uma ferramenta do administrador mais pra frente.
+
+  // 🔹 Abre o modal — não exclui nada ainda.
+  const handleExcluirCliente = (l: Lead) => {
+    setClienteParaExcluir(l);
   };
 
-  const handleDelete = async (l: Lead) => {
-    if (!confirm(`Excluir ${l.name} definitivamente?`)) return;
-    await deleteLead(l.id);
-    toast.success("Lead excluído");
-    load();
+  // 🔹 Só executa quando ela confirma no modal.
+  const confirmarExclusaoCliente = async () => {
+    if (!clienteParaExcluir) return;
+    setExcluindoCliente(true);
+    try {
+      await deleteLead(clienteParaExcluir.id);
+      toast.success("Cliente excluída");
+      setClienteParaExcluir(null);
+      load();
+    } catch {
+      toast.error("Não foi possível excluir a cliente");
+    } finally {
+      setExcluindoCliente(false);
+    }
   };
 
   const handleExport = () => {
@@ -202,13 +222,18 @@ export default function CRM() {
   // sozinho — abre a conversa já escrita, e ela aperta enviar em cada uma.
   // Envio de verdade sem toque nenhum exige a API oficial do WhatsApp
   // Business, que é um projeto à parte (painel do administrador).
+  // 🔹 Só valida e abre o modal — o envio de verdade fica em confirmarEnvioMassa.
   const handleEnviarSelecionados = () => {
     const alvos = leads.filter((l) => selecionados.has(l.id) && podeReceber(l));
     if (alvos.length === 0) return toast.error("Selecione ao menos uma cliente que aceitou receber mensagem");
     if (alvos.length > 15) {
       return toast.error("Selecione até 15 por vez — o navegador bloqueia muitas janelas abertas de uma vez");
     }
-    if (!confirm(`Abrir o WhatsApp para ${alvos.length} cliente${alvos.length > 1 ? "s" : ""}?`)) return;
+    setConfirmandoEnvioMassa(true);
+  };
+
+  const confirmarEnvioMassa = () => {
+    const alvos = leads.filter((l) => selecionados.has(l.id) && podeReceber(l));
     alvos.forEach((l, i) => {
       setTimeout(() => {
         const link = buildWaLink(l.phone, template.body, {
@@ -222,7 +247,9 @@ export default function CRM() {
       }, i * 600);
     });
     setSelecionados(new Set());
+    setConfirmandoEnvioMassa(false);
   };
+
 
   const optInCount = leads.filter((l) => l.whatsapp_opt_in).length;
 
@@ -414,10 +441,7 @@ export default function CRM() {
                         >
                           <MessageCircle className="h-4 w-4" />
                         </Button>
-                        <Button size="icon" variant="ghost" title="Anonimizar (LGPD)" onClick={() => handleAnonymize(l)} className="h-8 w-8">
-                          <ShieldOff className="h-4 w-4" />
-                        </Button>
-                        <Button size="icon" variant="ghost" title="Excluir" onClick={() => handleDelete(l)} className="h-8 w-8 text-destructive">
+                        <Button size="icon" variant="ghost" title="Excluir" onClick={() => handleExcluirCliente(l)} className="h-8 w-8 text-destructive">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -625,6 +649,69 @@ export default function CRM() {
               onClick={confirmarExclusaoPedido}
             >
               {excluindoPedido ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* 🔹 Modal de exclusão de CLIENTE — mesmo padrão do modal de exclusão
+        de pedido, mas com o aviso de que TODO o histórico dela some junto. */}
+    {clienteParaExcluir && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+        onClick={() => !excluindoCliente && setClienteParaExcluir(null)}
+      >
+        <div className="w-full max-w-sm rounded-2xl bg-card p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10">
+            <Trash2 className="h-5 w-5 text-destructive" />
+          </div>
+          <h3 className="text-center font-display text-base font-bold text-foreground">
+            Excluir {clienteParaExcluir.name}?
+          </h3>
+          <p className="mt-1.5 text-center text-sm text-muted-foreground">
+            Isso apaga a cliente e <strong className="text-foreground">todo o histórico de compras</strong> dela
+            do CRM. Não tem como desfazer.
+          </p>
+          <div className="mt-5 flex gap-2">
+            <Button variant="outline" className="flex-1" disabled={excluindoCliente} onClick={() => setClienteParaExcluir(null)}>
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-destructive text-white hover:bg-destructive/90"
+              disabled={excluindoCliente}
+              onClick={confirmarExclusaoCliente}
+            >
+              {excluindoCliente ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* 🔹 Modal de confirmação do envio em massa. */}
+    {confirmandoEnvioMassa && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+        onClick={() => setConfirmandoEnvioMassa(false)}
+      >
+        <div className="w-full max-w-sm rounded-2xl bg-card p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-brand/10">
+            <MessageCircle className="h-5 w-5 text-brand" />
+          </div>
+          <h3 className="text-center font-display text-base font-bold text-foreground">
+            Abrir o WhatsApp para {selecionados.size} cliente{selecionados.size > 1 ? "s" : ""}?
+          </h3>
+          <p className="mt-1.5 text-center text-sm text-muted-foreground">
+            Vai abrir uma conversa por cliente, já com a mensagem escrita. Você ainda precisa
+            apertar enviar em cada uma.
+          </p>
+          <div className="mt-5 flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setConfirmandoEnvioMassa(false)}>
+              Cancelar
+            </Button>
+            <Button className="flex-1" onClick={confirmarEnvioMassa}>
+              Abrir conversas
             </Button>
           </div>
         </div>
