@@ -13,6 +13,7 @@ from django.urls import path
 
 from .admin_views import (
     admin_consultants_health,
+    admin_crm_overview,
     admin_impersonate_user,
     admin_toggle_block_user,
     list_plan_configs,
@@ -44,6 +45,7 @@ urlpatterns = [
     # Analytics (filtrado por consentimento LGPD — ver admin_views.py)
     # 📊 Saúde de todas as consultoras (indicadores de gestão)
     path('analytics/consultants/', admin_consultants_health, name='admin_consultants_health'),
+    path('analytics/crm/', admin_crm_overview, name='admin_crm_overview'),
     # 🔐 Suporte: acessar como consultora / bloquear acesso
     path('users/<int:user_id>/impersonate/', admin_impersonate_user, name='admin_impersonate'),
     path('users/<int:user_id>/toggle-block/', admin_toggle_block_user, name='admin_toggle_block'),

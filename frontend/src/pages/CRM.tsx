@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Search, Download, MessageCircle, Trash2, ShieldOff, Loader2, Users, CheckCircle2, XCircle } from "lucide-react";
+import { ArrowLeft, Search, Download, MessageCircle, Trash2, ShieldOff, Loader2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { listLeads, anonymizeLead, deleteLead, exportLeadsCsv, downloadCsv, Lead } from "../lib/leads";
+import { listLeads, getLead, anonymizeLead, deleteLead, exportLeadsCsv, downloadCsv, Lead } from "../lib/leads";
 import { WA_TEMPLATES, WaTemplateKey, buildWaLink, renderTemplate } from "@/lib/whatsapp";
 
 export default function CRM() {
@@ -18,6 +18,9 @@ export default function CRM() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  // 🔹 Painel de histórico: qual cliente está aberto e os dados dela.
+  const [detalheAberto, setDetalheAberto] = useState<Lead | null>(null);
+  const [carregandoDetalhe, setCarregandoDetalhe] = useState(false);
   const [optInFilter, setOptInFilter] = useState<"all" | "yes" | "no">("all");
   const [tplKey, setTplKey] = useState<WaTemplateKey>("welcome");
 
@@ -54,6 +57,21 @@ export default function CRM() {
   }, [leads, search, optInFilter]);
 
   const template = WA_TEMPLATES.find((t) => t.key === tplKey) || WA_TEMPLATES[0];
+
+  // 🔹 Abre o painel de histórico de um cliente — busca o detalhe completo
+  // (o /crm/leads/<id> já vem com purchase_history embutido).
+  const handleVerHistorico = async (l: Lead) => {
+    setDetalheAberto(l); // mostra o painel já com o que se tem, enquanto carrega
+    setCarregandoDetalhe(true);
+    try {
+      const completo = await getLead(l.id);
+      setDetalheAberto(completo);
+    } catch {
+      toast.error("Não foi possível carregar o histórico");
+    } finally {
+      setCarregandoDetalhe(false);
+    }
+  };
 
   const handleWhatsapp = (l: Lead) => {
     if (l.anonymized_at) return toast.error("Lead anonimizado");
@@ -106,6 +124,7 @@ export default function CRM() {
   const optInCount = leads.filter((l) => l.whatsapp_opt_in).length;
 
   return (
+    <>
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
@@ -218,6 +237,15 @@ export default function CRM() {
                         <Button
                           size="icon"
                           variant="ghost"
+                          title="Ver histórico de compras"
+                          onClick={() => handleVerHistorico(l)}
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
                           disabled={!l.whatsapp_opt_in || !!l.anonymized_at}
                           title={!l.whatsapp_opt_in ? "Sem opt-in" : "Enviar WhatsApp"}
                           onClick={() => handleWhatsapp(l)}
@@ -241,6 +269,106 @@ export default function CRM() {
         )}
       </main>
     </div>
+
+    {/* 🔹 Painel de histórico: o que essa cliente comprou, quando e por
+        quanto — o que faltava pra "Meus Clientes" virar uma central de
+        verdade, não só uma lista de contatos. */}
+    {detalheAberto && (
+      <div
+        className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center"
+        onClick={() => setDetalheAberto(null)}
+      >
+        <div
+          className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-card p-5 sm:rounded-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="font-display text-lg font-bold text-foreground">
+                {detalheAberto.name}
+                {detalheAberto.anonymized_at && (
+                  <Badge variant="outline" className="ml-2 text-xs">anonimizado</Badge>
+                )}
+              </h2>
+              <p className="text-sm text-muted-foreground">{detalheAberto.phone}</p>
+              {detalheAberto.email && (
+                <p className="text-xs text-muted-foreground">{detalheAberto.email}</p>
+              )}
+            </div>
+            <button
+              onClick={() => setDetalheAberto(null)}
+              className="rounded-full p-1.5 text-muted-foreground hover:bg-muted"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Resumo */}
+          <div className="mt-4 grid grid-cols-3 gap-2">
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 text-center">
+              <p className="text-lg font-bold text-foreground">{detalheAberto.total_orders}</p>
+              <p className="text-[11px] text-muted-foreground">pedidos</p>
+            </div>
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 text-center">
+              <p className="text-lg font-bold text-foreground">
+                R$ {Number(detalheAberto.total_spent || 0).toFixed(2)}
+              </p>
+              <p className="text-[11px] text-muted-foreground">total gasto</p>
+            </div>
+            <div className="rounded-xl border border-border bg-secondary/30 p-3 text-center">
+              <p className="text-xs font-bold text-foreground">
+                {detalheAberto.last_purchase_at
+                  ? new Date(detalheAberto.last_purchase_at).toLocaleDateString("pt-BR")
+                  : "—"}
+              </p>
+              <p className="text-[11px] text-muted-foreground">última compra</p>
+            </div>
+          </div>
+
+          {/* Histórico */}
+          <div className="mt-5">
+            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <ShoppingBag className="h-4 w-4" /> Histórico de compras
+            </h3>
+
+            {carregandoDetalhe ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-brand" />
+              </div>
+            ) : !detalheAberto.purchase_history || detalheAberto.purchase_history.length === 0 ? (
+              <div className="rounded-xl border border-border bg-card px-4 py-8 text-center">
+                <Package className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Nenhum pedido fechado ainda.</p>
+              </div>
+            ) : (
+              <ul className="space-y-2">
+                {detalheAberto.purchase_history.map((pedido) => (
+                  <li key={pedido.cart_id} className="rounded-xl border border-border p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(pedido.date).toLocaleDateString("pt-BR")}
+                      </span>
+                      <span className="text-sm font-semibold text-foreground">
+                        R$ {Number(pedido.total).toFixed(2)}
+                      </span>
+                    </div>
+                    <ul className="mt-1.5 space-y-0.5">
+                      {pedido.items.map((item, i) => (
+                        <li key={i} className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span className="truncate">{item.quantity}x {item.product_name}</span>
+                          <span className="shrink-0">R$ {Number(item.subtotal).toFixed(2)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
 

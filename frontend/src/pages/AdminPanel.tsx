@@ -13,6 +13,7 @@ import {
 import { profileApi, adminApi, adminHealthApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import ConsultantsHealthTab from "../components/admin/ConsultantsHealthTab";
+import CrmOverviewTab from "../components/admin/CrmOverviewTab";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { Badge } from "../components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
@@ -1887,6 +1888,14 @@ export default function AdminPanel() {
               </p>
             </div>
             <ConsultantsHealthTab />
+
+            <div className="pt-6 border-t border-border">
+              <h2 className="text-2xl font-bold">CRM da vitrine</h2>
+              <p className="mb-4 text-muted-foreground">
+                Quantos clientes cada loja captura, sem identificar ninguém
+              </p>
+              <CrmOverviewTab />
+            </div>
 
             <div className="flex justify-between items-center pt-4 border-t border-border">
               <div>

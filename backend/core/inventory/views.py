@@ -4415,6 +4415,10 @@ def crm_leads_list(request):
 def crm_lead_detail(request, lead_id):
     """
     GET    /api/crm/leads/<id> — um lead específico, só da própria loja.
+           Inclui o histórico de compras: cada pedido fechado (checked_out),
+           com os produtos, quantidade, preço e data. É o que dá pra
+           consultora ver "o que ela comprou, quando, por quanto" — sem
+           isso o Lead sozinho só mostra nome e telefone.
     DELETE /api/crm/leads/<id> — exclusão definitiva, só da própria loja.
     Os dois métodos compartilham a mesma URL (é assim que lib/leads.ts chama).
     """
@@ -4429,7 +4433,37 @@ def crm_lead_detail(request, lead_id):
     if request.method == 'DELETE':
         lead.delete()
         return Response(status=204)
-    return Response(LeadSerializer(lead).data)
+
+    pedidos = (Cart.objects
+               .filter(store=store, lead=lead, checked_out=True)
+               .prefetch_related('items')
+               .order_by('-updated_at'))
+
+    historico = []
+    for pedido in pedidos:
+        itens = list(pedido.items.all())
+        if not itens:
+            continue  # carrinho fechado sem item não é um pedido de verdade
+        total = sum(i.price_snapshot * i.quantity for i in itens)
+        historico.append({
+            'cart_id': pedido.id,
+            'date': pedido.updated_at,
+            'items': [
+                {
+                    'product_name': i.product_name,
+                    'quantity': i.quantity,
+                    'unit_price': i.price_snapshot,
+                    'subtotal': i.price_snapshot * i.quantity,
+                }
+                for i in itens
+            ],
+            'total': total,
+        })
+
+    dados = LeadSerializer(lead).data
+    dados['purchase_history'] = historico
+    dados['last_purchase_at'] = historico[0]['date'] if historico else None
+    return Response(dados)
 
 
 @api_view(['POST'])
