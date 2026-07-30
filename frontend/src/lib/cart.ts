@@ -14,6 +14,10 @@ export interface PersistCartInput {
   lead_id?: string; // opcional para visitantes
   checked_out: boolean;
   items: CartItemInput[];
+  // 💳 O que a cliente escolheu na vitrine antes de mandar a mensagem —
+  // vai junto só quando checked_out=true (é o momento do envio de verdade).
+  payment_method?: "pix" | "cartao";
+  whatsapp_message?: string;
 }
 
 // 🔹 Gera ou recupera session_id único por loja/visitante

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Search, Download, MessageCircle, Trash2, ShieldOff, Loader2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag } from "lucide-react";
+import { ArrowLeft, Search, Download, MessageCircle, Trash2, ShieldOff, Loader2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag, QrCode, CreditCard, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { listLeads, getLead, anonymizeLead, deleteLead, exportLeadsCsv, downloadCsv, Lead } from "../lib/leads";
+import { listLeads, getLead, anonymizeLead, deleteLead, exportLeadsCsv, downloadCsv, updateCartPayment, deleteCart, Lead } from "../lib/leads";
 import { WA_TEMPLATES, WaTemplateKey, buildWaLink, renderTemplate } from "@/lib/whatsapp";
 
 export default function CRM() {
@@ -72,6 +72,48 @@ export default function CRM() {
       toast.error("Não foi possível carregar o histórico");
     } finally {
       setCarregandoDetalhe(false);
+    }
+  };
+
+  // 🔹 Marca/desmarca um pedido específico como pago. Sempre manual — não
+  // há integração com o WhatsApp nem com meio de pagamento pra confirmar
+  // isso sozinho, é a consultora quem sabe se o dinheiro caiu de verdade.
+  const handleConfirmarPagamento = async (cartId: number, confirmado: boolean) => {
+    try {
+      await updateCartPayment(cartId, { payment_confirmed: confirmado });
+      // Atualiza o painel aberto sem precisar buscar tudo de novo do servidor
+      setDetalheAberto((prev) =>
+        prev
+          ? {
+              ...prev,
+              purchase_history: prev.purchase_history?.map((p) =>
+                p.cart_id === cartId ? { ...p, payment_confirmed: confirmado } : p
+              ),
+            }
+          : prev
+      );
+      load(); // a lista principal também mostra o pagamento mais recente
+      toast.success(confirmado ? "Pagamento confirmado" : "Confirmação removida");
+    } catch {
+      toast.error("Não foi possível atualizar o pagamento");
+    }
+  };
+
+  // 🔹 Exclui um pedido que nunca foi pago. Só o pedido some — a cliente
+  // (Lead) continua no CRM, com o resto do histórico intacto.
+  const handleExcluirPedido = async (cartId: number) => {
+    if (!confirm("Excluir este pedido? Ele nunca foi pago, então não conta como venda.")) return;
+    try {
+      await deleteCart(cartId);
+      setDetalheAberto((prev) =>
+        prev
+          ? { ...prev, purchase_history: prev.purchase_history?.filter((p) => p.cart_id !== cartId) }
+          : prev
+      );
+      load();
+      toast.success("Pedido excluído");
+    } catch {
+      toast.error("Não foi possível excluir o pedido");
     }
   };
 
@@ -280,6 +322,7 @@ export default function CRM() {
                   <th className="px-4 py-3 text-left">Recebe mensagem?</th>
                   <th className="px-4 py-3 text-left">Última visita</th>
                   <th className="px-4 py-3 text-left">Gasto</th>
+                  <th className="px-4 py-3 text-left">Pagamento</th>
                   <th className="px-4 py-3 text-right">Ações</th>
                 </tr>
               </thead>
@@ -312,6 +355,27 @@ export default function CRM() {
                       {new Date(l.last_seen).toLocaleDateString("pt-BR")}
                     </td>
                     <td className="px-4 py-3 text-xs">R$ {Number(l.total_spent || 0).toFixed(2)}</td>
+                    <td className="px-4 py-3">
+                      {!l.last_payment_method ? (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          {l.last_payment_method === "pix" ? (
+                            <QrCode className="h-3.5 w-3.5 text-muted-foreground" />
+                          ) : (
+                            <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
+                          )}
+                          <span className="text-xs text-foreground">
+                            {l.last_payment_method === "pix" ? "PIX" : "Cartão"}
+                          </span>
+                          {l.last_payment_confirmed ? (
+                            <Badge className="bg-emerald-500/15 text-emerald-700 text-[10px]">pago</Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px]">a confirmar</Badge>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
                         <Button
@@ -440,6 +504,56 @@ export default function CRM() {
                         </li>
                       ))}
                     </ul>
+
+                    {/* 💳 Forma de pagamento que ela declarou + confirmação
+                        manual da consultora. Nunca é automático — não há
+                        integração com meio de pagamento nenhum ainda. */}
+                    <div className="mt-2.5 flex items-center justify-between border-t border-border/60 pt-2.5">
+                      <div className="flex items-center gap-1.5">
+                        {pedido.payment_method ? (
+                          <>
+                            {pedido.payment_method === "pix" ? (
+                              <QrCode className="h-3.5 w-3.5 text-muted-foreground" />
+                            ) : (
+                              <CreditCard className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                            <span className="text-xs text-muted-foreground">
+                              {pedido.payment_method === "pix" ? "PIX" : "Cartão de crédito"}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Forma de pagamento não informada</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {pedido.payment_confirmed ? (
+                          <button
+                            onClick={() => handleConfirmarPagamento(pedido.cart_id, false)}
+                            className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-500/25"
+                            title="Clique para desmarcar"
+                          >
+                            <Check className="h-3 w-3" /> Pago
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => handleConfirmarPagamento(pedido.cart_id, true)}
+                              className="rounded-full border border-brand/30 bg-brand/5 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand/10"
+                            >
+                              Marcar como pago
+                            </button>
+                            <button
+                              onClick={() => handleExcluirPedido(pedido.cart_id)}
+                              title="Ela não pagou — excluir este pedido"
+                              className="rounded-full p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </li>
                 ))}
               </ul>

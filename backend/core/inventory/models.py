@@ -1139,6 +1139,23 @@ class Cart(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    # 💳 Forma de pagamento que a CLIENTE escolheu na vitrine antes de mandar
+    # a mensagem — é o que ela DECLAROU, não uma confirmação de pagamento
+    # (não há integração com o WhatsApp nem com nenhum meio de pagamento
+    # ainda, então o sistema não tem como saber se ela pagou de verdade).
+    PAGAMENTO_CHOICES = [('pix', 'PIX'), ('cartao', 'Cartão de crédito')]
+    payment_method = models.CharField(max_length=10, choices=PAGAMENTO_CHOICES, blank=True, null=True)
+
+    # ✅ Confirmação MANUAL da consultora — ela quem sabe se o dinheiro
+    # realmente caiu ou o cartão passou. Começa sempre False.
+    payment_confirmed = models.BooleanField(default=False)
+
+    # 📝 A mensagem exata que foi montada e enviada pro WhatsApp da
+    # consultora. Registrar isso é o que a consultora pediu: um histórico do
+    # que a cliente mandou, mesmo sem integração com a API do WhatsApp para
+    # confirmar se a mensagem chegou ou foi lida.
+    whatsapp_message = models.TextField(blank=True, null=True)
+
     class Meta:
         indexes = [models.Index(fields=['store', 'session_id'])]
         ordering = ['-updated_at']

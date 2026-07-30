@@ -218,20 +218,24 @@ export default function Storefront() {
   const getDisplayName = (item: StorefrontItem | BagItem) => getProductDisplayName(item);
   const getItemQtyInBag = (id: string) => bag.find((b) => b.id === id)?.qty || 0;
 
+  // 🔹 CRM: monta só o TEXTO da mensagem (sem codificar pra URL). Separado
+  // do link porque agora esse texto também é REGISTRADO no pedido — é o
+  // "o que ela enviou pra consultora" que a consultora pediu pra guardar.
+  const buildOrderMessageText = (itemsList: BagItem[]): string => {
+    if (itemsList.length === 1 && itemsList[0].qty === 1) {
+      const name = getDisplayName(itemsList[0]);
+      const priceText = itemsList[0].sale_price ? ` — ${formatMoney(itemsList[0].sale_price)}` : "";
+      return `Olá ${sellerName}! 😊\n\nTenho interesse no produto:\n• ${name}${priceText}\n\n💳 Forma de pagamento: *${paymentLabel}*\n\nEstá disponível?`;
+    }
+    const lines = itemsList.map((b) => `• ${b.qty}x ${getDisplayName(b)}${b.sale_price ? ` — ${formatMoney(b.sale_price * b.qty)}` : ""}`);
+    return `Olá ${sellerName}! 😊\n\nGostaria de solicitar os seguintes produtos:\n\n${lines.join("\n")}\n\n💰 Total estimado: *${formatMoney(bagTotal)}*\n💳 Forma de pagamento: *${paymentLabel}*\n\nPode verificar a disponibilidade e me retornar? Obrigada!`;
+  };
+
   // 🔹 CRM: Gera link do WhatsApp com mensagem contextual
   const buildWhatsappLink = (itemsList: BagItem[]) => {
     const rawPhone = sellerWhatsapp?.replace(/\D/g, "") || "";
     const phone = rawPhone.startsWith("55") ? rawPhone : `55${rawPhone}`;
-
-    if (itemsList.length === 1 && itemsList[0].qty === 1) {
-      const name = getDisplayName(itemsList[0]);
-      const priceText = itemsList[0].sale_price ? ` — ${formatMoney(itemsList[0].sale_price)}` : "";
-      const msg = `Olá ${sellerName}! 😊\n\nTenho interesse no produto:\n• ${name}${priceText}\n\n💳 Forma de pagamento: *${paymentLabel}*\n\nEstá disponível?`;
-      return `https://api.whatsapp.com/send/?phone=${phone}&text=${encodeURIComponent(msg)}`;
-    }
-
-    const lines = itemsList.map((b) => `• ${b.qty}x ${getDisplayName(b)}${b.sale_price ? ` — ${formatMoney(b.sale_price * b.qty)}` : ""}`);
-    const msg = `Olá ${sellerName}! 😊\n\nGostaria de solicitar os seguintes produtos:\n\n${lines.join("\n")}\n\n💰 Total estimado: *${formatMoney(bagTotal)}*\n💳 Forma de pagamento: *${paymentLabel}*\n\nPode verificar a disponibilidade e me retornar? Obrigada!`;
+    const msg = buildOrderMessageText(itemsList);
     return `https://api.whatsapp.com/send/?phone=${phone}&text=${encodeURIComponent(msg)}`;
   };
 
@@ -244,12 +248,49 @@ export default function Storefront() {
     setBagOpen(true);
   };
 
+  // 🔹 CRM: registra o pedido como FECHADO — com forma de pagamento e a
+  // mensagem exata que foi mandada. Reaproveitado tanto por quem preenche o
+  // modal agora quanto por quem já é cliente e está comprando de novo.
+  // Nunca bloqueia o envio: se isso falhar, o WhatsApp abre normalmente.
+  const registrarPedidoFechado = async (leadId: string) => {
+    if (!tenantId) return;
+    const cartItems: CartItemInput[] = bag.map((b) => ({
+      inventory_id: b.id,
+      product_name: getDisplayName(b),
+      quantity: b.qty,
+      price_snapshot: b.sale_price || 0,
+    }));
+    try {
+      await persistCart({
+        tenant_id: tenantId,
+        session_id: sessionId,
+        lead_id: leadId,
+        checked_out: true,
+        payment_method: paymentMethod,
+        whatsapp_message: buildOrderMessageText(bag),
+        items: cartItems,
+      });
+    } catch {
+      /* silencioso — o pedido já foi enviado pelo WhatsApp de qualquer forma */
+    }
+  };
+
   // 🔹 CRM: Fluxo principal de envio do pedido
   const handleSendOrder = () => {
     if (bag.length === 0 || !sellerWhatsapp) return;
 
-    // 🔹 Se lead já foi capturado nesta sessão, envia direto para o WhatsApp
+    // ⚠️ CORREÇÃO: antes, quem já tinha lead capturado (cliente que voltou)
+    // só abria o WhatsApp — o pedido em si NUNCA era registrado como
+    // fechado. Isso significava que a 2ª compra em diante de qualquer
+    // cliente ficava invisível pro CRM: não contava em total_orders, não
+    // tinha forma de pagamento, e o carrinho ficava sempre marcado como
+    // "aberto" (por causa da sincronização automática da sacola) até virar
+    // um falso positivo de carrinho abandonado 2h depois.
     if (leadCaptured || !tenantId) {
+      const leadIdSalvo = tenantId ? localStorage.getItem(getLeadCapturedKey(tenantId)) : null;
+      if (leadIdSalvo) {
+        registrarPedidoFechado(leadIdSalvo); // não precisa esperar — abre o WhatsApp já
+      }
       const link = buildWhatsappLink(bag);
       window.open(link, "_blank", "noopener,noreferrer");
       return;
@@ -305,6 +346,8 @@ export default function Storefront() {
         session_id: sessionId,
         lead_id: lead.id,
         checked_out: true,
+        payment_method: paymentMethod,
+        whatsapp_message: buildOrderMessageText(bag),
         items: cartItems,
       });
 

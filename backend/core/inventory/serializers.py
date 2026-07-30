@@ -959,6 +959,10 @@ class ConsentExportSerializer(serializers.Serializer):
 
 class LeadSerializer(serializers.ModelSerializer):
     tenant_id = serializers.SerializerMethodField()
+    # 💳 Forma de pagamento do pedido mais recente — pra tabela do CRM não
+    # precisar de uma chamada extra só pra mostrar essa coluna.
+    last_payment_method = serializers.SerializerMethodField()
+    last_payment_confirmed = serializers.SerializerMethodField()
 
     class Meta:
         model = Lead
@@ -966,9 +970,20 @@ class LeadSerializer(serializers.ModelSerializer):
             'id', 'tenant_id', 'name', 'phone', 'email', 'birth_date',
             'whatsapp_opt_in', 'source', 'consent_version', 'consent_timestamp',
             'tags', 'total_orders', 'total_spent', 'created_at', 'last_seen',
-            'anonymized_at',
+            'anonymized_at', 'last_payment_method', 'last_payment_confirmed',
         ]
         read_only_fields = ['id', 'created_at', 'last_seen', 'total_orders', 'total_spent']
+
+    def _ultimo_pedido(self, obj):
+        return obj.carts.filter(checked_out=True).order_by('-updated_at').first()
+
+    def get_last_payment_method(self, obj):
+        pedido = self._ultimo_pedido(obj)
+        return pedido.payment_method if pedido else None
+
+    def get_last_payment_confirmed(self, obj):
+        pedido = self._ultimo_pedido(obj)
+        return bool(pedido.payment_confirmed) if pedido else False
 
     def get_tenant_id(self, obj):
         # O frontend (lib/leads.ts) espera `tenant_id` no formato usado em

@@ -4448,6 +4448,9 @@ def crm_lead_detail(request, lead_id):
         historico.append({
             'cart_id': pedido.id,
             'date': pedido.updated_at,
+            'payment_method': pedido.payment_method,
+            'payment_confirmed': pedido.payment_confirmed,
+            'whatsapp_message': pedido.whatsapp_message,
             'items': [
                 {
                     'product_name': i.product_name,
@@ -4603,6 +4606,17 @@ def crm_cart_persist(request):
 
     checked_out = bool(data.get('checked_out'))
 
+    # 💳 Forma de pagamento que ela escolheu na vitrine (o que ela declarou,
+    # não uma confirmação — só a consultora confirma isso, manualmente).
+    payment_method = data.get('payment_method')
+    if payment_method not in ('pix', 'cartao'):
+        payment_method = None
+
+    # 📝 A mensagem exata que foi montada e mandada pro WhatsApp — registro
+    # do que a cliente "enviou", já que não há integração com a API do
+    # WhatsApp pra confirmar entrega ou leitura.
+    whatsapp_message = str(data.get('whatsapp_message') or '')[:4000] or None
+
     # Reaproveita o carrinho ABERTO desta sessão, se existir. Um carrinho já
     # fechado não é reaberto — uma sacola nova na mesma sessão vira um
     # carrinho novo (é um segundo pedido, não uma edição do primeiro).
@@ -4611,11 +4625,16 @@ def crm_cart_persist(request):
         if lead and not cart.lead_id:
             cart.lead = lead  # sessão que ganhou identidade (fez o checkout) depois de já ter itens
         cart.checked_out = checked_out
-        cart.save(update_fields=['lead', 'checked_out', 'updated_at'])
+        if payment_method:
+            cart.payment_method = payment_method
+        if whatsapp_message:
+            cart.whatsapp_message = whatsapp_message
+        cart.save(update_fields=['lead', 'checked_out', 'payment_method', 'whatsapp_message', 'updated_at'])
         cart.items.all().delete()  # substitui pela sacola atual — é sempre o estado mais recente
     else:
         cart = Cart.objects.create(
             store=store, session_id=session_id, lead=lead, checked_out=checked_out,
+            payment_method=payment_method, whatsapp_message=whatsapp_message,
         )
 
     for it in items[:100]:  # limite defensivo: um carrinho não tem centenas de itens
@@ -4711,4 +4730,48 @@ def crm_notifications(request):
         'novos_leads': novos_leads,
         'aniversarios': aniversariantes,
         'carrinhos_abandonados': carrinhos_abandonados,
+    })
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def crm_cart_update(request, cart_id):
+    """
+    PATCH  /api/crm/carts/<id> — a consultora confirma (ou corrige) o
+           pagamento de um pedido. Não existe integração com o WhatsApp nem
+           com meio de pagamento nenhum ainda, então isso é sempre uma
+           marcação MANUAL dela — ela é quem sabe se o PIX caiu ou o cartão
+           passou.
+    DELETE /api/crm/carts/<id> — remove um pedido que nunca foi pago (ex.:
+           cliente mandou mensagem e sumiu). Some só o pedido, o cliente
+           (Lead) continua no CRM.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    cart = Cart.objects.filter(store=store, id=cart_id).first()
+    if not cart:
+        return Response({'error': 'Pedido não encontrado'}, status=404)
+
+    if request.method == 'DELETE':
+        cart.delete()
+        return Response(status=204)
+
+    data = request.data
+    campos = []
+    if 'payment_confirmed' in data:
+        cart.payment_confirmed = bool(data['payment_confirmed'])
+        campos.append('payment_confirmed')
+    if 'payment_method' in data and data['payment_method'] in ('pix', 'cartao'):
+        cart.payment_method = data['payment_method']
+        campos.append('payment_method')
+
+    if not campos:
+        return Response({'error': 'Nada para atualizar'}, status=400)
+
+    cart.save(update_fields=campos)
+    return Response({
+        'cart_id': cart.id,
+        'payment_method': cart.payment_method,
+        'payment_confirmed': cart.payment_confirmed,
     })

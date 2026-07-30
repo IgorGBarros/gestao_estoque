@@ -9,11 +9,18 @@ export interface PurchaseHistoryItem {
   subtotal: number;
 }
 
+export type PaymentMethod = "pix" | "cartao";
+
 export interface Purchase {
   cart_id: number;
   date: string;
   items: PurchaseHistoryItem[];
   total: number;
+  // 💳 O que a cliente DECLAROU ao enviar a mensagem — não é confirmação de
+  // pagamento. A confirmação é sempre manual, feita pela consultora.
+  payment_method?: PaymentMethod | null;
+  payment_confirmed?: boolean;
+  whatsapp_message?: string | null;
 }
 
 export interface Lead {
@@ -37,6 +44,10 @@ export interface Lead {
   // na listagem geral (custaria caro buscar isso pra todo mundo de uma vez).
   purchase_history?: Purchase[];
   last_purchase_at?: string | null;
+  // 💳 Forma de pagamento do pedido mais recente — já vem na listagem, pra
+  // a tabela do CRM mostrar sem precisar de uma chamada por cliente.
+  last_payment_method?: PaymentMethod | null;
+  last_payment_confirmed?: boolean;
 }
 
 export interface LeadInput {
@@ -63,6 +74,10 @@ export interface PersistCartInput {
   lead_id?: string;
   checked_out: boolean;
   items: CartItemInput[];
+  // 💳 O que a cliente escolheu na vitrine antes de mandar a mensagem —
+  // vai junto só quando checked_out=true (é o momento do envio de verdade).
+  payment_method?: "pix" | "cartao";
+  whatsapp_message?: string;
 }
 
 // 🔹 LISTAR LEADS por tenant
@@ -160,4 +175,20 @@ export function getOrCreateSessionId(storeSlug: string): string {
     localStorage.setItem(key, sessionId);
   }
   return sessionId;
+}
+// 🔹 Consultora confirma (ou corrige) o pagamento de um pedido específico.
+// Sempre manual — não existe integração com o WhatsApp nem com meio de
+// pagamento pra confirmar isso sozinho.
+export async function updateCartPayment(
+  cartId: number,
+  data: { payment_confirmed?: boolean; payment_method?: "pix" | "cartao" }
+): Promise<{ cart_id: number; payment_method: string | null; payment_confirmed: boolean }> {
+  const response = await api.patch(`/crm/carts/${cartId}`, data);
+  return response.data;
+}
+
+// 🔹 Remove um pedido que nunca foi pago. O cliente (Lead) continua no CRM
+// — só o pedido some.
+export async function deleteCart(cartId: number): Promise<void> {
+  await api.delete(`/crm/carts/${cartId}`);
 }

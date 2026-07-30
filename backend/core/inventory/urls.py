@@ -57,7 +57,7 @@ from inventory.views import SessionControlView, SessionSummaryView
 from inventory.views import public_storefront, public_storefront_view, lookup_product
 from inventory.views import (
     crm_leads_list, crm_lead_detail, crm_lead_upsert,
-    crm_lead_anonymize, crm_cart_persist, crm_notifications,
+    crm_lead_anonymize, crm_cart_persist, crm_notifications, crm_cart_update,
 )
 
 # Swagger/Documentação
@@ -137,6 +137,7 @@ urlpatterns = [
     path('api/crm/leads/<int:lead_id>/anonymize', crm_lead_anonymize, name='crm_lead_anonymize'),
     path('api/crm/carts/persist', crm_cart_persist, name='crm_cart_persist'),
     path('api/crm/notifications', crm_notifications, name='crm_notifications'),
+    path('api/crm/carts/<int:cart_id>', crm_cart_update, name='crm_cart_update'),
     
     # ==========================================
     # 📚 DOCUMENTAÇÃO API (Swagger)
