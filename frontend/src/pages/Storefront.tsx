@@ -495,8 +495,17 @@ export default function Storefront() {
 
       {/* BAG SHEET */}
       <Sheet open={bagOpen} onOpenChange={setBagOpen}>
-        <SheetContent side="bottom" className="max-h-[85vh] rounded-t-3xl sm:max-w-md sm:mx-auto px-4">
-          <SheetHeader className="pb-4">
+        {/* ⚠️ CORREÇÃO: o conteúdo (lista + pagamento + total + botões) só
+            tinha UM scroll interno, o da lista, limitado a 40vh. O resto
+            (cabeçalho, pagamento, total, os dois botões) disputava o mesmo
+            espaço fixo de max-h-[85vh] SEM nenhuma rolagem própria — com
+            a sacola cheia, o conjunto passava da altura da tela e o botão
+            "Esvaziar sacola" (o último elemento) ficava inacessível, sem
+            nenhuma barra de rolagem pra alcançar.
+            Agora é cabeçalho fixo + área do meio que rola + rodapé sempre
+            fixo — o padrão de layout pra esse tipo de painel. */}
+        <SheetContent side="bottom" className="flex max-h-[85vh] flex-col rounded-t-3xl px-4 sm:mx-auto sm:max-w-md">
+          <SheetHeader className="shrink-0 pb-4">
             <SheetTitle className="flex items-center gap-2 text-foreground text-lg"><ShoppingBag className="h-5 w-5 text-brand" />Sua Sacola</SheetTitle>
             <SheetDescription>{bag.length === 0 ? "Sua sacola está vazia" : `${bagCount} ${bagCount === 1 ? "item" : "itens"} selecionado${bagCount === 1 ? "" : "s"}`}</SheetDescription>
           </SheetHeader>
@@ -507,54 +516,62 @@ export default function Storefront() {
               <p className="text-sm font-medium">Adicione produtos da vitrine</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-5 mt-2">
-              <div className="max-h-[40vh] space-y-3 overflow-y-auto pr-2 scrollbar-thin">
-                {bag.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 shadow-sm">
-                    <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-secondary/30">
-                      {item.image_url ? <img src={item.image_url} alt={getDisplayName(item)} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center"><Package className="h-6 w-6 text-muted-foreground/30" /></div>}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-xs font-bold text-foreground">{getDisplayName(item)}</p>
-                      {item.sale_price && <p className="mt-1 text-sm font-extrabold text-brand">{formatMoney(item.sale_price * item.qty)}</p>}
-                    </div>
-                    <div className="flex items-center gap-1 bg-secondary rounded-lg p-1 border border-border/50">
-                      <button className="flex h-6 w-6 items-center justify-center rounded bg-background shadow-sm text-muted-foreground hover:text-foreground" onClick={() => updateQty(item.id, -1)}><Minus className="h-3 w-3" /></button>
-                      <span className="w-6 text-center text-xs font-bold text-foreground">{item.qty}</span>
-                      <button className="flex h-6 w-6 items-center justify-center rounded bg-background shadow-sm text-muted-foreground hover:text-foreground" onClick={() => updateQty(item.id, 1)}><Plus className="h-3 w-3" /></button>
-                    </div>
-                    <button className="p-2 text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/10" onClick={() => removeFromBag(item.id)}><Trash2 className="h-4 w-4" /></button>
+            <>
+              {/* Área do meio: cresce e rola. min-h-0 é essencial aqui — sem
+                  ele, um filho flex com overflow-y-auto não encolhe direito
+                  e a rolagem não funciona (comportamento padrão do flexbox). */}
+              <div className="min-h-0 flex-1 overflow-y-auto pr-1 scrollbar-thin">
+                <div className="flex flex-col gap-5 pb-2 pt-2">
+                  <div className="space-y-3">
+                    {bag.map((item) => (
+                      <div key={item.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 shadow-sm">
+                        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-secondary/30">
+                          {item.image_url ? <img src={item.image_url} alt={getDisplayName(item)} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center"><Package className="h-6 w-6 text-muted-foreground/30" /></div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-xs font-bold text-foreground">{getDisplayName(item)}</p>
+                          {item.sale_price && <p className="mt-1 text-sm font-extrabold text-brand">{formatMoney(item.sale_price * item.qty)}</p>}
+                        </div>
+                        <div className="flex items-center gap-1 bg-secondary rounded-lg p-1 border border-border/50">
+                          <button className="flex h-6 w-6 items-center justify-center rounded bg-background shadow-sm text-muted-foreground hover:text-foreground" onClick={() => updateQty(item.id, -1)}><Minus className="h-3 w-3" /></button>
+                          <span className="w-6 text-center text-xs font-bold text-foreground">{item.qty}</span>
+                          <button className="flex h-6 w-6 items-center justify-center rounded bg-background shadow-sm text-muted-foreground hover:text-foreground" onClick={() => updateQty(item.id, 1)}><Plus className="h-3 w-3" /></button>
+                        </div>
+                        <button className="p-2 text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/10" onClick={() => removeFromBag(item.id)}><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <Separator />
-              
-              {/* Payment Method */}
-              <div className="space-y-3">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Como deseja pagar?</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setPaymentMethod("pix")} className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-3 transition-all ${paymentMethod === "pix" ? "border-brand bg-brand/5 text-brand shadow-sm" : "border-border bg-card text-muted-foreground hover:border-brand/30 hover:bg-secondary/50"}`}>
-                    <QrCode className="h-5 w-5" /><span className="text-xs font-bold">PIX</span>
-                  </button>
-                  <button onClick={() => setPaymentMethod("cartao")} className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-3 transition-all ${paymentMethod === "cartao" ? "border-brand bg-brand/5 text-brand shadow-sm" : "border-border bg-card text-muted-foreground hover:border-brand/30 hover:bg-secondary/50"}`}>
-                    <CreditCard className="h-5 w-5" /><span className="text-xs font-bold">Cartão ou Link</span>
-                  </button>
+                  <Separator />
+
+                  {/* Payment Method */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Como deseja pagar?</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button onClick={() => setPaymentMethod("pix")} className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-3 transition-all ${paymentMethod === "pix" ? "border-brand bg-brand/5 text-brand shadow-sm" : "border-border bg-card text-muted-foreground hover:border-brand/30 hover:bg-secondary/50"}`}>
+                        <QrCode className="h-5 w-5" /><span className="text-xs font-bold">PIX</span>
+                      </button>
+                      <button onClick={() => setPaymentMethod("cartao")} className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-3 transition-all ${paymentMethod === "cartao" ? "border-brand bg-brand/5 text-brand shadow-sm" : "border-border bg-card text-muted-foreground hover:border-brand/30 hover:bg-secondary/50"}`}>
+                        <CreditCard className="h-5 w-5" /><span className="text-xs font-bold">Cartão ou Link</span>
+                      </button>
+                    </div>
+                  </div>
+                  <Separator />
+
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Total do Pedido</span>
+                    <span className="text-2xl font-black text-foreground">{formatMoney(bagTotal)}</span>
+                  </div>
                 </div>
               </div>
-              <Separator />
-              
-              <div className="flex items-center justify-between px-1">
-                <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Total do Pedido</span>
-                <span className="text-2xl font-black text-foreground">{formatMoney(bagTotal)}</span>
-              </div>
-              
-              <div className="space-y-2 pt-2">
+
+              {/* Rodapé: NUNCA rola, sempre visível, não importa o tamanho da sacola. */}
+              <div className="shrink-0 space-y-2 border-t border-border pt-3">
                 <Button onClick={handleSendOrder} className="w-full h-14 gap-2 rounded-xl bg-[#25D366] text-base font-bold text-white shadow-lg hover:bg-[#128C7E] transition-all hover:scale-[1.02]">
                   <Send className="h-5 w-5" />Enviar pedido pelo WhatsApp
                 </Button>
                 <Button variant="ghost" className="w-full text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" onClick={clearBag}>Esvaziar sacola</Button>
               </div>
-            </div>
+            </>
           )}
         </SheetContent>
       </Sheet>
