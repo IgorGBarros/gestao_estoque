@@ -4533,7 +4533,19 @@ def crm_lead_anonymize(request, lead_id):
 def crm_cart_persist(request):
     """
     POST /api/crm/carts/persist — salva o carrinho da vitrine vinculado ao
-    lead, para a consultora ver o que o cliente pediu. Chamado sem login.
+    lead. Chamado sem login, de duas formas:
+
+      1. A cada mudança na sacola (checked_out=False) — é o que alimenta a
+         detecção de CARRINHO ABANDONADO. Antes, isto só era chamado uma vez,
+         no fechamento do pedido, então nunca existia registro de quem
+         desistiu no meio do caminho.
+      2. No fechamento do pedido (checked_out=True).
+
+    ⚠️ IDEMPOTENTE por (loja, sessão): enquanto o carrinho está aberto
+    (checked_out=False), a MESMA sessão sempre atualiza a MESMA linha —
+    sem isso, cada tecla digitada ou clique de +/- criaria um carrinho novo
+    no banco. Depois que fecha (checked_out=True), um pedido novo na mesma
+    sessão abre uma linha nova (fica registrado como um segundo pedido).
     """
     data = request.data
     store = _store_by_tenant_id(data.get('tenant_id'))
@@ -4555,10 +4567,23 @@ def crm_cart_persist(request):
     if not isinstance(items, list):
         return Response({'error': 'items deve ser uma lista'}, status=400)
 
-    cart = Cart.objects.create(
-        store=store, session_id=session_id, lead=lead,
-        checked_out=bool(data.get('checked_out')),
-    )
+    checked_out = bool(data.get('checked_out'))
+
+    # Reaproveita o carrinho ABERTO desta sessão, se existir. Um carrinho já
+    # fechado não é reaberto — uma sacola nova na mesma sessão vira um
+    # carrinho novo (é um segundo pedido, não uma edição do primeiro).
+    cart = Cart.objects.filter(store=store, session_id=session_id, checked_out=False).first()
+    if cart:
+        if lead and not cart.lead_id:
+            cart.lead = lead  # sessão que ganhou identidade (fez o checkout) depois de já ter itens
+        cart.checked_out = checked_out
+        cart.save(update_fields=['lead', 'checked_out', 'updated_at'])
+        cart.items.all().delete()  # substitui pela sacola atual — é sempre o estado mais recente
+    else:
+        cart = Cart.objects.create(
+            store=store, session_id=session_id, lead=lead, checked_out=checked_out,
+        )
+
     for it in items[:100]:  # limite defensivo: um carrinho não tem centenas de itens
         try:
             CartItem.objects.create(
@@ -4572,10 +4597,84 @@ def crm_cart_persist(request):
             continue  # item malformado não derruba o carrinho inteiro
 
     # Pedido fechado: soma nas métricas agregadas do lead.
-    if cart.checked_out and lead:
+    if checked_out and cart.lead_id:
         total = sum((i.price_snapshot * i.quantity) for i in cart.items.all())
-        lead.total_orders = models.F('total_orders') + 1
-        lead.total_spent = models.F('total_spent') + total
-        lead.save(update_fields=['total_orders', 'total_spent'])
+        Lead.objects.filter(id=cart.lead_id).update(
+            total_orders=models.F('total_orders') + 1,
+            total_spent=models.F('total_spent') + total,
+        )
 
     return Response({'id': cart.id}, status=201)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def crm_notifications(request):
+    """
+    GET /api/crm/notifications — os três avisos do CRM pro sino de
+    notificações da consultora:
+
+      • novos_leads       — clientes capturados nos últimos 3 dias
+      • aniversarios       — clientes que fazem aniversário nos próximos 7 dias
+      • carrinhos_abandonados — sacola parada há mais de 2h, sem fechar
+        pedido, com uma cliente identificada (senão não tem pra quem
+        mandar mensagem)
+    """
+    from datetime import timedelta, date as _date
+    from django.utils import timezone as _tz
+
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    agora = _tz.now()
+
+    # ── Novos leads ──
+    novos = (Lead.objects
+             .filter(store=store, created_at__gte=agora - timedelta(days=3), anonymized_at__isnull=True)
+             .order_by('-created_at')[:20])
+    novos_leads = [{'id': l.id, 'name': l.name, 'created_at': l.created_at} for l in novos]
+
+    # ── Aniversários nos próximos 7 dias ──
+    # Comparação por mês/dia (não por data completa) — e cobre a virada do
+    # ano: se hoje é 28/dez e o aniversário é 3/jan, os 7 dias à frente
+    # cruzam dezembro pra janeiro.
+    hoje = agora.date()
+    proximos_dias = [(hoje + timedelta(days=i)) for i in range(8)]
+    pares_mes_dia = {(d.month, d.day) for d in proximos_dias}
+    aniversariantes = []
+    for lead in Lead.objects.filter(store=store, birth_date__isnull=False, anonymized_at__isnull=True):
+        if (lead.birth_date.month, lead.birth_date.day) in pares_mes_dia:
+            # Próxima ocorrência do aniversário, pra ordenar por "quão perto".
+            prox = lead.birth_date.replace(year=hoje.year)
+            if prox < hoje:
+                prox = lead.birth_date.replace(year=hoje.year + 1)
+            aniversariantes.append({'id': lead.id, 'name': lead.name, 'date': prox})
+    aniversariantes.sort(key=lambda x: x['date'])
+
+    # ── Carrinhos abandonados ──
+    limite = agora - timedelta(hours=2)
+    carrinhos = (Cart.objects
+                 .filter(store=store, checked_out=False, updated_at__lt=limite, lead__isnull=False)
+                 .exclude(lead__anonymized_at__isnull=False)
+                 .select_related('lead')
+                 .prefetch_related('items')
+                 .order_by('-updated_at')[:20])
+    carrinhos_abandonados = []
+    for c in carrinhos:
+        itens = list(c.items.all())
+        if not itens:
+            continue  # sacola vazia não é "abandono", é só uma sessão que passou por aqui
+        carrinhos_abandonados.append({
+            'cart_id': c.id,
+            'lead_id': c.lead_id,
+            'lead_name': c.lead.name,
+            'items': [i.product_name for i in itens],
+            'updated_at': c.updated_at,
+        })
+
+    return Response({
+        'novos_leads': novos_leads,
+        'aniversarios': aniversariantes,
+        'carrinhos_abandonados': carrinhos_abandonados,
+    })

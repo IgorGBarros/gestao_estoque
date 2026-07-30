@@ -1039,6 +1039,20 @@ export const movementsReportApi = {
   },
 };
 
+// ── Notificações do CRM (novos leads, aniversários, carrinho abandonado) ──
+export interface CrmNotifications {
+  novos_leads: { id: number; name: string; created_at: string }[];
+  aniversarios: { id: number; name: string; date: string }[];
+  carrinhos_abandonados: {
+    cart_id: number; lead_id: number; lead_name: string;
+    items: string[]; updated_at: string;
+  }[];
+}
+
+export const crmNotificationsApi = {
+  get: () => apiRequest<CrmNotifications>("/crm/notifications"),
+};
+
 export const consentApi = {
   record: async (data: ConsentRequest): Promise<ConsentRecord> => {
     const response = await apiRequest<ConsentRecord>("/consent/", {

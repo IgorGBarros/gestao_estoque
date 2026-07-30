@@ -92,6 +92,36 @@ export default function Storefront() {
     }
   }, [storeSlug]);
 
+  // 🔹 CRM: sincroniza a sacola com o backend conforme ela muda — não só no
+  // fechamento do pedido. Sem isto, uma cliente que adiciona produtos e sai
+  // sem finalizar não deixa NENHUM rastro: o "carrinho abandonado" nunca
+  // existia porque só salvávamos no clique final de "enviar pedido".
+  //
+  // Debounce de 2s pra não bater na API a cada + / - de quantidade. Se já
+  // existe um lead capturado nesta sessão (visitante que voltou), amarra o
+  // carrinho a ele — é o que torna o abandono ACIONÁVEL (a consultora tem o
+  // WhatsApp pra quem procurar).
+  useEffect(() => {
+    if (!tenantId || bag.length === 0) return;
+    const timer = setTimeout(() => {
+      const leadIdSalvo = localStorage.getItem(getLeadCapturedKey(tenantId));
+      const cartItems: CartItemInput[] = bag.map((b) => ({
+        inventory_id: b.id,
+        product_name: getDisplayName(b),
+        quantity: b.qty,
+        price_snapshot: b.sale_price || 0,
+      }));
+      persistCart({
+        tenant_id: tenantId,
+        session_id: sessionId,
+        lead_id: leadIdSalvo || undefined,
+        checked_out: false,
+        items: cartItems,
+      }).catch(() => { /* silencioso: não é ação da cliente, não pode gerar erro visível */ });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [bag, tenantId, sessionId]);
+
   useEffect(() => {
     if (storeSlug) saveCart(bag, storeSlug);
   }, [bag, storeSlug]);

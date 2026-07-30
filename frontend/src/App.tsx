@@ -42,6 +42,7 @@ import StockWizard from "./pages/StockWizard";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import MovementHistory from "./pages/MovementHistory";
+import CRM from "./pages/CRM";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
@@ -247,6 +248,16 @@ const App = () => {
                         <ProtectedRoute>
                           <ProtectedLayout>
                             <MovementHistory />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      {/* ⚠️ CORREÇÃO: a página CRM.tsx existia pronta mas nunca
+                          tinha sido roteada — a consultora não tinha como
+                          acessar a lista de clientes capturados na vitrine. */}
+                      <Route path="/crm" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <CRM />
                           </ProtectedLayout>
                         </ProtectedRoute>
                       } />
