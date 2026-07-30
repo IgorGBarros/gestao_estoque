@@ -1,382 +1,473 @@
-// pages/MovementHistory.tsx — VERSÃO REFATORADA COM TEMA DINÂMICO
-import { useState, useEffect, useMemo } from "react";
+// pages/ProductList.tsx — VERSÃO FINAL COM PALETA COMPLETA MINHA AMORA
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, ArrowUpCircle, ArrowDownCircle, Search, Package,
-  ChevronDown, ChevronUp, Calendar, Calculator, Download, Loader2,
-} from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-import { movementsApi, formatMoney, movementsReportApi } from "../lib/api";
+  Plus, Search, Edit2, Package, ArrowLeft, Scale, Loader2,
+  AlertTriangle, Clock, ChevronDown, ChevronUp, X, BookOpen, ZoomIn, Calendar,
+  TrendingUp, TrendingDown, Download } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import { inventoryApi, formatMoney, stockReportApi } from "../lib/api";
 import { btn } from "../lib/ui";
-import { useAuth } from "../hooks/useAuth";
+import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
+import StockAdjustmentModal from "../components/StockAdjustmentModal";
+import ProductSearchModal from "../components/ProductSearchModal";
 
-const TYPE_LABELS: Record<string, { label: string; emoji: string }> = {
-  VENDA: { label: "Venda", emoji: "💰" },
-  USO_PROPRIO: { label: "Uso Próprio", emoji: "👤" },
-  PRESENTE: { label: "Presente", emoji: "🎁" },
-  BRINDE: { label: "Brinde", emoji: "🤝" },
-  PERDA: { label: "Perda", emoji: "⚠️" },
-  AJUSTE: { label: "Ajuste", emoji: "⚖️" },
-  ENTRADA: { label: "Entrada", emoji: "📦" },
+function getStockStatus(qty: number, min: number): { label: string; color: string } {
+  if (qty <= 0)
+    return { label: "Esgotado", color: "bg-destructive/10 text-destructive border-destructive/20" };
+  if (qty <= min)
+    return { label: "Baixo", color: "bg-brand-peach/40 text-brand-rose border-brand-peach" };
+  return { label: "Em Estoque", color: "bg-brand/10 text-brand border-brand/20" };
+}
+
+function getBatchStatus(batch: any) {
+  if (!batch.expiration_date)
+    return { status: "no_date", color: "text-muted-foreground", icon: Calendar };
+
+  const exp = new Date(batch.expiration_date);
+  exp.setHours(0, 0, 0, 0);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const daysLeft = Math.ceil((exp.getTime() - now.getTime()) / 86400000);
+
+  if (daysLeft <= 0) return { status: "expired", color: "text-destructive", icon: AlertTriangle };
+  if (daysLeft <= 7) return { status: "critical", color: "text-destructive", icon: AlertTriangle };
+  if (daysLeft <= 30) return { status: "warning", color: "text-brand-rose", icon: Clock };
+  return { status: "valid", color: "text-brand", icon: Clock };
+}
+
+const consolidateBatchesByExpiry = (batches: any[]) => {
+  if (!batches || batches.length === 0) return [];
+  const activeBatches = batches.filter((batch) => batch.quantity > 0);
+  const grouped = activeBatches.reduce((acc: any, batch: any) => {
+    const key = batch.expiration_date || "no_date";
+    if (!acc[key]) {
+      acc[key] = {
+        expiration_date: batch.expiration_date,
+        quantity: 0,
+        batch_codes: [],
+        ids: [],
+        formatted_date: batch.expiration_date
+          ? new Date(batch.expiration_date).toLocaleDateString("pt-BR")
+          : "Sem validade",
+      };
+    }
+    acc[key].quantity += batch.quantity;
+    acc[key].batch_codes.push(batch.batch_code || "S/N");
+    acc[key].ids.push(batch.id);
+    return acc;
+  }, {});
+
+  return Object.entries(grouped)
+    .map(([, data]: [string, any]) => ({
+      id: `consolidated_${data.ids[0]}`,
+      expiration_date: data.expiration_date,
+      quantity: data.quantity,
+      batch_code:
+        data.batch_codes.length === 1
+          ? data.batch_codes[0]
+          : `${data.batch_codes.length} lotes`,
+      is_consolidated: data.batch_codes.length > 1,
+      original_batches: data.batch_codes,
+      formatted_date: data.formatted_date,
+    }))
+    .sort((a: any, b: any) => {
+      if (!a.expiration_date && !b.expiration_date) return 0;
+      if (!a.expiration_date) return 1;
+      if (!b.expiration_date) return -1;
+      return new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime();
+    });
 };
 
-export default function MovementHistory() {
-  const navigate = useNavigate();
-  const { user } = useAuth();
+type StockFilter = "TODOS" | "COM_ESTOQUE" | "ESGOTADO";
 
-  const [movements, setMovements] = useState<any[]>([]);
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<"all" | "entrada" | "saida">("all");
-  const [loading, setLoading] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState<string>("all");
-  const [expandedId, setExpandedId] = useState<string | number | null>(null);
+export default function ProductList() {
   const [baixandoRel, setBaixandoRel] = useState(false);
 
-  useEffect(() => {
-    if (!user) return;
-    movementsApi
-      .list()
-      .then((data: any[]) => {
-        const normalizedData = data.map((m) => {
-          const rawType = (m.transaction_type || m.movement_type || "").toUpperCase();
-          const uiType = rawType === "ENTRADA" ? "entrada" : "saida";
-          return {
-            ...m,
-            raw_type: rawType,
-            ui_type: uiType,
-            product_name: m.product?.name || m.product_name || "Produto Desconhecido",
-            barcode: m.product?.bar_code || m.barcode || "",
-          };
-        });
-        setMovements(normalizedData);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, [user]);
-
-  // ── Meses disponíveis ──
-  const availableMonths = useMemo(() => {
-    const months = new Set<string>();
-    movements.forEach((m) => {
-      const d = new Date(m.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      months.add(key);
-    });
-    return Array.from(months).sort().reverse();
-  }, [movements]);
-
-  const formatMonthLabel = (YYYYMM: string) => {
-    const [y, m] = YYYYMM.split("-");
-    const date = new Date(parseInt(y), parseInt(m) - 1);
-    return date.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-  };
-
-  // ── Filtro combinado ──
-  const filtered = movements.filter((m) => {
-    const matchSearch =
-      m.product_name.toLowerCase().includes(search.toLowerCase()) ||
-      m.barcode.includes(search);
-    const matchFilter = filter === "all" || m.ui_type === filter;
-    const d = new Date(m.created_at);
-    const mKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    const matchMonth = selectedMonth === "all" || mKey === selectedMonth;
-    return matchSearch && matchFilter && matchMonth;
-  });
-
-  // ── Totais ──
-  const totalEntradas = filtered
-    .filter((m) => m.ui_type === "entrada")
-    .reduce((s, m) => s + Math.abs(m.quantity), 0);
-
-  const totalSaidas = filtered
-    .filter((m) => m.ui_type === "saida")
-    .reduce((s, m) => s + Math.abs(m.quantity), 0);
-
-  const totalReceita = filtered
-    .filter((m) => m.ui_type === "saida" && m.raw_type === "VENDA")
-    .reduce((s, m) => s + (m.unit_price || m.unit_price_sold || 0) * Math.abs(m.quantity), 0);
-
-  const totalLucro = filtered
-    .filter((m) => m.profit != null)
-    .reduce((s, m) => s + (m.profit || 0), 0);
-
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleDateString("pt-BR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  // ── Relatório de movimentação (CSV) ──
-  // Entradas, saídas, valores, lucro e a descrição preenchida pela
-  // consultora. CSV abre no Excel e no Google Sheets sem plugin.
+  // Relatório do estoque ATUAL em CSV: o que tem hoje, quanto vale e o que
+  // está para vencer. (O histórico de entradas/saídas fica no Extrato.)
   const baixarRelatorio = async () => {
     setBaixandoRel(true);
     try {
-      await movementsReportApi.download("tudo");
+      await stockReportApi.download();
     } catch {
-      /* silencioso: o extrato na tela continua disponível */
+      /* silencioso: a lista na tela continua disponível */
     } finally {
       setBaixandoRel(false);
     }
   };
 
-  // ── Loading ──
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-brand" />
-      </div>
-    );
-  }
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [filterStock, setFilterStock] = useState<StockFilter>("COM_ESTOQUE");
+  const [loading, setLoading] = useState(true);
+
+  const [adjustItem, setAdjustItem] = useState<any | null>(null);
+  const [showCatalog, setShowCatalog] = useState(false);
+
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  const loadInventory = async () => {
+    try {
+      setLoading(true);
+      const data = await inventoryApi.list();
+
+      const processedData = data.map((item: any) => {
+        if (item.batches && Array.isArray(item.batches)) {
+          item.consolidatedBatches = consolidateBatchesByExpiry(item.batches);
+          item.batches = item.batches
+            .filter((batch: any) => batch.quantity > 0)
+            .sort((a: any, b: any) => {
+              if (!a.expiration_date && !b.expiration_date) return a.id - b.id;
+              if (!a.expiration_date) return 1;
+              if (!b.expiration_date) return -1;
+              return new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime();
+            });
+        } else {
+          item.consolidatedBatches = [];
+        }
+
+        if (item.consolidatedBatches && item.consolidatedBatches.length > 0) {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          item.batchSummary = {
+            total: item.consolidatedBatches.length,
+            expired: item.consolidatedBatches.filter(
+              (b: any) => b.expiration_date && new Date(b.expiration_date) < today
+            ).length,
+            nearExpiry: item.consolidatedBatches.filter((b: any) => {
+              if (!b.expiration_date) return false;
+              const exp = new Date(b.expiration_date);
+              const daysLeft = Math.ceil((exp.getTime() - today.getTime()) / 86400000);
+              return daysLeft > 0 && daysLeft <= 30;
+            }).length,
+            valid: item.consolidatedBatches.filter((b: any) => {
+              if (!b.expiration_date) return true;
+              const exp = new Date(b.expiration_date);
+              const daysLeft = Math.ceil((exp.getTime() - today.getTime()) / 86400000);
+              return daysLeft > 30;
+            }).length,
+          };
+        } else {
+          item.batchSummary = { total: 0, expired: 0, nearExpiry: 0, valid: 0 };
+        }
+
+        return item;
+      });
+
+      setInventory(processedData);
+    } catch (error) {
+      console.error("Erro ao carregar estoque:", error);
+      toast({ title: "Erro ao carregar estoque", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadInventory();
+  }, []);
+
+  const filtered = inventory.filter((item) => {
+    const qty = item.total_quantity ?? item.quantity ?? 0;
+    const prodName = item.product?.name || item.product_name || "";
+    const prodBarcode = item.product?.bar_code || item.barcode || "";
+    const prodSku = item.product?.natura_sku || item.sku || "";
+    const prodCat = item.product?.category || item.category || "";
+
+    const textMatch =
+      prodName.toLowerCase().includes(search.toLowerCase()) ||
+      (item.custom_name || "").toLowerCase().includes(search.toLowerCase()) ||
+      prodBarcode.includes(search) ||
+      prodSku.toLowerCase().includes(search.toLowerCase()) ||
+      prodCat.toLowerCase().includes(search.toLowerCase());
+
+    const stockMatch =
+      filterStock === "TODOS"
+        ? true
+        : filterStock === "COM_ESTOQUE"
+        ? qty > 0
+        : qty <= 0;
+
+    return textMatch && stockMatch;
+  });
 
   return (
     <div className="min-h-screen bg-background pb-20">
       {/* ══════════════════════════════════════════
           HEADER
           ══════════════════════════════════════════ */}
-      <header className="sticky top-0 z-20 border-b border-border bg-card shadow-sm">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-6 py-4">
-          <button
-            onClick={() => navigate("/")}
-            className="rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <h1 className="font-display text-lg font-bold text-foreground">
-            Extrato de Movimentações
-          </h1>
-          <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium text-secondary-foreground">
-            {filtered.length}
-          </span>
-
-          <button
-            onClick={baixarRelatorio}
-            disabled={baixandoRel}
-            className={`ml-auto ${btn.base} ${btn.sm} ${btn.suave}`}
-            title="Baixar relatório de movimentação"
-          >
-            {baixandoRel ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Download className="h-3.5 w-3.5" />
-            )}
-            <span className="hidden sm:inline">Relatório</span>
-          </button>
+      <header className="sticky top-0 z-20 border-b border-border bg-card">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => navigate("/")}
+              className="rounded-lg p-2 text-muted-foreground hover:bg-brand-soft hover:text-brand transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <h1 className="font-display text-lg font-bold text-foreground">Meu Estoque</h1>
+            <span className="rounded-full bg-brand-soft px-2.5 py-0.5 text-xs font-bold text-brand">
+              {inventory.length}
+            </span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={baixarRelatorio}
+              disabled={baixandoRel}
+              className={`${btn.base} ${btn.md} ${btn.contorno}`}
+              title="Baixar relatório de estoque"
+            >
+              {baixandoRel ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Relatório</span>
+            </button>
+            <button
+              onClick={() => setShowCatalog(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-brand/20 bg-brand-soft px-3 py-2 text-sm font-medium text-brand transition-colors hover:bg-brand-peach/30"
+            >
+              <BookOpen className="h-4 w-4" />
+              <span className="hidden sm:inline">Catálogo</span>
+            </button>
+            <button
+              onClick={() => navigate("/products/new")}
+              className="flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 shadow-sm"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Novo</span>
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-6 space-y-4">
-        {/* ══════════════════════════════════════════
-            SUMMARY CARDS
-            ══════════════════════════════════════════ */}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">
-              Entradas
-            </p>
-            <p className="font-display text-2xl font-bold text-success">
-              +{totalEntradas}
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">
-              Saídas
-            </p>
-            <p className="font-display text-2xl font-bold text-destructive">
-              -{totalSaidas}
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">
-              Receita (Vendas)
-            </p>
-            <p className="font-display text-2xl font-bold text-foreground">
-              {formatMoney(totalReceita)}
-            </p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
-            <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider mb-1">
-              Lucro Bruto
-            </p>
-            <p
-              className={`font-display text-2xl font-bold ${
-                totalLucro >= 0 ? "text-success" : "text-destructive"
-              }`}
-            >
-              {formatMoney(totalLucro)}
-            </p>
-          </div>
+      <main className="mx-auto max-w-4xl px-6 py-6">
+        {/* ── Search ── */}
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-brand/15 bg-brand-soft/50 px-3 py-2.5 shadow-sm focus-within:ring-2 focus-within:ring-brand/20 focus-within:border-brand/30 transition-all">
+          <Search className="h-4 w-4 text-brand-rose" />
+          <input
+            type="text"
+            placeholder="Buscar por nome, código, SKU ou categoria..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-brand-rose/50"
+          />
+        </div>
+
+        {/* ── Stock Filters ── */}
+        <div className="mb-6 flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+          <button
+            onClick={() => setFilterStock("COM_ESTOQUE")}
+            className={`px-4 py-1.5 text-xs rounded-full font-bold whitespace-nowrap transition-colors border ${
+              filterStock === "COM_ESTOQUE"
+                ? "bg-brand text-white border-brand shadow-sm"
+                : "bg-brand-soft text-brand-rose border-brand-peach hover:bg-brand-peach/30"
+            }`}
+          >
+            Em Estoque
+          </button>
+          <button
+            onClick={() => setFilterStock("ESGOTADO")}
+            className={`px-4 py-1.5 text-xs rounded-full font-bold whitespace-nowrap transition-colors border ${
+              filterStock === "ESGOTADO"
+                ? "bg-destructive text-destructive-foreground border-destructive shadow-sm"
+                : "bg-brand-soft text-brand-rose border-brand-peach hover:bg-brand-peach/30"
+            }`}
+          >
+            Esgotados
+          </button>
+          <button
+            onClick={() => setFilterStock("TODOS")}
+            className={`px-4 py-1.5 text-xs rounded-full font-bold whitespace-nowrap transition-colors border ${
+              filterStock === "TODOS"
+                ? "bg-brand-rose text-white border-brand-rose shadow-sm"
+                : "bg-brand-soft text-brand-rose border-brand-peach hover:bg-brand-peach/30"
+            }`}
+          >
+            Todos
+          </button>
         </div>
 
         {/* ══════════════════════════════════════════
-            FILTERS
+            PRODUCT LIST
             ══════════════════════════════════════════ */}
-        <div className="flex flex-col gap-3 sm:flex-row pt-2">
-          <div className="flex flex-1 items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5 focus-within:border-brand/50 shadow-sm">
-            <Search className="h-5 w-5 text-muted-foreground" />
-            <input
-              type="text"
-              placeholder="Buscar por nome ou código..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-          </div>
-
-          {availableMonths.length > 0 && (
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5 shadow-sm min-w-[160px]">
-              <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-              <select
-                value={selectedMonth}
-                onChange={(e) => setSelectedMonth(e.target.value)}
-                className="bg-transparent text-sm font-medium text-foreground outline-none w-full cursor-pointer capitalize"
-              >
-                <option value="all">Todo o período</option>
-                {availableMonths.map((m) => (
-                  <option key={m} value={m} className="capitalize">
-                    {formatMonthLabel(m)}
-                  </option>
-                ))}
-              </select>
+        <div className="space-y-3">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20 text-brand">
+              <Loader2 className="animate-spin w-8 h-8 mb-4" />
+              <p className="text-sm font-medium text-brand-rose">Carregando estoque...</p>
             </div>
-          )}
-        </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+              <Package className="mb-3 h-12 w-12 text-brand-lavender" />
+              <p className="text-sm font-medium text-brand-rose">Nenhum produto encontrado</p>
+            </div>
+          ) : (
+            filtered.map((item, i) => {
+              const qty = item.total_quantity ?? item.quantity ?? 0;
+              const minQty = item.min_quantity ?? 5;
+              const status = getStockStatus(qty, minQty);
 
-        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
-          {(["all", "entrada", "saida"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-colors border ${
-                filter === f
-                  ? "bg-brand text-white shadow-sm border-brand"
-                  : "bg-card text-muted-foreground border-border hover:bg-secondary"
-              }`}
-            >
-              {f === "all"
-                ? "Todos os Tipos"
-                : f === "entrada"
-                ? "Apenas Entradas"
-                : "Apenas Saídas"}
-            </button>
-          ))}
-        </div>
+              const prodName = item.product?.name || item.product_name || "Sem Nome";
+              const displayName = item.custom_name || prodName;
+              const imageUrl = item.product?.image_url || item.image_url;
+              const barcode = item.product?.bar_code || item.barcode;
+              const category = item.product?.category || item.category;
 
-        {/* ══════════════════════════════════════════
-            MOVEMENT LIST
-            ══════════════════════════════════════════ */}
-        {filtered.length === 0 ? (
-          <div className="flex flex-col items-center py-20 text-muted-foreground">
-            <Package className="mb-4 h-14 w-14 opacity-20" />
-            <p className="text-base font-medium">Nenhuma movimentação</p>
-            <p className="text-sm mt-1">Tente mudar o mês ou os filtros acima.</p>
-          </div>
-        ) : (
-          <div className="space-y-3 pt-2">
-            {filtered.map((m, i) => {
-              const typeInfo = TYPE_LABELS[m.raw_type] || TYPE_LABELS["AJUSTE"];
-              const displayQuantity = Math.abs(m.quantity);
-              const isExpanded = expandedId === m.id;
-              const isEntry = m.ui_type === "entrada";
-              const operacaoTotal =
-                displayQuantity * (Number(m.unit_price) || Number(m.unit_cost) || 0);
+              const productIdToEdit = item.product?.id || item.id;
+              const isExpanded = expandedId === item.id;
+
+              const salePrice = Number(item.sale_price) || 0;
+              const costPrice = Number(item.cost_price) || 0;
+              const profitUnit = salePrice - costPrice;
+
+              const nextExpiryBatch =
+                item.consolidatedBatches && item.consolidatedBatches.length > 0
+                  ? item.consolidatedBatches.find((b: any) => b.expiration_date)
+                  : null;
 
               return (
                 <motion.div
-                  key={m.id}
-                  initial={{ opacity: 0, y: 10 }}
+                  key={item.id}
+                  initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.02 }}
-                  onClick={() => setExpandedId(isExpanded ? null : m.id)}
-                  className="flex flex-col rounded-xl border border-border bg-card p-4 transition-shadow hover:shadow-md cursor-pointer relative overflow-hidden"
+                  transition={{ delay: i * 0.03 }}
+                  className="flex flex-col rounded-xl border border-brand/10 bg-card p-4 hover:shadow-md hover:border-brand/20 transition-all cursor-pointer relative overflow-hidden"
+                  onClick={() => setExpandedId(isExpanded ? null : item.id)}
                 >
-                  {/* Data no topo */}
-                  <div className="absolute top-2 right-3 text-[10px] text-muted-foreground font-medium flex items-center gap-1.5">
-                    <Calendar className="h-3 w-3" />
-                    {formatDate(m.created_at)}
-                  </div>
-
-                  <div className="flex items-start gap-4 mt-3">
+                  <div className="flex items-start gap-4">
+                    {/* Foto */}
                     <div
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${
-                        isEntry ? "bg-success/10" : "bg-destructive/10"
-                      }`}
+                      className="relative group shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (imageUrl) setPreviewImage(imageUrl);
+                      }}
                     >
-                      {isEntry ? (
-                        <ArrowUpCircle className="h-6 w-6 text-success" />
+                      {imageUrl ? (
+                        <>
+                          <img
+                            src={imageUrl}
+                            alt={displayName}
+                            className="h-16 w-16 rounded-xl object-cover border border-brand-peach bg-brand-soft"
+                          />
+                          <div className="absolute inset-0 bg-brand/0 group-hover:bg-brand/20 transition-colors rounded-xl flex items-center justify-center">
+                            <ZoomIn className="text-white opacity-0 group-hover:opacity-100 h-5 w-5 transition-opacity" />
+                          </div>
+                        </>
                       ) : (
-                        <ArrowDownCircle className="h-6 w-6 text-destructive" />
+                        <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-brand-soft border border-brand-peach">
+                          <Package className="h-6 w-6 text-brand-rose" />
+                        </div>
                       )}
                     </div>
 
-                    <div className="min-w-0 flex-1 pr-4">
-                      <div className="flex justify-between items-start mb-1">
-                        <p className="text-sm font-bold text-foreground line-clamp-2 leading-tight">
-                          {m.product_name}
-                        </p>
-                        <span
-                          className={`text-sm font-mono font-black shrink-0 ml-3 ${
-                            isEntry ? "text-success" : "text-destructive"
-                          }`}
-                        >
-                          {isEntry ? "+" : "-"}
-                          {displayQuantity} un.
-                        </span>
-                      </div>
+                    <div className="min-w-0 flex-1 pt-0.5">
+                      <p className="text-sm font-bold text-foreground line-clamp-2 leading-tight">
+                        {displayName}
+                      </p>
 
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
                         <span
-                          className={`shrink-0 rounded-full px-2 py-0.5 font-bold uppercase tracking-wider ${
-                            isEntry
-                              ? "bg-success/10 text-success"
-                              : "bg-destructive/10 text-destructive"
-                          }`}
+                          className={`shrink-0 rounded-full border px-2 py-0.5 font-bold uppercase tracking-wider ${status.color}`}
                         >
-                          {isEntry ? "Entrada" : "Saída"}
+                          {status.label}
                         </span>
-                        <span className="font-mono bg-secondary px-2 py-0.5 rounded">
-                          {m.barcode}
+                        <span className="bg-brand-lavender/30 text-brand-rose px-2 py-0.5 rounded font-medium">
+                          {category}
                         </span>
-                        {typeInfo && (
-                          <span className="bg-secondary px-2 py-0.5 rounded text-foreground font-medium">
-                            {typeInfo.emoji} {typeInfo.label}
+                        <span className="font-mono bg-brand-soft px-2 py-0.5 rounded text-brand-rose/70">
+                          {barcode}
+                        </span>
+
+                        {nextExpiryBatch &&
+                          (() => {
+                            const batchStatus = getBatchStatus(nextExpiryBatch);
+                            if (batchStatus.status === "valid" || batchStatus.status === "no_date")
+                              return null;
+
+                            const exp = new Date(nextExpiryBatch.expiration_date);
+                            const now = new Date();
+                            const daysLeft = Math.ceil(
+                              (exp.getTime() - now.getTime()) / 86400000
+                            );
+
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-bold ${
+                                  batchStatus.status === "expired" ||
+                                  batchStatus.status === "critical"
+                                    ? "border-destructive/20 bg-destructive/10 text-destructive"
+                                    : "border-brand-rose/30 bg-brand-peach/40 text-brand-rose"
+                                }`}
+                              >
+                                <batchStatus.icon className="h-3 w-3" />
+                                {daysLeft <= 0 ? "Vencido" : `${daysLeft}d`}
+                              </span>
+                            );
+                          })()}
+
+                        {item.consolidatedBatches && item.consolidatedBatches.length > 1 && (
+                          <span className="inline-flex items-center gap-0.5 rounded-full border border-brand-lavender bg-brand-lavender/20 text-brand px-1.5 py-0.5 text-[10px] font-bold">
+                            <Calendar className="h-3 w-3" />
+                            {item.consolidatedBatches.length} validades
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Preços */}
-                  <div className="flex items-center justify-between border-t border-border/50 pt-3 mt-3">
-                    <div className="flex gap-5 text-xs text-muted-foreground">
-                      <p>
-                        Custo:{" "}
-                        <span className="font-bold text-foreground">
-                          {formatMoney(m.unit_cost)}
-                        </span>
-                      </p>
+                  {/* ── Resumo ── */}
+                  <div className="flex items-center justify-between border-t border-brand-peach/30 pt-3 mt-3">
+                    <div className="flex gap-4 text-xs text-brand-rose/70">
                       <p>
                         Venda:{" "}
                         <span className="font-bold text-foreground">
-                          {formatMoney(m.unit_price)}
+                          {formatMoney(salePrice)}
+                        </span>
+                      </p>
+                      <p className="flex items-center gap-1">
+                        Lucro:
+                        <span
+                          className={`font-bold flex items-center gap-0.5 ${
+                            profitUnit >= 0 ? "text-brand" : "text-destructive"
+                          }`}
+                        >
+                          {profitUnit >= 0 ? (
+                            <TrendingUp className="h-3 w-3" />
+                          ) : (
+                            <TrendingDown className="h-3 w-3" />
+                          )}
+                          {formatMoney(profitUnit)}
                         </span>
                       </p>
                     </div>
-                    <div className="p-1.5 rounded-full bg-secondary/80 text-muted-foreground hover:bg-secondary transition-colors">
-                      {isExpanded ? (
-                        <ChevronUp className="h-4 w-4" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4" />
-                      )}
+
+                    <div className="flex items-center gap-3">
+                      <p
+                        className={`text-sm font-bold font-mono ${
+                          qty <= 0 ? "text-destructive" : "text-brand"
+                        }`}
+                      >
+                        {qty} un.
+                      </p>
+                      <div className="p-1 rounded-full bg-brand-soft text-brand-rose hover:bg-brand-peach/40 transition-colors">
+                        {isExpanded ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                      </div>
                     </div>
                   </div>
 
-                  {/* ── Acordeão com detalhes ── */}
+                  {/* ── Acordeão ── */}
                   <AnimatePresence>
                     {isExpanded && (
                       <motion.div
@@ -385,78 +476,194 @@ export default function MovementHistory() {
                         exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden"
                       >
-                        <div className="mt-3 pt-3 border-t border-border/50 grid grid-cols-2 gap-y-3 gap-x-4 text-xs">
-                          <div className="bg-secondary/30 p-3 rounded-xl border border-border">
-                            <p className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1.5 mb-1">
-                              <Calculator className="h-3.5 w-3.5" /> Total da Operação
-                            </p>
-                            <p className="font-mono font-bold text-base text-foreground">
-                              {formatMoney(operacaoTotal)}{" "}
-                              <span className="text-[10px] font-medium text-muted-foreground">
-                                ({displayQuantity}x)
-                              </span>
-                            </p>
-                          </div>
-
-                          {m.profit != null && (
-                            <div className="bg-secondary/30 p-3 rounded-xl border border-border">
-                              <p className="text-[10px] uppercase font-bold text-muted-foreground mb-1">
-                                Lucro da Venda
+                        <div className="mt-3 pt-3 border-t border-brand-peach/30 space-y-4">
+                          {/* Financeiro */}
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-brand-soft p-3 rounded-xl border border-brand-peach/50">
+                              <p className="text-[10px] uppercase font-bold text-brand-rose/60 mb-0.5">
+                                Custo Unitário
+                              </p>
+                              <p className="font-mono text-sm font-semibold text-foreground">
+                                {formatMoney(costPrice)}
+                              </p>
+                            </div>
+                            <div className="bg-brand-lavender/15 p-3 rounded-xl border border-brand-lavender/40">
+                              <p className="text-[10px] uppercase font-bold text-brand/70 mb-0.5">
+                                Lucro Bruto Un.
                               </p>
                               <p
-                                className={`font-mono font-bold text-base ${
-                                  m.profit >= 0 ? "text-success" : "text-destructive"
+                                className={`font-mono text-sm font-bold ${
+                                  profitUnit >= 0 ? "text-brand" : "text-destructive"
                                 }`}
                               >
-                                {formatMoney(m.profit)}
+                                {formatMoney(profitUnit)}
                               </p>
+                            </div>
+                          </div>
+
+                          {/* Lotes consolidados */}
+                          {item.consolidatedBatches && item.consolidatedBatches.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <p className="text-[10px] uppercase font-bold text-brand-rose/60 flex items-center gap-1">
+                                  <Clock className="h-3 w-3" /> Validades Consolidadas (FIFO)
+                                </p>
+                                {item.batchSummary && (
+                                  <div className="flex items-center gap-1 text-[10px]">
+                                    {item.batchSummary.expired > 0 && (
+                                      <span className="bg-destructive/10 text-destructive px-1.5 py-0.5 rounded-full font-bold">
+                                        {item.batchSummary.expired} vencidas
+                                      </span>
+                                    )}
+                                    {item.batchSummary.nearExpiry > 0 && (
+                                      <span className="bg-brand-peach/50 text-brand-rose px-1.5 py-0.5 rounded-full font-bold">
+                                        {item.batchSummary.nearExpiry} próximas
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="space-y-1">
+                                {item.consolidatedBatches.map((batch: any, index: number) => {
+                                  const batchStatus = getBatchStatus(batch);
+                                  const isFirstBatch = index === 0;
+
+                                  return (
+                                    <motion.div
+                                      key={batch.id}
+                                      initial={{ opacity: 0, x: -10 }}
+                                      animate={{ opacity: 1, x: 0 }}
+                                      transition={{ delay: index * 0.05 }}
+                                      className={`flex justify-between items-center p-3 rounded-xl border text-xs transition-all ${
+                                        isFirstBatch
+                                          ? "bg-brand-soft border-brand/20 shadow-sm"
+                                          : "bg-card border-brand-peach/20"
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <batchStatus.icon
+                                          className={`h-3 w-3 ${batchStatus.color}`}
+                                        />
+                                        <span className="font-medium text-brand-rose/70">
+                                          {batch.batch_code}
+                                        </span>
+                                        {isFirstBatch && (
+                                          <span className="bg-brand/10 text-brand px-1.5 py-0.5 rounded-full text-[10px] font-bold">
+                                            PRÓXIMO
+                                          </span>
+                                        )}
+                                        {batch.is_consolidated && (
+                                          <span className="bg-brand-lavender/30 text-brand px-1.5 py-0.5 rounded-full text-[10px] font-bold">
+                                            CONSOLIDADO
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center gap-3">
+                                        <span
+                                          className={`text-foreground flex items-center gap-1 ${batchStatus.color}`}
+                                        >
+                                          <Calendar className="h-3 w-3" />
+                                          {batch.formatted_date}
+                                        </span>
+                                        <span
+                                          className={`font-mono font-bold px-2 py-0.5 rounded-full ${
+                                            isFirstBatch
+                                              ? "bg-brand text-white"
+                                              : "bg-brand-soft text-brand-rose"
+                                          }`}
+                                        >
+                                          {batch.quantity} un.
+                                        </span>
+                                      </div>
+                                    </motion.div>
+                                  );
+                                })}
+                              </div>
+                              <div className="text-xs text-brand-rose/60 bg-brand-soft p-2 rounded-lg border border-brand-peach/30">
+                                💡 Lotes com a mesma validade foram consolidados para melhor visualização
+                              </div>
                             </div>
                           )}
 
-                          {(m.batch_code ||
-                            m.expiration_date ||
-                            m.description ||
-                            m.notes) && (
-                            <div className="col-span-2 rounded-xl bg-brand/5 p-3.5 border border-brand/20 space-y-2">
-                              <p className="text-[10px] uppercase font-bold text-brand mb-1.5 flex items-center gap-1.5">
-                                <Package className="h-3.5 w-3.5" /> Informações Adicionais
-                              </p>
-                              {m.batch_code && (
-                                <p className="text-foreground text-xs">
-                                  <span className="font-semibold text-brand/80">Lote:</span>{" "}
-                                  {m.batch_code}
-                                </p>
-                              )}
-                              {m.expiration_date && (
-                                <p className="text-foreground text-xs">
-                                  <span className="font-semibold text-brand/80">Validade:</span>{" "}
-                                  {new Date(m.expiration_date).toLocaleDateString("pt-BR")}
-                                </p>
-                              )}
-                              {m.description && (
-                                <p className="text-foreground text-xs">
-                                  <span className="font-semibold text-brand/80">Descrição:</span>{" "}
-                                  {m.description}
-                                </p>
-                              )}
-                              {m.notes && (
-                                <p className="text-foreground text-xs">
-                                  <span className="font-semibold text-brand/80">Notas:</span>{" "}
-                                  {m.notes}
-                                </p>
-                              )}
-                            </div>
-                          )}
+                          {/* Botões de ação */}
+                          <div className="flex gap-2 pt-2">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setAdjustItem(item);
+                              }}
+                              className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-brand-soft py-3 text-xs font-bold hover:bg-brand-peach/30 transition-colors text-brand border border-brand-peach/50"
+                            >
+                              <Scale className="h-4 w-4" /> Ajustar Saldo
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/products/${productIdToEdit}/edit`);
+                              }}
+                              className="flex-1 flex items-center justify-center gap-2 rounded-xl border border-brand-peach/50 py-3 text-xs font-bold hover:bg-brand-peach/20 transition-colors text-brand-rose"
+                            >
+                              <Edit2 className="h-4 w-4" /> Editar Produto
+                            </button>
+                          </div>
                         </div>
                       </motion.div>
                     )}
                   </AnimatePresence>
                 </motion.div>
               );
-            })}
-          </div>
-        )}
+            })
+          )}
+        </div>
       </main>
+
+      {/* Lightbox */}
+      <AnimatePresence>
+        {previewImage && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            onClick={() => setPreviewImage(null)}
+          >
+            <button
+              className="absolute top-4 right-4 p-2.5 bg-white/10 hover:bg-white/20 text-white rounded-full transition-colors"
+              onClick={() => setPreviewImage(null)}
+            >
+              <X size={24} />
+            </button>
+            <motion.img
+              initial={{ scale: 0.9 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.9 }}
+              src={previewImage}
+              alt="Visualização do Produto"
+              className="max-w-full max-h-[80vh] rounded-xl object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <StockAdjustmentModal
+        isOpen={adjustItem !== null}
+        onClose={() => setAdjustItem(null)}
+        item={adjustItem}
+        onAdjusted={loadInventory}
+      />
+      <ProductSearchModal
+        isOpen={showCatalog}
+        onClose={() => setShowCatalog(false)}
+        onSelect={(product) => {
+          toast({
+            title: "Produto selecionado",
+            description: `${product.name} - Use "Novo" para adicionar ao estoque`,
+          });
+          setShowCatalog(false);
+        }}
+      />
     </div>
   );
 }
