@@ -67,7 +67,7 @@ export interface PersistCartInput {
 
 // 🔹 LISTAR LEADS por tenant
 export async function listLeads(tenantId: string): Promise<Lead[]> {
-  const response = await api.get(`/api/crm/leads`, {
+  const response = await api.get(`/crm/leads`, {
     params: { tenant_id: tenantId },
   });
   return response.data;
@@ -75,13 +75,13 @@ export async function listLeads(tenantId: string): Promise<Lead[]> {
 
 // 🔹 OBTER UM LEAD por ID
 export async function getLead(leadId: string): Promise<Lead> {
-  const response = await api.get(`/api/crm/leads/${leadId}`);
+  const response = await api.get(`/crm/leads/${leadId}`);
   return response.data;
 }
 
 // 🔹 UPSERT LEAD (cria ou atualiza por phone + tenant_id)
 export async function upsertLead(input: LeadInput): Promise<Lead> {
-  const response = await api.post("/api/crm/leads/upsert", {
+  const response = await api.post("/crm/leads/upsert", {
     ...input,
     phone: input.phone.replace(/\D/g, ""),
     consent_timestamp: new Date().toISOString(),
@@ -91,12 +91,12 @@ export async function upsertLead(input: LeadInput): Promise<Lead> {
 
 // 🔹 ANONIMIZAR LEAD (LGPD - Direito ao Esquecimento)
 export async function anonymizeLead(leadId: string): Promise<void> {
-  await api.post(`/api/crm/leads/${leadId}/anonymize`);
+  await api.post(`/crm/leads/${leadId}/anonymize`);
 }
 
 // 🔹 EXCLUIR LEAD (exclusão lógica ou física, conforme política)
 export async function deleteLead(leadId: string): Promise<void> {
-  await api.delete(`/api/crm/leads/${leadId}`);
+  await api.delete(`/crm/leads/${leadId}`);
 }
 
 // 🔹 EXPORTAR LEADS PARA CSV (portabilidade de dados - LGPD)
@@ -148,7 +148,7 @@ export function downloadCsv(filename: string, content: string): void {
 
 // 🔹 PERSISTIR CARRINHO (vincula sessão/lead ao carrinho)
 export async function persistCart(input: PersistCartInput): Promise<void> {
-  await api.post("/api/crm/carts/persist", input);
+  await api.post("/crm/carts/persist", input);
 }
 
 // 🔹 UTILITÁRIO: Gerar session_id único por loja/visitante
