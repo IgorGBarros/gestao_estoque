@@ -29,5 +29,5 @@ export function getOrCreateSessionId(storeSlug: string): string {
 
 // 🔹 Persiste carrinho no backend para analytics/CRM
 export async function persistCart(input: PersistCartInput): Promise<void> {
-  await api.post("/api/crm/carts/persist", input);
+  await api.post("/crm/carts/persist", input);
 }

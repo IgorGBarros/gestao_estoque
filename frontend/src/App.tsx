@@ -62,22 +62,6 @@ const queryClient = new QueryClient({
   },
 });
 
-const defaultFormatCurrency = (value: number) =>
-  new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
-
-const defaultToast = (opts: {
-  title: string;
-  description?: string;
-  variant?: "default" | "destructive";
-}) => {
-  if (import.meta.env.DEV) {
-    console.log("[toast]", opts.title, opts.description, opts.variant);
-  }
-};
-
 // ✅ Layout Wrapper para Rotas Protegidas
 // Nota: o <SessionHeader /> global foi REMOVIDO daqui. A sessão de cadastro
 // pertence ao fluxo do AddProduct (que já tem indicador próprio de "Sessão
@@ -161,7 +145,7 @@ const App = () => {
                       {/* ==========================================
                           ROTAS PÚBLICAS (Sem autenticação)
                           ========================================== */}
-                      <Route path="/lp" element={<LandingPage formatCurrency={defaultFormatCurrency} toast={defaultToast} />} />
+                      <Route path="/lp" element={<LandingPage />} />
                       <Route path="/auth" element={<Auth />} />
                       <Route path="/privacy" element={<PrivacyPage />} />
                       <Route path="/terms" element={<TermsPage />} />
