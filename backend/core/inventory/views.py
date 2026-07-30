@@ -2636,7 +2636,19 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             
             quantity = abs(int(data.get('quantity', 0)))
             transaction_type = data.get('transaction_type', '').upper()
-            unit_price = float(data.get('unit_price', 0))
+            # ⚠️ CORREÇÃO: era `float(...)`. O campo do modelo é DecimalField, e
+            # o objeto é serializado logo abaixo SEM recarregar do banco — o
+            # atributo em memória ficava como float puro. O serializer soma
+            # `unit_price - unit_cost` (Decimal, vindo de inventory_item.cost_price)
+            # para calcular o lucro, e Python não permite float - Decimal:
+            # TypeError, capturado pelo except genérico e devolvido como 500
+            # "Erro ao criar transação" — quebrava TODA baixa (venda, presente,
+            # brinde, uso próprio, perda, ajuste).
+            from decimal import Decimal, InvalidOperation
+            try:
+                unit_price = Decimal(str(data.get('unit_price', 0) or 0))
+            except InvalidOperation:
+                unit_price = Decimal('0')
             
             # ✅ VERIFICAR SE É SAÍDA E APLICAR FIFO (incluindo AJUSTE)
             is_exit = transaction_type in ['VENDA', 'USO_PROPRIO', 'PRESENTE', 'BRINDE', 'PERDA', 'SAIDA', 'AJUSTE']

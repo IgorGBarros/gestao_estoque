@@ -419,6 +419,28 @@ class StockTransactionSerializer(serializers.ModelSerializer):
     def get_formatted_date(self, obj):
         return obj.created_at.strftime('%d/%m/%Y %H:%M')
 
+    @staticmethod
+    def _as_decimal(valor):
+        """
+        Converte para Decimal com segurança, aceitando float, int, str, None
+        ou Decimal.
+
+        ⚠️ Existe por causa de um bug real: StockTransactionViewSet.create()
+        podia deixar `unit_price` como float puro em objetos criados sem
+        passar pelo serializer (fluxo de baixa/FIFO). Fazer `float - Decimal`
+        levanta TypeError, que virava um 500 em toda venda/presente/brinde/
+        uso próprio/perda. Normalizando aqui, o cálculo do lucro nunca quebra
+        a criação da transação, não importa que tipo o objeto trouxer.
+        """
+        if valor is None:
+            return Decimal('0')
+        if isinstance(valor, Decimal):
+            return valor
+        try:
+            return Decimal(str(valor))
+        except (InvalidOperation, ValueError, TypeError):
+            return Decimal('0')
+
     def get_profit(self, obj):
         """
         Lucro da movimentação. Só faz sentido em VENDA: é o que sobrou depois
@@ -428,13 +450,15 @@ class StockTransactionSerializer(serializers.ModelSerializer):
         if obj.transaction_type != 'VENDA':
             return None
         qtd = abs(obj.quantity or 0)
-        return float(((obj.unit_price or 0) - (obj.unit_cost or 0)) * qtd)
+        preco = self._as_decimal(obj.unit_price)
+        custo = self._as_decimal(obj.unit_cost)
+        return float((preco - custo) * qtd)
 
     def get_total_value(self, obj):
         """Valor total da movimentação: preço em vendas, custo nos demais."""
         qtd = abs(obj.quantity or 0)
         base = obj.unit_price if obj.transaction_type == 'VENDA' else obj.unit_cost
-        return float((base or 0) * qtd)
+        return float(self._as_decimal(base) * qtd)
 
 
 # ==========================================

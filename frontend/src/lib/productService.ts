@@ -66,7 +66,14 @@ export async function apiRequest<T>(
   };
 
   if (token) {
-    headers["Authorization"] = `Token ${token}`;
+    // ⚠️ CORREÇÃO: era `Token ${token}`. O backend (SimpleJWT) espera o
+    // esquema "Bearer", e o ApiKeyMiddleware trata QUALQUER header que não
+    // comece com "Bearer " como ausência de credencial — bloqueando com 401
+    // "API Key ausente" mesmo em endpoints públicos. Antes do middleware
+    // existir isso era inofensivo (o header malformado era simplesmente
+    // ignorado e a requisição seguia anônima); agora quebra a busca de
+    // produto ao cadastrar.
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   try {
