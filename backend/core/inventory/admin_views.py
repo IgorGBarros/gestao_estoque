@@ -10,7 +10,8 @@ from rest_framework.response import Response
 
 from .models import (
     Product, Store, InventoryItem, Sale, UserBehaviorLog, 
-    PlanConfig, Promotion, CustomUser, ConsentRecord, StockTransaction
+    PlanConfig, Promotion, CustomUser, ConsentRecord, StockTransaction,
+    Lead, Cart, CartItem,
 )
 
 logger = logging.getLogger(__name__)
@@ -1102,4 +1103,57 @@ def admin_toggle_block_user(request, user_id):
         'email': alvo.email,
         'is_active': alvo.is_active,
         'status': 'liberado' if alvo.is_active else 'bloqueado',
+    })
+
+# ─────────────────────────────────────────────────────────────
+# 📇 CRM — VISÃO AGREGADA (SEM DADOS DE TERCEIROS)
+# ─────────────────────────────────────────────────────────────
+# ⚠️ LIMITE FIRME DE LGPD: os clientes finais capturados na vitrine NUNCA
+# deram nenhum aceite com o Minha Amora — o consentimento deles é com a
+# CONSULTORA, não com a plataforma. Do ponto de vista da plataforma, esses
+# clientes são TERCEIROS de uma relação da qual ela não faz parte.
+#
+# Por isso este endpoint NUNCA devolve nome, telefone, e-mail, data de
+# nascimento ou qualquer histórico individual de compra — só CONTAGENS e
+# MÉDIAS por loja. Se um dia sentir falta de um número aqui, o teste é
+# simples: "dá pra eu identificar UMA pessoa a partir disto?" Se sim, não
+# entra.
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_crm_overview(request):
+    """
+    GET /api/admin/analytics/crm/ — quantos leads cada loja capturou na
+    vitrine, taxa de opt-in, ticket médio e recorrência — agregado, sem
+    identificar ninguém.
+    """
+    linhas = []
+    for store in Store.objects.select_related('owner').all():
+        leads = Lead.objects.filter(store=store)
+        total_leads = leads.count()
+        if total_leads == 0:
+            continue  # loja sem nenhum lead não entra na lista
+
+        opt_in = leads.filter(whatsapp_opt_in=True).count()
+        recorrentes = leads.filter(total_orders__gte=2).count()
+        ticket_medio = (leads.exclude(total_orders=0)
+                         .aggregate(m=Avg('total_spent'))['m']) or 0
+
+        linhas.append({
+            'store_id': store.id,
+            'store_name': store.name,  # nome da LOJA, não de cliente — ok mostrar
+            'total_leads': total_leads,
+            'opt_in_rate': round(opt_in / total_leads * 100, 1),
+            'clientes_recorrentes': recorrentes,
+            'ticket_medio': round(float(ticket_medio), 2),
+        })
+
+    linhas.sort(key=lambda x: x['total_leads'], reverse=True)
+
+    return Response({
+        'totais': {
+            'lojas_com_crm_ativo': len(linhas),
+            'leads_capturados': sum(l['total_leads'] for l in linhas),
+        },
+        'lojas': linhas,
     })

@@ -1,10 +1,11 @@
 // components/NotificationBell.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
 import { useState, useRef, useEffect } from "react";
-import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package, Crown } from "lucide-react";
+import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package, Crown, Users, Cake, ShoppingBag } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useExpiryAlerts, ExpiryAlert } from "../hooks/useExpiryAlerts";
 import { useSalesNotifications, SalesMilestone, WeeklyInsight } from "../hooks/useSalesNotifications";
 import { useSubscriptionAlert } from "../hooks/useSubscriptionAlert";
+import { useCrmNotifications } from "../hooks/useCrmNotifications";
 import { formatMoney } from "../lib/api";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -23,6 +24,7 @@ export default function NotificationBell() {
   const { alerts: expiryAlerts, totalCount: expiryCount, criticalCount } = useExpiryAlerts();
   const { milestones, weeklyInsight, notificationCount: salesCount, dismissMilestone } = useSalesNotifications();
   const { subscriptionAlert } = useSubscriptionAlert();
+  const { crmItens } = useCrmNotifications();
 
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"all" | "expiry" | "sales">("all");
@@ -39,7 +41,7 @@ export default function NotificationBell() {
   const filteredCritical = expiryEnabled ? criticalCount : 0;
   const filteredSalesCount = filteredMilestones.length + (filteredWeekly ? 1 : 0);
   const subCount = subscriptionAlert ? 1 : 0;
-  const totalCount = filteredExpiryCount + filteredSalesCount + subCount;
+  const totalCount = filteredExpiryCount + filteredSalesCount + subCount + crmItens.length;
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -148,6 +150,19 @@ export default function NotificationBell() {
                   }}
                 />
               )}
+
+              {/* CRM: novos clientes, aniversários, carrinho abandonado —
+                  todas levam para a central de clientes. */}
+              {crmItens.map((item) => (
+                <CrmNotificationItem
+                  key={item.key}
+                  item={item}
+                  onNavigate={() => {
+                    setOpen(false);
+                    navigate("/crm");
+                  }}
+                />
+              ))}
 
               {/* Milestones */}
               {(activeTab === "all" || activeTab === "sales") &&
@@ -302,6 +317,30 @@ function WeeklyInsightItem({
 }
 
 // ── Expiry Alert Item ──
+function CrmNotificationItem({
+  item, onNavigate,
+}: {
+  item: { tipo: string; titulo: string; descricao: string };
+  onNavigate: () => void;
+}) {
+  const Icone = item.tipo === "novo_lead" ? Users
+    : item.tipo === "aniversario" ? Cake
+    : ShoppingBag;
+  return (
+    <button
+      onClick={onNavigate}
+      className="flex w-full items-center gap-3 border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50"
+    >
+      <Icone className="h-4 w-4 shrink-0 text-brand" />
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-foreground">{item.titulo}</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.descricao}</p>
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
 function SubscriptionAlertItem({
   alert,
   onNavigate,

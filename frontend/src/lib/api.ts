@@ -1000,6 +1000,21 @@ export const adminHealthApi = {
     apiRequest<{ user_id: number; email: string; is_active: boolean; status: string }>(
       `/admin/users/${userId}/toggle-block/`, { method: "POST" }
     ),
+
+  /**
+   * CRM agregado por loja — NUNCA traz nome, telefone ou histórico de
+   * cliente final. É proposital: esses clientes deram consentimento com a
+   * CONSULTORA, não com o Minha Amora, então a plataforma só pode ver
+   * contagens e médias, nunca um indivíduo.
+   */
+  getCrmOverview: () =>
+    apiRequest<{
+      totais: { lojas_com_crm_ativo: number; leads_capturados: number };
+      lojas: {
+        store_id: number; store_name: string; total_leads: number;
+        opt_in_rate: number; clientes_recorrentes: number; ticket_medio: number;
+      }[];
+    }>("/admin/analytics/crm/"),
 };
 
 // ── Relatório de movimentações (CSV) ──
@@ -1037,6 +1052,20 @@ export const movementsReportApi = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
+};
+
+// ── Notificações do CRM (novos leads, aniversários, carrinho abandonado) ──
+export interface CrmNotifications {
+  novos_leads: { id: number; name: string; created_at: string }[];
+  aniversarios: { id: number; name: string; date: string }[];
+  carrinhos_abandonados: {
+    cart_id: number; lead_id: number; lead_name: string;
+    items: string[]; updated_at: string;
+  }[];
+}
+
+export const crmNotificationsApi = {
+  get: () => apiRequest<CrmNotifications>("/crm/notifications"),
 };
 
 export const consentApi = {

@@ -36,6 +36,22 @@ class ApiKeyMiddleware(MiddlewareMixin):
         # Profile (usa JWT, não API Key)
         r'^/api/profile/',
 
+        # ⚠️ Catálogo/busca de produtos: usado pelo AddProduct (busca por nome
+        # e código de barras enquanto a consultora digita). As views são
+        # AllowAny de propósito — não exigem login nem API key. Sem esta
+        # exclusão, o middleware bloqueava com 401 "API Key ausente" mesmo
+        # a view não exigindo nenhuma autenticação, quebrando a busca ao
+        # cadastrar produto.
+        r'^/api/products/',
+
+        # ⚠️ CRM da vitrine: `leads/upsert` e `carts/persist` são chamados
+        # por VISITANTES sem login (o "CRM invisível"). As rotas que exigem
+        # autenticação (listar, ver, anonimizar, excluir) continuam
+        # protegidas pelo IsAuthenticated do DRF — este middleware é
+        # especificamente sobre a API comercial (chaves pk_live_), não sobre
+        # login geral do app, então excluir o prefixo inteiro é seguro.
+        r'^/api/crm/',
+
         # Painel admin e pagamentos: autenticam por JWT (IsAdminUser /
         # IsAuthenticated), não pela API Key comercial. Sem estas linhas o
         # middleware bloqueava o painel inteiro e o checkout do Asaas.

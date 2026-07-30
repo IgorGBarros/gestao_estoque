@@ -92,6 +92,36 @@ export default function Storefront() {
     }
   }, [storeSlug]);
 
+  // 🔹 CRM: sincroniza a sacola com o backend conforme ela muda — não só no
+  // fechamento do pedido. Sem isto, uma cliente que adiciona produtos e sai
+  // sem finalizar não deixa NENHUM rastro: o "carrinho abandonado" nunca
+  // existia porque só salvávamos no clique final de "enviar pedido".
+  //
+  // Debounce de 2s pra não bater na API a cada + / - de quantidade. Se já
+  // existe um lead capturado nesta sessão (visitante que voltou), amarra o
+  // carrinho a ele — é o que torna o abandono ACIONÁVEL (a consultora tem o
+  // WhatsApp pra quem procurar).
+  useEffect(() => {
+    if (!tenantId || bag.length === 0) return;
+    const timer = setTimeout(() => {
+      const leadIdSalvo = localStorage.getItem(getLeadCapturedKey(tenantId));
+      const cartItems: CartItemInput[] = bag.map((b) => ({
+        inventory_id: b.id,
+        product_name: getDisplayName(b),
+        quantity: b.qty,
+        price_snapshot: b.sale_price || 0,
+      }));
+      persistCart({
+        tenant_id: tenantId,
+        session_id: sessionId,
+        lead_id: leadIdSalvo || undefined,
+        checked_out: false,
+        items: cartItems,
+      }).catch(() => { /* silencioso: não é ação da cliente, não pode gerar erro visível */ });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [bag, tenantId, sessionId]);
+
   useEffect(() => {
     if (storeSlug) saveCart(bag, storeSlug);
   }, [bag, storeSlug]);
@@ -188,20 +218,24 @@ export default function Storefront() {
   const getDisplayName = (item: StorefrontItem | BagItem) => getProductDisplayName(item);
   const getItemQtyInBag = (id: string) => bag.find((b) => b.id === id)?.qty || 0;
 
+  // 🔹 CRM: monta só o TEXTO da mensagem (sem codificar pra URL). Separado
+  // do link porque agora esse texto também é REGISTRADO no pedido — é o
+  // "o que ela enviou pra consultora" que a consultora pediu pra guardar.
+  const buildOrderMessageText = (itemsList: BagItem[]): string => {
+    if (itemsList.length === 1 && itemsList[0].qty === 1) {
+      const name = getDisplayName(itemsList[0]);
+      const priceText = itemsList[0].sale_price ? ` — ${formatMoney(itemsList[0].sale_price)}` : "";
+      return `Olá ${sellerName}! 😊\n\nTenho interesse no produto:\n• ${name}${priceText}\n\n💳 Forma de pagamento: *${paymentLabel}*\n\nEstá disponível?`;
+    }
+    const lines = itemsList.map((b) => `• ${b.qty}x ${getDisplayName(b)}${b.sale_price ? ` — ${formatMoney(b.sale_price * b.qty)}` : ""}`);
+    return `Olá ${sellerName}! 😊\n\nGostaria de solicitar os seguintes produtos:\n\n${lines.join("\n")}\n\n💰 Total estimado: *${formatMoney(bagTotal)}*\n💳 Forma de pagamento: *${paymentLabel}*\n\nPode verificar a disponibilidade e me retornar? Obrigada!`;
+  };
+
   // 🔹 CRM: Gera link do WhatsApp com mensagem contextual
   const buildWhatsappLink = (itemsList: BagItem[]) => {
     const rawPhone = sellerWhatsapp?.replace(/\D/g, "") || "";
     const phone = rawPhone.startsWith("55") ? rawPhone : `55${rawPhone}`;
-
-    if (itemsList.length === 1 && itemsList[0].qty === 1) {
-      const name = getDisplayName(itemsList[0]);
-      const priceText = itemsList[0].sale_price ? ` — ${formatMoney(itemsList[0].sale_price)}` : "";
-      const msg = `Olá ${sellerName}! 😊\n\nTenho interesse no produto:\n• ${name}${priceText}\n\n💳 Forma de pagamento: *${paymentLabel}*\n\nEstá disponível?`;
-      return `https://api.whatsapp.com/send/?phone=${phone}&text=${encodeURIComponent(msg)}`;
-    }
-
-    const lines = itemsList.map((b) => `• ${b.qty}x ${getDisplayName(b)}${b.sale_price ? ` — ${formatMoney(b.sale_price * b.qty)}` : ""}`);
-    const msg = `Olá ${sellerName}! 😊\n\nGostaria de solicitar os seguintes produtos:\n\n${lines.join("\n")}\n\n💰 Total estimado: *${formatMoney(bagTotal)}*\n💳 Forma de pagamento: *${paymentLabel}*\n\nPode verificar a disponibilidade e me retornar? Obrigada!`;
+    const msg = buildOrderMessageText(itemsList);
     return `https://api.whatsapp.com/send/?phone=${phone}&text=${encodeURIComponent(msg)}`;
   };
 
@@ -214,12 +248,49 @@ export default function Storefront() {
     setBagOpen(true);
   };
 
+  // 🔹 CRM: registra o pedido como FECHADO — com forma de pagamento e a
+  // mensagem exata que foi mandada. Reaproveitado tanto por quem preenche o
+  // modal agora quanto por quem já é cliente e está comprando de novo.
+  // Nunca bloqueia o envio: se isso falhar, o WhatsApp abre normalmente.
+  const registrarPedidoFechado = async (leadId: string) => {
+    if (!tenantId) return;
+    const cartItems: CartItemInput[] = bag.map((b) => ({
+      inventory_id: b.id,
+      product_name: getDisplayName(b),
+      quantity: b.qty,
+      price_snapshot: b.sale_price || 0,
+    }));
+    try {
+      await persistCart({
+        tenant_id: tenantId,
+        session_id: sessionId,
+        lead_id: leadId,
+        checked_out: true,
+        payment_method: paymentMethod,
+        whatsapp_message: buildOrderMessageText(bag),
+        items: cartItems,
+      });
+    } catch {
+      /* silencioso — o pedido já foi enviado pelo WhatsApp de qualquer forma */
+    }
+  };
+
   // 🔹 CRM: Fluxo principal de envio do pedido
   const handleSendOrder = () => {
     if (bag.length === 0 || !sellerWhatsapp) return;
 
-    // 🔹 Se lead já foi capturado nesta sessão, envia direto para o WhatsApp
+    // ⚠️ CORREÇÃO: antes, quem já tinha lead capturado (cliente que voltou)
+    // só abria o WhatsApp — o pedido em si NUNCA era registrado como
+    // fechado. Isso significava que a 2ª compra em diante de qualquer
+    // cliente ficava invisível pro CRM: não contava em total_orders, não
+    // tinha forma de pagamento, e o carrinho ficava sempre marcado como
+    // "aberto" (por causa da sincronização automática da sacola) até virar
+    // um falso positivo de carrinho abandonado 2h depois.
     if (leadCaptured || !tenantId) {
+      const leadIdSalvo = tenantId ? localStorage.getItem(getLeadCapturedKey(tenantId)) : null;
+      if (leadIdSalvo) {
+        registrarPedidoFechado(leadIdSalvo); // não precisa esperar — abre o WhatsApp já
+      }
       const link = buildWhatsappLink(bag);
       window.open(link, "_blank", "noopener,noreferrer");
       return;
@@ -230,7 +301,13 @@ export default function Storefront() {
   };
 
   // 🔹 CRM: Callback do CheckoutModal - captura lead e persiste carrinho
-  const handleLeadSubmit = async (data: { name: string; phone: string; whatsapp_opt_in: boolean }) => {
+  const handleLeadSubmit = async (data: {
+    name: string;
+    phone: string;
+    email?: string;
+    birth_date?: string;
+    whatsapp_opt_in: boolean;
+  }) => {
     if (!tenantId) {
       // Fallback: se não tem tenant, envia direto
       const link = buildWhatsappLink(bag);
@@ -244,6 +321,8 @@ export default function Storefront() {
         tenant_id: tenantId,
         name: data.name.trim(),
         phone: data.phone.replace(/\D/g, ""),
+        email: data.email,
+        birth_date: data.birth_date,
         whatsapp_opt_in: data.whatsapp_opt_in,
         source: "storefront",
         consent_version: "1.0", // 🔹 LGPD: versão do termo de consentimento
@@ -267,6 +346,8 @@ export default function Storefront() {
         session_id: sessionId,
         lead_id: lead.id,
         checked_out: true,
+        payment_method: paymentMethod,
+        whatsapp_message: buildOrderMessageText(bag),
         items: cartItems,
       });
 
@@ -325,22 +406,63 @@ export default function Storefront() {
           </div>
         </motion.div>
 
-        {/* Brand Filter */}
-        {availableBrands.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              <button onClick={() => setSelectedBrand("")} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${selectedBrand === "" ? "bg-brand text-white shadow-md" : "bg-secondary/80 text-secondary-foreground hover:bg-secondary hover:shadow-sm"}`}>
-                Todas as Marcas <span className="ml-2 text-xs opacity-70">({items.length})</span>
-              </button>
-              {availableBrands.map((brand: string) => {
-                const brandCount = items.filter((item: StorefrontItem) => getProductBrand(item) === brand).length;
-                return (
-                  <button key={brand} onClick={() => setSelectedBrand(brand)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${selectedBrand === brand ? "bg-brand text-white shadow-md" : "bg-secondary/80 text-secondary-foreground hover:bg-secondary hover:shadow-sm"}`}>
-                    {brand} <span className="ml-2 text-xs opacity-70">({brandCount})</span>
-                  </button>
-                );
-              })}
-            </div>
+        {/* Abas de marca — mesma lógica de filtro de antes (client-side,
+            state selectedBrand/availableBrands), agora com o mesmo padrão
+            visual usado no resto do sistema (Dashboard, Relatórios/Meu MEI):
+            cartão com borda, segmento ativo preenchido na cor da marca. A
+            versão anterior era só texto sublinhado, sem "corpo" nenhum —
+            por isso destoava do resto do app. */}
+        {availableBrands.length > 1 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 flex gap-1 overflow-x-auto rounded-xl border border-border bg-card p-1 scrollbar-hide"
+            role="tablist"
+            aria-label="Filtrar por marca"
+          >
+            <button
+              role="tab"
+              aria-selected={selectedBrand === ""}
+              onClick={() => setSelectedBrand("")}
+              className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                selectedBrand === ""
+                  ? "bg-brand text-white"
+                  : "text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              Todas
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none ${
+                  selectedBrand === "" ? "bg-white/20" : "bg-secondary"
+                }`}
+              >
+                {items.length}
+              </span>
+            </button>
+            {availableBrands.map((brand: string) => {
+              const brandCount = items.filter((item: StorefrontItem) => getProductBrand(item) === brand).length;
+              const ativa = selectedBrand === brand;
+              return (
+                <button
+                  key={brand}
+                  role="tab"
+                  aria-selected={ativa}
+                  onClick={() => setSelectedBrand(brand)}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+                    ativa ? "bg-brand text-white" : "text-muted-foreground hover:bg-secondary"
+                  }`}
+                >
+                  {brand}
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none ${
+                      ativa ? "bg-white/20" : "bg-secondary"
+                    }`}
+                  >
+                    {brandCount}
+                  </span>
+                </button>
+              );
+            })}
           </motion.div>
         )}
 
@@ -424,8 +546,17 @@ export default function Storefront() {
 
       {/* BAG SHEET */}
       <Sheet open={bagOpen} onOpenChange={setBagOpen}>
-        <SheetContent side="bottom" className="max-h-[85vh] rounded-t-3xl sm:max-w-md sm:mx-auto px-4">
-          <SheetHeader className="pb-4">
+        {/* ⚠️ CORREÇÃO: o conteúdo (lista + pagamento + total + botões) só
+            tinha UM scroll interno, o da lista, limitado a 40vh. O resto
+            (cabeçalho, pagamento, total, os dois botões) disputava o mesmo
+            espaço fixo de max-h-[85vh] SEM nenhuma rolagem própria — com
+            a sacola cheia, o conjunto passava da altura da tela e o botão
+            "Esvaziar sacola" (o último elemento) ficava inacessível, sem
+            nenhuma barra de rolagem pra alcançar.
+            Agora é cabeçalho fixo + área do meio que rola + rodapé sempre
+            fixo — o padrão de layout pra esse tipo de painel. */}
+        <SheetContent side="bottom" className="flex max-h-[85vh] flex-col rounded-t-3xl px-4 sm:mx-auto sm:max-w-md">
+          <SheetHeader className="shrink-0 pb-4">
             <SheetTitle className="flex items-center gap-2 text-foreground text-lg"><ShoppingBag className="h-5 w-5 text-brand" />Sua Sacola</SheetTitle>
             <SheetDescription>{bag.length === 0 ? "Sua sacola está vazia" : `${bagCount} ${bagCount === 1 ? "item" : "itens"} selecionado${bagCount === 1 ? "" : "s"}`}</SheetDescription>
           </SheetHeader>
@@ -436,54 +567,62 @@ export default function Storefront() {
               <p className="text-sm font-medium">Adicione produtos da vitrine</p>
             </div>
           ) : (
-            <div className="flex flex-col gap-5 mt-2">
-              <div className="max-h-[40vh] space-y-3 overflow-y-auto pr-2 scrollbar-thin">
-                {bag.map((item) => (
-                  <div key={item.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 shadow-sm">
-                    <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-secondary/30">
-                      {item.image_url ? <img src={item.image_url} alt={getDisplayName(item)} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center"><Package className="h-6 w-6 text-muted-foreground/30" /></div>}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate text-xs font-bold text-foreground">{getDisplayName(item)}</p>
-                      {item.sale_price && <p className="mt-1 text-sm font-extrabold text-brand">{formatMoney(item.sale_price * item.qty)}</p>}
-                    </div>
-                    <div className="flex items-center gap-1 bg-secondary rounded-lg p-1 border border-border/50">
-                      <button className="flex h-6 w-6 items-center justify-center rounded bg-background shadow-sm text-muted-foreground hover:text-foreground" onClick={() => updateQty(item.id, -1)}><Minus className="h-3 w-3" /></button>
-                      <span className="w-6 text-center text-xs font-bold text-foreground">{item.qty}</span>
-                      <button className="flex h-6 w-6 items-center justify-center rounded bg-background shadow-sm text-muted-foreground hover:text-foreground" onClick={() => updateQty(item.id, 1)}><Plus className="h-3 w-3" /></button>
-                    </div>
-                    <button className="p-2 text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/10" onClick={() => removeFromBag(item.id)}><Trash2 className="h-4 w-4" /></button>
+            <>
+              {/* Área do meio: cresce e rola. min-h-0 é essencial aqui — sem
+                  ele, um filho flex com overflow-y-auto não encolhe direito
+                  e a rolagem não funciona (comportamento padrão do flexbox). */}
+              <div className="min-h-0 flex-1 overflow-y-auto pr-1 scrollbar-thin">
+                <div className="flex flex-col gap-5 pb-2 pt-2">
+                  <div className="space-y-3">
+                    {bag.map((item) => (
+                      <div key={item.id} className="flex items-center gap-3 rounded-xl border border-border bg-card p-2.5 shadow-sm">
+                        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-border/50 bg-secondary/30">
+                          {item.image_url ? <img src={item.image_url} alt={getDisplayName(item)} className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center"><Package className="h-6 w-6 text-muted-foreground/30" /></div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-xs font-bold text-foreground">{getDisplayName(item)}</p>
+                          {item.sale_price && <p className="mt-1 text-sm font-extrabold text-brand">{formatMoney(item.sale_price * item.qty)}</p>}
+                        </div>
+                        <div className="flex items-center gap-1 bg-secondary rounded-lg p-1 border border-border/50">
+                          <button className="flex h-6 w-6 items-center justify-center rounded bg-background shadow-sm text-muted-foreground hover:text-foreground" onClick={() => updateQty(item.id, -1)}><Minus className="h-3 w-3" /></button>
+                          <span className="w-6 text-center text-xs font-bold text-foreground">{item.qty}</span>
+                          <button className="flex h-6 w-6 items-center justify-center rounded bg-background shadow-sm text-muted-foreground hover:text-foreground" onClick={() => updateQty(item.id, 1)}><Plus className="h-3 w-3" /></button>
+                        </div>
+                        <button className="p-2 text-muted-foreground hover:text-destructive transition-colors rounded-lg hover:bg-destructive/10" onClick={() => removeFromBag(item.id)}><Trash2 className="h-4 w-4" /></button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <Separator />
-              
-              {/* Payment Method */}
-              <div className="space-y-3">
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Como deseja pagar?</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => setPaymentMethod("pix")} className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-3 transition-all ${paymentMethod === "pix" ? "border-brand bg-brand/5 text-brand shadow-sm" : "border-border bg-card text-muted-foreground hover:border-brand/30 hover:bg-secondary/50"}`}>
-                    <QrCode className="h-5 w-5" /><span className="text-xs font-bold">PIX</span>
-                  </button>
-                  <button onClick={() => setPaymentMethod("cartao")} className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-3 transition-all ${paymentMethod === "cartao" ? "border-brand bg-brand/5 text-brand shadow-sm" : "border-border bg-card text-muted-foreground hover:border-brand/30 hover:bg-secondary/50"}`}>
-                    <CreditCard className="h-5 w-5" /><span className="text-xs font-bold">Cartão ou Link</span>
-                  </button>
+                  <Separator />
+
+                  {/* Payment Method */}
+                  <div className="space-y-3">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Como deseja pagar?</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button onClick={() => setPaymentMethod("pix")} className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-3 transition-all ${paymentMethod === "pix" ? "border-brand bg-brand/5 text-brand shadow-sm" : "border-border bg-card text-muted-foreground hover:border-brand/30 hover:bg-secondary/50"}`}>
+                        <QrCode className="h-5 w-5" /><span className="text-xs font-bold">PIX</span>
+                      </button>
+                      <button onClick={() => setPaymentMethod("cartao")} className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 p-3 transition-all ${paymentMethod === "cartao" ? "border-brand bg-brand/5 text-brand shadow-sm" : "border-border bg-card text-muted-foreground hover:border-brand/30 hover:bg-secondary/50"}`}>
+                        <CreditCard className="h-5 w-5" /><span className="text-xs font-bold">Cartão ou Link</span>
+                      </button>
+                    </div>
+                  </div>
+                  <Separator />
+
+                  <div className="flex items-center justify-between px-1">
+                    <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Total do Pedido</span>
+                    <span className="text-2xl font-black text-foreground">{formatMoney(bagTotal)}</span>
+                  </div>
                 </div>
               </div>
-              <Separator />
-              
-              <div className="flex items-center justify-between px-1">
-                <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Total do Pedido</span>
-                <span className="text-2xl font-black text-foreground">{formatMoney(bagTotal)}</span>
-              </div>
-              
-              <div className="space-y-2 pt-2">
+
+              {/* Rodapé: NUNCA rola, sempre visível, não importa o tamanho da sacola. */}
+              <div className="shrink-0 space-y-2 border-t border-border pt-3">
                 <Button onClick={handleSendOrder} className="w-full h-14 gap-2 rounded-xl bg-[#25D366] text-base font-bold text-white shadow-lg hover:bg-[#128C7E] transition-all hover:scale-[1.02]">
                   <Send className="h-5 w-5" />Enviar pedido pelo WhatsApp
                 </Button>
                 <Button variant="ghost" className="w-full text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors" onClick={clearBag}>Esvaziar sacola</Button>
               </div>
-            </div>
+            </>
           )}
         </SheetContent>
       </Sheet>

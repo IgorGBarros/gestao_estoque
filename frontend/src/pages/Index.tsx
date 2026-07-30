@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   Package, TrendingDown, DollarSign, BarChart3, ScanBarcode, List,
-  ArrowDownCircle, Settings, PieChart, Store, History, User, Bell, CheckCircle2
+  ArrowDownCircle, Settings, PieChart, Store, History, User, Bell, CheckCircle2,
+  Users,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { statsApi } from "../lib/api";
@@ -170,6 +171,7 @@ export default function Index() {
           <ActionBtn onClick={() => navigate("/withdraw")} icon={ArrowDownCircle} label="Baixa" desc="Registrar saída" />
           <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" />
           <ActionBtn onClick={() => navigate("/history")} icon={History} label="Extrato" desc="Movimentações" />
+          <ActionBtn onClick={() => navigate("/crm")} icon={Users} label="Meus Clientes" desc="Quem comprou na vitrine" />
           <ActionBtn
             onClick={() => {
               // Bloqueado: oferece o upgrade em vez de levar a uma tela que

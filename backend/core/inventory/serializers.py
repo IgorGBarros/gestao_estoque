@@ -13,7 +13,8 @@ from django.conf import settings
 # Importa seus modelos de negócio
 from .models import (
     ConsentRecord, CustomUser, Product, InventoryItem, InventoryBatch, Store, 
-    Sale, SaleItem, StockTransaction, PlanConfig, Promotion, ThemeConfig
+    Sale, SaleItem, StockTransaction, PlanConfig, Promotion, ThemeConfig,
+    Lead, Cart, CartItem,
 )
 
 User = get_user_model()
@@ -419,6 +420,28 @@ class StockTransactionSerializer(serializers.ModelSerializer):
     def get_formatted_date(self, obj):
         return obj.created_at.strftime('%d/%m/%Y %H:%M')
 
+    @staticmethod
+    def _as_decimal(valor):
+        """
+        Converte para Decimal com segurança, aceitando float, int, str, None
+        ou Decimal.
+
+        ⚠️ Existe por causa de um bug real: StockTransactionViewSet.create()
+        podia deixar `unit_price` como float puro em objetos criados sem
+        passar pelo serializer (fluxo de baixa/FIFO). Fazer `float - Decimal`
+        levanta TypeError, que virava um 500 em toda venda/presente/brinde/
+        uso próprio/perda. Normalizando aqui, o cálculo do lucro nunca quebra
+        a criação da transação, não importa que tipo o objeto trouxer.
+        """
+        if valor is None:
+            return Decimal('0')
+        if isinstance(valor, Decimal):
+            return valor
+        try:
+            return Decimal(str(valor))
+        except (InvalidOperation, ValueError, TypeError):
+            return Decimal('0')
+
     def get_profit(self, obj):
         """
         Lucro da movimentação. Só faz sentido em VENDA: é o que sobrou depois
@@ -428,13 +451,15 @@ class StockTransactionSerializer(serializers.ModelSerializer):
         if obj.transaction_type != 'VENDA':
             return None
         qtd = abs(obj.quantity or 0)
-        return float(((obj.unit_price or 0) - (obj.unit_cost or 0)) * qtd)
+        preco = self._as_decimal(obj.unit_price)
+        custo = self._as_decimal(obj.unit_cost)
+        return float((preco - custo) * qtd)
 
     def get_total_value(self, obj):
         """Valor total da movimentação: preço em vendas, custo nos demais."""
         qtd = abs(obj.quantity or 0)
         base = obj.unit_price if obj.transaction_type == 'VENDA' else obj.unit_cost
-        return float((base or 0) * qtd)
+        return float(self._as_decimal(base) * qtd)
 
 
 # ==========================================
@@ -927,3 +952,46 @@ class ConsentExportSerializer(serializers.Serializer):
             'data_retention_days': getattr(settings, 'LGPD_CONSENT_RETENTION_DAYS', 730),
             'contact_dpo': 'privacidade@minhaamora.com.br',  # Configurar em settings
         }
+
+# ==========================================
+# 📇 CRM DA VITRINE
+# ==========================================
+
+class LeadSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.SerializerMethodField()
+    # 💳 Forma de pagamento do pedido mais recente — pra tabela do CRM não
+    # precisar de uma chamada extra só pra mostrar essa coluna.
+    last_payment_method = serializers.SerializerMethodField()
+    last_payment_confirmed = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Lead
+        fields = [
+            'id', 'tenant_id', 'name', 'phone', 'email', 'birth_date',
+            'whatsapp_opt_in', 'source', 'consent_version', 'consent_timestamp',
+            'tags', 'total_orders', 'total_spent', 'created_at', 'last_seen',
+            'anonymized_at', 'last_payment_method', 'last_payment_confirmed',
+        ]
+        read_only_fields = ['id', 'created_at', 'last_seen', 'total_orders', 'total_spent']
+
+    def _ultimo_pedido(self, obj):
+        return obj.carts.filter(checked_out=True).order_by('-updated_at').first()
+
+    def get_last_payment_method(self, obj):
+        pedido = self._ultimo_pedido(obj)
+        return pedido.payment_method if pedido else None
+
+    def get_last_payment_confirmed(self, obj):
+        pedido = self._ultimo_pedido(obj)
+        return bool(pedido.payment_confirmed) if pedido else False
+
+    def get_tenant_id(self, obj):
+        # O frontend (lib/leads.ts) espera `tenant_id` no formato usado em
+        # toda a vitrine: o ID do usuário dono da loja.
+        return str(obj.store.owner_id) if obj.store.owner_id else None
+
+
+class CartItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CartItem
+        fields = ['inventory_id', 'product_name', 'quantity', 'price_snapshot']

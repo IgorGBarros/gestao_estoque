@@ -42,6 +42,7 @@ import StockWizard from "./pages/StockWizard";
 import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import MovementHistory from "./pages/MovementHistory";
+import CRM from "./pages/CRM";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
@@ -60,22 +61,6 @@ const queryClient = new QueryClient({
     },
   },
 });
-
-const defaultFormatCurrency = (value: number) =>
-  new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value);
-
-const defaultToast = (opts: {
-  title: string;
-  description?: string;
-  variant?: "default" | "destructive";
-}) => {
-  if (import.meta.env.DEV) {
-    console.log("[toast]", opts.title, opts.description, opts.variant);
-  }
-};
 
 // ✅ Layout Wrapper para Rotas Protegidas
 // Nota: o <SessionHeader /> global foi REMOVIDO daqui. A sessão de cadastro
@@ -160,7 +145,7 @@ const App = () => {
                       {/* ==========================================
                           ROTAS PÚBLICAS (Sem autenticação)
                           ========================================== */}
-                      <Route path="/lp" element={<LandingPage formatCurrency={defaultFormatCurrency} toast={defaultToast} />} />
+                      <Route path="/lp" element={<LandingPage />} />
                       <Route path="/auth" element={<Auth />} />
                       <Route path="/privacy" element={<PrivacyPage />} />
                       <Route path="/terms" element={<TermsPage />} />
@@ -247,6 +232,16 @@ const App = () => {
                         <ProtectedRoute>
                           <ProtectedLayout>
                             <MovementHistory />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+                      {/* ⚠️ CORREÇÃO: a página CRM.tsx existia pronta mas nunca
+                          tinha sido roteada — a consultora não tinha como
+                          acessar a lista de clientes capturados na vitrine. */}
+                      <Route path="/crm" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <CRM />
                           </ProtectedLayout>
                         </ProtectedRoute>
                       } />

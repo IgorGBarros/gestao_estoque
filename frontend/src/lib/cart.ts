@@ -14,6 +14,10 @@ export interface PersistCartInput {
   lead_id?: string; // opcional para visitantes
   checked_out: boolean;
   items: CartItemInput[];
+  // 💳 O que a cliente escolheu na vitrine antes de mandar a mensagem —
+  // vai junto só quando checked_out=true (é o momento do envio de verdade).
+  payment_method?: "pix" | "cartao";
+  whatsapp_message?: string;
 }
 
 // 🔹 Gera ou recupera session_id único por loja/visitante
@@ -29,5 +33,5 @@ export function getOrCreateSessionId(storeSlug: string): string {
 
 // 🔹 Persiste carrinho no backend para analytics/CRM
 export async function persistCart(input: PersistCartInput): Promise<void> {
-  await api.post("/api/crm/carts/persist", input);
+  await api.post("/crm/carts/persist", input);
 }

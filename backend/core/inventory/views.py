@@ -35,7 +35,8 @@ from .models import (
     CustomUser, RegistrationSession, ThemeConfig,
     Product, Store, InventoryItem, InventoryBatch,
     Sale, SaleItem, PriceHistory, StockTransaction,
-    PlanConfig, Promotion, ConsentRecord  # ✅ Novo modelo LGPD
+    PlanConfig, Promotion, ConsentRecord,  # ✅ Novo modelo LGPD
+    Lead, Cart, CartItem,  # ✅ CRM da vitrine
 )
 
 # Imports dos seus serializers
@@ -46,11 +47,12 @@ from .serializers import (
     StockEntrySerializer, SaleSerializer, StockTransactionSerializer,
     ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer,  # ✅ Serializers LGPD
     PlanConfigSerializer,
+    LeadSerializer, CartItemSerializer,  # ✅ CRM da vitrine
 )
 
 from .scraper import search_google_shopping
 from .consent_utils import has_consent_for_purpose as _has_consent_for_purpose
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.db.models.functions import Abs  # usado no fluxo de caixa MEI
 
 User = get_user_model()
@@ -513,6 +515,19 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]    
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
+    # ✅ Mesmo motivo do InventoryViewSet e do StockTransactionViewSet: o
+    # frontend (productService.ts) faz `data.map(...)` esperando um ARRAY
+    # puro. A paginação global do DRF embrulharia em {count, results} e
+    # quebraria com "data.map is not a function".
+    #
+    # ⚠️ Diferença importante: aqui é o catálogo GLOBAL (compartilhado por
+    # todas as lojas), não o estoque de uma consultora — pode crescer muito
+    # mais que "algumas dezenas de itens". Se o catálogo passar de alguns
+    # milhares de produtos, isto vai devolver a lista inteira em toda
+    # chamada. Quando isso incomodar, o caminho é paginar de propósito E
+    # atualizar productService.ts para ler `.results` em vez de tratar a
+    # resposta como array direto — as duas pontas têm que mudar juntas.
+    pagination_class = None
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)
@@ -2480,7 +2495,14 @@ def public_storefront_view(request, slug=None, brand=None):
         store_data = {
             'name': getattr(store, 'name', 'Consultora'),
             'whatsapp': getattr(store, 'whatsapp', ''),
-            'slug': getattr(store, 'slug', slug or '')
+            'slug': getattr(store, 'slug', slug or ''),
+            # ⚠️ Sem isto, o frontend (Storefront.tsx) nunca sabe a quem
+            # atribuir o lead: `tenantId = res.store.user_id`. Com tenantId
+            # vazio, `handleSendOrder` pula direto para o WhatsApp e o modal
+            # de captura (CRM invisível) nunca abre — era a causa raiz de o
+            # CRM nunca disparar, mesmo com o resto pronto.
+            'user_id': str(store.owner_id) if store.owner_id else None,
+            'tenant_id': str(store.owner_id) if store.owner_id else None,
         }
         
         # Response final
@@ -2636,7 +2658,19 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             
             quantity = abs(int(data.get('quantity', 0)))
             transaction_type = data.get('transaction_type', '').upper()
-            unit_price = float(data.get('unit_price', 0))
+            # ⚠️ CORREÇÃO: era `float(...)`. O campo do modelo é DecimalField, e
+            # o objeto é serializado logo abaixo SEM recarregar do banco — o
+            # atributo em memória ficava como float puro. O serializer soma
+            # `unit_price - unit_cost` (Decimal, vindo de inventory_item.cost_price)
+            # para calcular o lucro, e Python não permite float - Decimal:
+            # TypeError, capturado pelo except genérico e devolvido como 500
+            # "Erro ao criar transação" — quebrava TODA baixa (venda, presente,
+            # brinde, uso próprio, perda, ajuste).
+            from decimal import Decimal, InvalidOperation
+            try:
+                unit_price = Decimal(str(data.get('unit_price', 0) or 0))
+            except InvalidOperation:
+                unit_price = Decimal('0')
             
             # ✅ VERIFICAR SE É SAÍDA E APLICAR FIFO (incluindo AJUSTE)
             is_exit = transaction_type in ['VENDA', 'USO_PROPRIO', 'PRESENTE', 'BRINDE', 'PERDA', 'SAIDA', 'AJUSTE']
@@ -4335,3 +4369,420 @@ def stock_report_csv(request):
     w.writerow(['Observação: "Valor se vender tudo" e "Lucro previsto" são '
                 'projeções sobre o estoque parado, não dinheiro recebido.'])
     return resp
+
+# ==========================================
+# 📇 CRM DA VITRINE — leads e carrinhos
+# ==========================================
+# Relacionamento CONSULTORA <-> CLIENTE FINAL DELA. Diferente do
+# ConsentRecord (que é CONSULTORA <-> Minha Amora).
+#
+# Regra de segurança que percorre todo este bloco: nas rotas AUTENTICADAS
+# (listar, ver, anonimizar, excluir), a loja vem SEMPRE de `request.user`,
+# nunca do `tenant_id` que o cliente manda. Se viesse do parâmetro, uma
+# consultora autenticada poderia listar os leads de outra loja só trocando
+# o valor na URL.
+#
+# Nas rotas PÚBLICAS (upsert, persistir carrinho — chamadas por visitantes
+# não autenticados da vitrine), o `tenant_id` é a ÚNICA forma de saber a
+# qual loja o lead pertence. Validamos que corresponde a uma loja real; o
+# throttling global (100/h por IP anônimo, em settings.py) cobre o abuso
+# básico de um visitante mandando muitos pedidos.
+
+def _store_by_tenant_id(tenant_id):
+    """Resolve a Store a partir do tenant_id que a vitrine usa (= ID do dono)."""
+    if not tenant_id:
+        return None
+    try:
+        return Store.objects.get(owner_id=int(tenant_id))
+    except (Store.DoesNotExist, ValueError, TypeError):
+        return None
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def crm_leads_list(request):
+    """GET /api/crm/leads — leads da loja de quem está logado."""
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    leads = Lead.objects.filter(store=store).order_by('-last_seen')
+    return Response(LeadSerializer(leads, many=True).data)
+
+
+@api_view(['GET', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def crm_lead_detail(request, lead_id):
+    """
+    GET    /api/crm/leads/<id> — um lead específico, só da própria loja.
+           Inclui o histórico de compras: cada pedido fechado (checked_out),
+           com os produtos, quantidade, preço e data. É o que dá pra
+           consultora ver "o que ela comprou, quando, por quanto" — sem
+           isso o Lead sozinho só mostra nome e telefone.
+    DELETE /api/crm/leads/<id> — exclusão definitiva, só da própria loja.
+    Os dois métodos compartilham a mesma URL (é assim que lib/leads.ts chama).
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    lead = Lead.objects.filter(store=store, id=lead_id).first()
+    if not lead:
+        return Response({'error': 'Lead não encontrado'}, status=404)
+
+    if request.method == 'DELETE':
+        lead.delete()
+        return Response(status=204)
+
+    pedidos = (Cart.objects
+               .filter(store=store, lead=lead, checked_out=True)
+               .prefetch_related('items')
+               .order_by('-updated_at'))
+
+    historico = []
+    for pedido in pedidos:
+        itens = list(pedido.items.all())
+        if not itens:
+            continue  # carrinho fechado sem item não é um pedido de verdade
+        total = sum(i.price_snapshot * i.quantity for i in itens)
+        historico.append({
+            'cart_id': pedido.id,
+            'date': pedido.updated_at,
+            'payment_method': pedido.payment_method,
+            'payment_confirmed': pedido.payment_confirmed,
+            'whatsapp_message': pedido.whatsapp_message,
+            'items': [
+                {
+                    'product_name': i.product_name,
+                    'quantity': i.quantity,
+                    'unit_price': i.price_snapshot,
+                    'subtotal': i.price_snapshot * i.quantity,
+                }
+                for i in itens
+            ],
+            'total': total,
+        })
+
+    dados = LeadSerializer(lead).data
+    dados['purchase_history'] = historico
+    dados['last_purchase_at'] = historico[0]['date'] if historico else None
+    return Response(dados)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def crm_lead_upsert(request):
+    """
+    POST /api/crm/leads/upsert — cria ou atualiza um lead pelo par
+    (loja, telefone). Chamado pelo CheckoutModal na vitrine, SEM login.
+
+    Nome e telefone são obrigatórios (é o mínimo pra consultora conseguir
+    falar com a cliente). E-mail e data de nascimento são opcionais — a
+    compra não pode travar por causa deles.
+    """
+    from datetime import date as _date
+    from django.core.validators import validate_email as _validate_email
+    from django.core.exceptions import ValidationError as _DjangoValidationError
+
+    data = request.data
+    store = _store_by_tenant_id(data.get('tenant_id'))
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=404)
+
+    name = str(data.get('name') or '').strip()
+    phone = re.sub(r'\D', '', str(data.get('phone') or ''))
+    if not name or not phone:
+        return Response({'error': 'Nome e telefone são obrigatórios'}, status=400)
+    if len(phone) < 10 or len(phone) > 13:
+        return Response({'error': 'Telefone inválido'}, status=400)
+
+    # E-mail: opcional, mas se vier tem que ser um e-mail de verdade —
+    # melhor recusar aqui do que deixar lixo entrar no CRM da consultora.
+    email = str(data.get('email') or '').strip() or None
+    if email:
+        try:
+            _validate_email(email)
+        except _DjangoValidationError:
+            return Response({'error': 'E-mail inválido'}, status=400)
+
+    # Data de nascimento: opcional, formato AAAA-MM-DD (o que <input type="date">
+    # manda). Recusa data futura ou absurdamente antiga — sinal de erro de
+    # digitação, não motivo pra travar a compra por outro campo qualquer.
+    birth_date = None
+    raw_birth_date = data.get('birth_date')
+    if raw_birth_date:
+        try:
+            birth_date = _date.fromisoformat(str(raw_birth_date))
+        except (TypeError, ValueError):
+            return Response({'error': 'Data de nascimento inválida'}, status=400)
+        hoje = _date.today()
+        if birth_date > hoje:
+            return Response({'error': 'Data de nascimento não pode ser no futuro'}, status=400)
+        if birth_date.year < hoje.year - 120:
+            return Response({'error': 'Data de nascimento inválida'}, status=400)
+
+    from django.utils import timezone as _tz
+    lead, _created = Lead.objects.update_or_create(
+        store=store, phone=phone,
+        defaults={
+            'name': name[:200],
+            'email': email,
+            'birth_date': birth_date,
+            'whatsapp_opt_in': bool(data.get('whatsapp_opt_in')),
+            'source': data.get('source') or 'storefront',
+            'consent_version': data.get('consent_version'),
+            'consent_timestamp': _tz.now(),
+        },
+    )
+    return Response(LeadSerializer(lead).data, status=201 if _created else 200)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def crm_lead_anonymize(request, lead_id):
+    """
+    POST /api/crm/leads/<id>/anonymize — direito ao esquecimento (LGPD).
+    Substitui os dados identificáveis por placeholders; preserva as
+    métricas agregadas (total_orders/total_spent) para as estatísticas da
+    consultora não ficarem com buraco.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    lead = Lead.objects.filter(store=store, id=lead_id).first()
+    if not lead:
+        return Response({'error': 'Lead não encontrado'}, status=404)
+
+    from django.utils import timezone as _tz
+    lead.name = 'Cliente anonimizado'
+    lead.phone = f'anon-{lead.id}'
+    lead.email = None
+    lead.whatsapp_opt_in = False
+    lead.anonymized_at = _tz.now()
+    lead.save(update_fields=['name', 'phone', 'email', 'whatsapp_opt_in', 'anonymized_at'])
+    return Response(status=204)
+
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def crm_cart_persist(request):
+    """
+    POST /api/crm/carts/persist — salva o carrinho da vitrine vinculado ao
+    lead. Chamado sem login, de duas formas:
+
+      1. A cada mudança na sacola (checked_out=False) — é o que alimenta a
+         detecção de CARRINHO ABANDONADO. Antes, isto só era chamado uma vez,
+         no fechamento do pedido, então nunca existia registro de quem
+         desistiu no meio do caminho.
+      2. No fechamento do pedido (checked_out=True).
+
+    ⚠️ IDEMPOTENTE por (loja, sessão): enquanto o carrinho está aberto
+    (checked_out=False), a MESMA sessão sempre atualiza a MESMA linha —
+    sem isso, cada tecla digitada ou clique de +/- criaria um carrinho novo
+    no banco. Depois que fecha (checked_out=True), um pedido novo na mesma
+    sessão abre uma linha nova (fica registrado como um segundo pedido).
+    """
+    data = request.data
+    store = _store_by_tenant_id(data.get('tenant_id'))
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=404)
+
+    session_id = str(data.get('session_id') or '')[:100]
+    if not session_id:
+        return Response({'error': 'session_id é obrigatório'}, status=400)
+
+    lead = None
+    lead_id = data.get('lead_id')
+    if lead_id:
+        # O lead precisa pertencer à MESMA loja do tenant_id informado —
+        # senão um carrinho poderia ser amarrado ao cliente de outra loja.
+        lead = Lead.objects.filter(store=store, id=lead_id).first()
+
+    items = data.get('items') or []
+    if not isinstance(items, list):
+        return Response({'error': 'items deve ser uma lista'}, status=400)
+
+    checked_out = bool(data.get('checked_out'))
+
+    # 💳 Forma de pagamento que ela escolheu na vitrine (o que ela declarou,
+    # não uma confirmação — só a consultora confirma isso, manualmente).
+    payment_method = data.get('payment_method')
+    if payment_method not in ('pix', 'cartao'):
+        payment_method = None
+
+    # 📝 A mensagem exata que foi montada e mandada pro WhatsApp — registro
+    # do que a cliente "enviou", já que não há integração com a API do
+    # WhatsApp pra confirmar entrega ou leitura.
+    whatsapp_message = str(data.get('whatsapp_message') or '')[:4000] or None
+
+    # Reaproveita o carrinho ABERTO desta sessão, se existir. Um carrinho já
+    # fechado não é reaberto — uma sacola nova na mesma sessão vira um
+    # carrinho novo (é um segundo pedido, não uma edição do primeiro).
+    cart = Cart.objects.filter(store=store, session_id=session_id, checked_out=False).first()
+    if cart:
+        if lead and not cart.lead_id:
+            cart.lead = lead  # sessão que ganhou identidade (fez o checkout) depois de já ter itens
+        cart.checked_out = checked_out
+        if payment_method:
+            cart.payment_method = payment_method
+        if whatsapp_message:
+            cart.whatsapp_message = whatsapp_message
+        cart.save(update_fields=['lead', 'checked_out', 'payment_method', 'whatsapp_message', 'updated_at'])
+        cart.items.all().delete()  # substitui pela sacola atual — é sempre o estado mais recente
+    else:
+        cart = Cart.objects.create(
+            store=store, session_id=session_id, lead=lead, checked_out=checked_out,
+            payment_method=payment_method, whatsapp_message=whatsapp_message,
+        )
+
+    for it in items[:100]:  # limite defensivo: um carrinho não tem centenas de itens
+        try:
+            CartItem.objects.create(
+                cart=cart,
+                inventory_id=str(it.get('inventory_id', ''))[:50],
+                product_name=str(it.get('product_name', ''))[:255],
+                quantity=max(1, int(it.get('quantity', 1))),
+                price_snapshot=Decimal(str(it.get('price_snapshot', 0) or 0)),
+            )
+        except (TypeError, ValueError, InvalidOperation):
+            continue  # item malformado não derruba o carrinho inteiro
+
+    # Pedido fechado: soma nas métricas agregadas do lead.
+    if checked_out and cart.lead_id:
+        total = sum((i.price_snapshot * i.quantity) for i in cart.items.all())
+        Lead.objects.filter(id=cart.lead_id).update(
+            total_orders=models.F('total_orders') + 1,
+            total_spent=models.F('total_spent') + total,
+        )
+
+    return Response({'id': cart.id}, status=201)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def crm_notifications(request):
+    """
+    GET /api/crm/notifications — os três avisos do CRM pro sino de
+    notificações da consultora:
+
+      • novos_leads       — clientes capturados nos últimos 3 dias
+      • aniversarios       — clientes que fazem aniversário nos próximos 7 dias
+      • carrinhos_abandonados — sacola parada há mais de 2h, sem fechar
+        pedido, com uma cliente identificada (senão não tem pra quem
+        mandar mensagem)
+    """
+    from datetime import timedelta, date as _date
+    from django.utils import timezone as _tz
+
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    agora = _tz.now()
+
+    # ── Novos leads ──
+    novos = (Lead.objects
+             .filter(store=store, created_at__gte=agora - timedelta(days=3), anonymized_at__isnull=True)
+             .order_by('-created_at')[:20])
+    novos_leads = [{'id': l.id, 'name': l.name, 'created_at': l.created_at} for l in novos]
+
+    # ── Aniversários nos próximos 7 dias ──
+    # Comparação por mês/dia (não por data completa) — e cobre a virada do
+    # ano: se hoje é 28/dez e o aniversário é 3/jan, os 7 dias à frente
+    # cruzam dezembro pra janeiro.
+    hoje = agora.date()
+    proximos_dias = [(hoje + timedelta(days=i)) for i in range(8)]
+    pares_mes_dia = {(d.month, d.day) for d in proximos_dias}
+    aniversariantes = []
+    for lead in Lead.objects.filter(store=store, birth_date__isnull=False, anonymized_at__isnull=True):
+        if (lead.birth_date.month, lead.birth_date.day) in pares_mes_dia:
+            # Próxima ocorrência do aniversário, pra ordenar por "quão perto".
+            prox = lead.birth_date.replace(year=hoje.year)
+            if prox < hoje:
+                prox = lead.birth_date.replace(year=hoje.year + 1)
+            aniversariantes.append({'id': lead.id, 'name': lead.name, 'date': prox})
+    aniversariantes.sort(key=lambda x: x['date'])
+
+    # ── Carrinhos abandonados ──
+    limite = agora - timedelta(hours=2)
+    carrinhos = (Cart.objects
+                 .filter(store=store, checked_out=False, updated_at__lt=limite, lead__isnull=False)
+                 .exclude(lead__anonymized_at__isnull=False)
+                 .select_related('lead')
+                 .prefetch_related('items')
+                 .order_by('-updated_at')[:20])
+    carrinhos_abandonados = []
+    for c in carrinhos:
+        itens = list(c.items.all())
+        if not itens:
+            continue  # sacola vazia não é "abandono", é só uma sessão que passou por aqui
+        carrinhos_abandonados.append({
+            'cart_id': c.id,
+            'lead_id': c.lead_id,
+            'lead_name': c.lead.name,
+            'items': [i.product_name for i in itens],
+            'updated_at': c.updated_at,
+        })
+
+    return Response({
+        'novos_leads': novos_leads,
+        'aniversarios': aniversariantes,
+        'carrinhos_abandonados': carrinhos_abandonados,
+    })
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def crm_cart_update(request, cart_id):
+    """
+    PATCH  /api/crm/carts/<id> — a consultora confirma (ou corrige) o
+           pagamento de um pedido. Não existe integração com o WhatsApp nem
+           com meio de pagamento nenhum ainda, então isso é sempre uma
+           marcação MANUAL dela — ela é quem sabe se o PIX caiu ou o cartão
+           passou.
+    DELETE /api/crm/carts/<id> — remove um pedido que nunca foi pago (ex.:
+           cliente mandou mensagem e sumiu). Some só o pedido, o cliente
+           (Lead) continua no CRM.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    cart = Cart.objects.filter(store=store, id=cart_id).first()
+    if not cart:
+        return Response({'error': 'Pedido não encontrado'}, status=404)
+
+    if request.method == 'DELETE':
+        # ⚠️ CORREÇÃO: total_orders/total_spent do Lead são somados no
+        # checkout (crm_cart_persist), mas excluir o pedido aqui nunca
+        # descontava — os números ficavam "presos" no valor antigo pra
+        # sempre, mesmo depois de excluir todos os pedidos da cliente.
+        if cart.checked_out and cart.lead_id:
+            total_pedido = sum(i.price_snapshot * i.quantity for i in cart.items.all())
+            lead = Lead.objects.filter(id=cart.lead_id).first()
+            if lead:
+                lead.total_orders = max(0, lead.total_orders - 1)
+                lead.total_spent = max(Decimal('0'), lead.total_spent - total_pedido)
+                lead.save(update_fields=['total_orders', 'total_spent'])
+        cart.delete()
+        return Response(status=204)
+
+    data = request.data
+    campos = []
+    if 'payment_confirmed' in data:
+        cart.payment_confirmed = bool(data['payment_confirmed'])
+        campos.append('payment_confirmed')
+    if 'payment_method' in data and data['payment_method'] in ('pix', 'cartao'):
+        cart.payment_method = data['payment_method']
+        campos.append('payment_method')
+
+    if not campos:
+        return Response({'error': 'Nada para atualizar'}, status=400)
+
+    cart.save(update_fields=campos)
+    return Response({
+        'cart_id': cart.id,
+        'payment_method': cart.payment_method,
+        'payment_confirmed': cart.payment_confirmed,
+    })

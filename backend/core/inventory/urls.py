@@ -55,6 +55,10 @@ from inventory.views import SessionControlView, SessionSummaryView
 
 # Views públicas
 from inventory.views import public_storefront, public_storefront_view, lookup_product
+from inventory.views import (
+    crm_leads_list, crm_lead_detail, crm_lead_upsert,
+    crm_lead_anonymize, crm_cart_persist, crm_notifications, crm_cart_update,
+)
 
 # Swagger/Documentação
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
@@ -119,8 +123,21 @@ urlpatterns = [
     # 🌐 ROTAS PÚBLICAS
     # ==========================================
     path('api/products/lookup/', lookup_product, name='lookup_product'),
-    path('api/public/storefront/<slug:slug>/', public_storefront, name='public_storefront_slug'),
-    path('api/public/storefront/', public_storefront, name='public_storefront_list'),
+    # ⚠️ CORREÇÃO: apontava para `public_storefront`, a view antiga que não
+    # envia marca do produto nem o user_id da loja (usado para amarrar o
+    # lead do CRM). `public_storefront_view` já existia no código, mais
+    # completa, mas nunca tinha sido roteada.
+    path('api/public/storefront/<slug:slug>/', public_storefront_view, name='public_storefront_slug'),
+    path('api/public/storefront/', public_storefront_view, name='public_storefront_list'),
+
+    # 📇 CRM da vitrine — leads e carrinhos capturados sem login do cliente
+    path('api/crm/leads', crm_leads_list, name='crm_leads_list'),
+    path('api/crm/leads/upsert', crm_lead_upsert, name='crm_lead_upsert'),
+    path('api/crm/leads/<int:lead_id>', crm_lead_detail, name='crm_lead_detail'),
+    path('api/crm/leads/<int:lead_id>/anonymize', crm_lead_anonymize, name='crm_lead_anonymize'),
+    path('api/crm/carts/persist', crm_cart_persist, name='crm_cart_persist'),
+    path('api/crm/notifications', crm_notifications, name='crm_notifications'),
+    path('api/crm/carts/<int:cart_id>', crm_cart_update, name='crm_cart_update'),
     
     # ==========================================
     # 📚 DOCUMENTAÇÃO API (Swagger)
@@ -138,11 +155,17 @@ urlpatterns = [
 # registrava — o frontend chamava /api/inventory/ e /api/transactions/ e
 # recebia 404. Este bloco fecha essa lacuna.
 from rest_framework.routers import DefaultRouter
-from inventory.views import InventoryViewSet, StockTransactionViewSet, StockEntryView
+from inventory.views import InventoryViewSet, StockTransactionViewSet, StockEntryView, ProductViewSet
 
 router = DefaultRouter()
 router.register(r'api/inventory', InventoryViewSet, basename='inventory')
 router.register(r'api/transactions', StockTransactionViewSet, basename='transactions')
+# ⚠️ CORREÇÃO: em v1.0.0 existia `router.register(r'products', ProductViewSet)`.
+# Na consolidação das URLs deste projeto, o router foi reconstruído do zero e
+# essa linha ficou de fora — GET/POST /api/products/ e /api/products/<id>/
+# passaram a devolver 404. É o catálogo global (AllowAny, sem filtro por
+# loja), usado pelo AddProduct para listar/consultar produtos por ID.
+router.register(r'api/products', ProductViewSet, basename='products')
 
 urlpatterns += router.urls
 urlpatterns += [
