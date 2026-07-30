@@ -230,7 +230,13 @@ export default function Storefront() {
   };
 
   // 🔹 CRM: Callback do CheckoutModal - captura lead e persiste carrinho
-  const handleLeadSubmit = async (data: { name: string; phone: string; whatsapp_opt_in: boolean }) => {
+  const handleLeadSubmit = async (data: {
+    name: string;
+    phone: string;
+    email?: string;
+    birth_date?: string;
+    whatsapp_opt_in: boolean;
+  }) => {
     if (!tenantId) {
       // Fallback: se não tem tenant, envia direto
       const link = buildWhatsappLink(bag);
@@ -244,6 +250,8 @@ export default function Storefront() {
         tenant_id: tenantId,
         name: data.name.trim(),
         phone: data.phone.replace(/\D/g, ""),
+        email: data.email,
+        birth_date: data.birth_date,
         whatsapp_opt_in: data.whatsapp_opt_in,
         source: "storefront",
         consent_version: "1.0", // 🔹 LGPD: versão do termo de consentimento
@@ -325,18 +333,51 @@ export default function Storefront() {
           </div>
         </motion.div>
 
-        {/* Brand Filter */}
-        {availableBrands.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-              <button onClick={() => setSelectedBrand("")} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${selectedBrand === "" ? "bg-brand text-white shadow-md" : "bg-secondary/80 text-secondary-foreground hover:bg-secondary hover:shadow-sm"}`}>
-                Todas as Marcas <span className="ml-2 text-xs opacity-70">({items.length})</span>
+        {/* Abas de marca — a mesma lógica de filtro de antes (client-side,
+            state selectedBrand/availableBrands), só que com visual de aba em
+            vez de pílula: linha inferior indicando a aba ativa, sem "pular"
+            a tela quando a consultora vende mais de uma marca. */}
+        {availableBrands.length > 1 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 border-b border-border"
+            role="tablist"
+            aria-label="Filtrar por marca"
+          >
+            <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+              <button
+                role="tab"
+                aria-selected={selectedBrand === ""}
+                onClick={() => setSelectedBrand("")}
+                className={`relative shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors ${
+                  selectedBrand === ""
+                    ? "text-brand"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Todas <span className="ml-1.5 text-xs opacity-70">({items.length})</span>
+                {selectedBrand === "" && (
+                  <motion.div layoutId="aba-marca-ativa" className="absolute inset-x-0 -bottom-px h-0.5 bg-brand" />
+                )}
               </button>
               {availableBrands.map((brand: string) => {
                 const brandCount = items.filter((item: StorefrontItem) => getProductBrand(item) === brand).length;
+                const ativa = selectedBrand === brand;
                 return (
-                  <button key={brand} onClick={() => setSelectedBrand(brand)} className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${selectedBrand === brand ? "bg-brand text-white shadow-md" : "bg-secondary/80 text-secondary-foreground hover:bg-secondary hover:shadow-sm"}`}>
-                    {brand} <span className="ml-2 text-xs opacity-70">({brandCount})</span>
+                  <button
+                    key={brand}
+                    role="tab"
+                    aria-selected={ativa}
+                    onClick={() => setSelectedBrand(brand)}
+                    className={`relative shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors ${
+                      ativa ? "text-brand" : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {brand} <span className="ml-1.5 text-xs opacity-70">({brandCount})</span>
+                    {ativa && (
+                      <motion.div layoutId="aba-marca-ativa" className="absolute inset-x-0 -bottom-px h-0.5 bg-brand" />
+                    )}
                   </button>
                 );
               })}

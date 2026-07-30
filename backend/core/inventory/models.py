@@ -1075,3 +1075,81 @@ class ProcessedPaymentEvent(models.Model):
 
     def __str__(self):
         return f"{self.payment_id} → loja {self.store_id} (+{self.days_granted}d)"
+
+# ==========================================
+# 📇 CRM DA VITRINE (leads e carrinhos)
+# ==========================================
+# O frontend (lib/leads.ts, lib/cart.ts, CheckoutModal, CRM.tsx) já estava
+# pronto e esperando estes modelos — só faltava o backend. É o "CRM
+# invisível": quando um cliente da vitrine finaliza um pedido pela primeira
+# vez na sessão, um modal leve pede nome e WhatsApp antes de abrir a
+# conversa. Isso vira um Lead automaticamente, sem exigir cadastro nem
+# login do cliente final.
+#
+# Importante: este é o relacionamento CONSULTORA <-> CLIENTE DELA — B2C, uma
+# relação diferente (e sem sobreposição) com o ConsentRecord, que trata do
+# consentimento da CONSULTORA com o Minha Amora.
+
+class Lead(models.Model):
+    """Cliente capturado através da vitrine (ou lançado manualmente pela consultora)."""
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='leads')
+    name = models.CharField(max_length=200)
+    # Guardado só com dígitos — é a chave de deduplicação por loja.
+    phone = models.CharField(max_length=20, db_index=True)
+    email = models.EmailField(blank=True, null=True)
+    # Opcional: ajuda a consultora a personalizar contato (ex.: mensagem de
+    # aniversário). Não é exigido para concluir a compra.
+    birth_date = models.DateField(blank=True, null=True)
+    whatsapp_opt_in = models.BooleanField(default=False)
+    source = models.CharField(
+        max_length=20, default='storefront',
+        choices=[('storefront', 'Vitrine'), ('dashboard', 'Manual')],
+    )
+    # Consentimento do CLIENTE FINAL para receber mensagens — LGPD, opt-in
+    # explícito e desmarcado por padrão no CheckoutModal.
+    consent_version = models.CharField(max_length=20, blank=True, null=True)
+    consent_timestamp = models.DateTimeField(blank=True, null=True)
+    tags = models.JSONField(default=list, blank=True)
+    total_orders = models.PositiveIntegerField(default=0)
+    total_spent = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_seen = models.DateTimeField(auto_now=True)
+    # Direito ao esquecimento (LGPD): quando preenchido, name/phone/email já
+    # foram substituídos por placeholders — ver LeadViewSet.anonymize.
+    anonymized_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        # Um telefone é um cliente só, por loja — pedidos repetidos
+        # atualizam o mesmo Lead em vez de duplicar.
+        unique_together = [('store', 'phone')]
+        indexes = [models.Index(fields=['store', 'phone'])]
+        ordering = ['-last_seen']
+
+    def __str__(self):
+        return f"{self.name} ({self.phone}) — loja {self.store_id}"
+
+
+class Cart(models.Model):
+    """Carrinho da vitrine — visitante identificado por sessão, não por login."""
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='storefront_carts')
+    session_id = models.CharField(max_length=100, db_index=True)
+    # Pode ficar sem lead: nem todo visitante chega a finalizar o pedido.
+    lead = models.ForeignKey(Lead, on_delete=models.SET_NULL, null=True, blank=True, related_name='carts')
+    checked_out = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['store', 'session_id'])]
+        ordering = ['-updated_at']
+
+
+class CartItem(models.Model):
+    """Item de um carrinho da vitrine — guarda o preço no momento da compra."""
+    cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
+    # String de propósito: é o id do InventoryItem tal como o frontend manda,
+    # sem depender de FK (o item pode ser removido do estoque depois).
+    inventory_id = models.CharField(max_length=50)
+    product_name = models.CharField(max_length=255)
+    quantity = models.PositiveIntegerField(default=1)
+    price_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)

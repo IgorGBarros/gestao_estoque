@@ -8,6 +8,7 @@ export interface Lead {
   name: string;
   phone: string;
   email?: string | null;              // ✅ Campo adicionado
+  birth_date?: string | null;         // ✅ Data de nascimento (AAAA-MM-DD)
   whatsapp_opt_in: boolean;
   created_at: string;
   last_seen: string;
@@ -26,6 +27,7 @@ export interface LeadInput {
   phone: string;
   whatsapp_opt_in: boolean;
   email?: string;
+  birth_date?: string;
   source?: "storefront" | "dashboard";
   consent_version?: string;
 }

@@ -10,7 +10,13 @@ interface CheckoutModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sellerName: string;
-  onSubmit: (data: { name: string; phone: string; whatsapp_opt_in: boolean }) => Promise<void>;
+  onSubmit: (data: {
+    name: string;
+    phone: string;
+    email?: string;
+    birth_date?: string;
+    whatsapp_opt_in: boolean;
+  }) => Promise<void>;
   lgpdConfig?: {
     required: boolean;
     checkboxLabel: string;
@@ -22,6 +28,8 @@ interface CheckoutModalProps {
 export default function CheckoutModal({ open, onOpenChange, sellerName, onSubmit, lgpdConfig }: CheckoutModalProps) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [birthDate, setBirthDate] = useState("");
   const [optIn, setOptIn] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -33,10 +41,16 @@ export default function CheckoutModal({ open, onOpenChange, sellerName, onSubmit
     }
     setLoading(true);
     try {
-      await onSubmit({ name, phone, whatsapp_opt_in: optIn });
+      await onSubmit({
+        name,
+        phone,
+        email: email.trim() || undefined,
+        birth_date: birthDate || undefined,
+        whatsapp_opt_in: optIn,
+      });
       onOpenChange(false);
       // Reset
-      setName(""); setPhone(""); setOptIn(false);
+      setName(""); setPhone(""); setEmail(""); setBirthDate(""); setOptIn(false);
     } finally {
       setLoading(false);
     }
@@ -60,6 +74,24 @@ export default function CheckoutModal({ open, onOpenChange, sellerName, onSubmit
             <Label htmlFor="phone">WhatsApp</Label>
             <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Ex: 71999999999" required />
             <p className="text-xs text-muted-foreground">Formato: apenas números com DDD</p>
+          </div>
+
+          {/* Opcionais: ajudam a consultora a personalizar o contato (ex.:
+              mensagem de aniversário), mas não bloqueiam a compra se a
+              cliente preferir não informar. */}
+          <div className="space-y-2">
+            <Label htmlFor="email">E-mail <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Ex: ana@email.com" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="birth-date">Data de nascimento <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+            <Input
+              id="birth-date"
+              type="date"
+              value={birthDate}
+              onChange={(e) => setBirthDate(e.target.value)}
+              max={new Date().toISOString().slice(0, 10)}
+            />
           </div>
           
           {/* 🔹 LGPD: Opt-in explícito (desmarcado por padrão) */}

@@ -35,7 +35,8 @@ from .models import (
     CustomUser, RegistrationSession, ThemeConfig,
     Product, Store, InventoryItem, InventoryBatch,
     Sale, SaleItem, PriceHistory, StockTransaction,
-    PlanConfig, Promotion, ConsentRecord  # ✅ Novo modelo LGPD
+    PlanConfig, Promotion, ConsentRecord,  # ✅ Novo modelo LGPD
+    Lead, Cart, CartItem,  # ✅ CRM da vitrine
 )
 
 # Imports dos seus serializers
@@ -46,11 +47,12 @@ from .serializers import (
     StockEntrySerializer, SaleSerializer, StockTransactionSerializer,
     ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer,  # ✅ Serializers LGPD
     PlanConfigSerializer,
+    LeadSerializer, CartItemSerializer,  # ✅ CRM da vitrine
 )
 
 from .scraper import search_google_shopping
 from .consent_utils import has_consent_for_purpose as _has_consent_for_purpose
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.db.models.functions import Abs  # usado no fluxo de caixa MEI
 
 User = get_user_model()
@@ -2493,7 +2495,14 @@ def public_storefront_view(request, slug=None, brand=None):
         store_data = {
             'name': getattr(store, 'name', 'Consultora'),
             'whatsapp': getattr(store, 'whatsapp', ''),
-            'slug': getattr(store, 'slug', slug or '')
+            'slug': getattr(store, 'slug', slug or ''),
+            # ⚠️ Sem isto, o frontend (Storefront.tsx) nunca sabe a quem
+            # atribuir o lead: `tenantId = res.store.user_id`. Com tenantId
+            # vazio, `handleSendOrder` pula direto para o WhatsApp e o modal
+            # de captura (CRM invisível) nunca abre — era a causa raiz de o
+            # CRM nunca disparar, mesmo com o resto pronto.
+            'user_id': str(store.owner_id) if store.owner_id else None,
+            'tenant_id': str(store.owner_id) if store.owner_id else None,
         }
         
         # Response final
@@ -4360,3 +4369,213 @@ def stock_report_csv(request):
     w.writerow(['Observação: "Valor se vender tudo" e "Lucro previsto" são '
                 'projeções sobre o estoque parado, não dinheiro recebido.'])
     return resp
+
+# ==========================================
+# 📇 CRM DA VITRINE — leads e carrinhos
+# ==========================================
+# Relacionamento CONSULTORA <-> CLIENTE FINAL DELA. Diferente do
+# ConsentRecord (que é CONSULTORA <-> Minha Amora).
+#
+# Regra de segurança que percorre todo este bloco: nas rotas AUTENTICADAS
+# (listar, ver, anonimizar, excluir), a loja vem SEMPRE de `request.user`,
+# nunca do `tenant_id` que o cliente manda. Se viesse do parâmetro, uma
+# consultora autenticada poderia listar os leads de outra loja só trocando
+# o valor na URL.
+#
+# Nas rotas PÚBLICAS (upsert, persistir carrinho — chamadas por visitantes
+# não autenticados da vitrine), o `tenant_id` é a ÚNICA forma de saber a
+# qual loja o lead pertence. Validamos que corresponde a uma loja real; o
+# throttling global (100/h por IP anônimo, em settings.py) cobre o abuso
+# básico de um visitante mandando muitos pedidos.
+
+def _store_by_tenant_id(tenant_id):
+    """Resolve a Store a partir do tenant_id que a vitrine usa (= ID do dono)."""
+    if not tenant_id:
+        return None
+    try:
+        return Store.objects.get(owner_id=int(tenant_id))
+    except (Store.DoesNotExist, ValueError, TypeError):
+        return None
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def crm_leads_list(request):
+    """GET /api/crm/leads — leads da loja de quem está logado."""
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    leads = Lead.objects.filter(store=store).order_by('-last_seen')
+    return Response(LeadSerializer(leads, many=True).data)
+
+
+@api_view(['GET', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def crm_lead_detail(request, lead_id):
+    """
+    GET    /api/crm/leads/<id> — um lead específico, só da própria loja.
+    DELETE /api/crm/leads/<id> — exclusão definitiva, só da própria loja.
+    Os dois métodos compartilham a mesma URL (é assim que lib/leads.ts chama).
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    lead = Lead.objects.filter(store=store, id=lead_id).first()
+    if not lead:
+        return Response({'error': 'Lead não encontrado'}, status=404)
+
+    if request.method == 'DELETE':
+        lead.delete()
+        return Response(status=204)
+    return Response(LeadSerializer(lead).data)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def crm_lead_upsert(request):
+    """
+    POST /api/crm/leads/upsert — cria ou atualiza um lead pelo par
+    (loja, telefone). Chamado pelo CheckoutModal na vitrine, SEM login.
+
+    Nome e telefone são obrigatórios (é o mínimo pra consultora conseguir
+    falar com a cliente). E-mail e data de nascimento são opcionais — a
+    compra não pode travar por causa deles.
+    """
+    from datetime import date as _date
+    from django.core.validators import validate_email as _validate_email
+    from django.core.exceptions import ValidationError as _DjangoValidationError
+
+    data = request.data
+    store = _store_by_tenant_id(data.get('tenant_id'))
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=404)
+
+    name = str(data.get('name') or '').strip()
+    phone = re.sub(r'\D', '', str(data.get('phone') or ''))
+    if not name or not phone:
+        return Response({'error': 'Nome e telefone são obrigatórios'}, status=400)
+    if len(phone) < 10 or len(phone) > 13:
+        return Response({'error': 'Telefone inválido'}, status=400)
+
+    # E-mail: opcional, mas se vier tem que ser um e-mail de verdade —
+    # melhor recusar aqui do que deixar lixo entrar no CRM da consultora.
+    email = str(data.get('email') or '').strip() or None
+    if email:
+        try:
+            _validate_email(email)
+        except _DjangoValidationError:
+            return Response({'error': 'E-mail inválido'}, status=400)
+
+    # Data de nascimento: opcional, formato AAAA-MM-DD (o que <input type="date">
+    # manda). Recusa data futura ou absurdamente antiga — sinal de erro de
+    # digitação, não motivo pra travar a compra por outro campo qualquer.
+    birth_date = None
+    raw_birth_date = data.get('birth_date')
+    if raw_birth_date:
+        try:
+            birth_date = _date.fromisoformat(str(raw_birth_date))
+        except (TypeError, ValueError):
+            return Response({'error': 'Data de nascimento inválida'}, status=400)
+        hoje = _date.today()
+        if birth_date > hoje:
+            return Response({'error': 'Data de nascimento não pode ser no futuro'}, status=400)
+        if birth_date.year < hoje.year - 120:
+            return Response({'error': 'Data de nascimento inválida'}, status=400)
+
+    from django.utils import timezone as _tz
+    lead, _created = Lead.objects.update_or_create(
+        store=store, phone=phone,
+        defaults={
+            'name': name[:200],
+            'email': email,
+            'birth_date': birth_date,
+            'whatsapp_opt_in': bool(data.get('whatsapp_opt_in')),
+            'source': data.get('source') or 'storefront',
+            'consent_version': data.get('consent_version'),
+            'consent_timestamp': _tz.now(),
+        },
+    )
+    return Response(LeadSerializer(lead).data, status=201 if _created else 200)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def crm_lead_anonymize(request, lead_id):
+    """
+    POST /api/crm/leads/<id>/anonymize — direito ao esquecimento (LGPD).
+    Substitui os dados identificáveis por placeholders; preserva as
+    métricas agregadas (total_orders/total_spent) para as estatísticas da
+    consultora não ficarem com buraco.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    lead = Lead.objects.filter(store=store, id=lead_id).first()
+    if not lead:
+        return Response({'error': 'Lead não encontrado'}, status=404)
+
+    from django.utils import timezone as _tz
+    lead.name = 'Cliente anonimizado'
+    lead.phone = f'anon-{lead.id}'
+    lead.email = None
+    lead.whatsapp_opt_in = False
+    lead.anonymized_at = _tz.now()
+    lead.save(update_fields=['name', 'phone', 'email', 'whatsapp_opt_in', 'anonymized_at'])
+    return Response(status=204)
+
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def crm_cart_persist(request):
+    """
+    POST /api/crm/carts/persist — salva o carrinho da vitrine vinculado ao
+    lead, para a consultora ver o que o cliente pediu. Chamado sem login.
+    """
+    data = request.data
+    store = _store_by_tenant_id(data.get('tenant_id'))
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=404)
+
+    session_id = str(data.get('session_id') or '')[:100]
+    if not session_id:
+        return Response({'error': 'session_id é obrigatório'}, status=400)
+
+    lead = None
+    lead_id = data.get('lead_id')
+    if lead_id:
+        # O lead precisa pertencer à MESMA loja do tenant_id informado —
+        # senão um carrinho poderia ser amarrado ao cliente de outra loja.
+        lead = Lead.objects.filter(store=store, id=lead_id).first()
+
+    items = data.get('items') or []
+    if not isinstance(items, list):
+        return Response({'error': 'items deve ser uma lista'}, status=400)
+
+    cart = Cart.objects.create(
+        store=store, session_id=session_id, lead=lead,
+        checked_out=bool(data.get('checked_out')),
+    )
+    for it in items[:100]:  # limite defensivo: um carrinho não tem centenas de itens
+        try:
+            CartItem.objects.create(
+                cart=cart,
+                inventory_id=str(it.get('inventory_id', ''))[:50],
+                product_name=str(it.get('product_name', ''))[:255],
+                quantity=max(1, int(it.get('quantity', 1))),
+                price_snapshot=Decimal(str(it.get('price_snapshot', 0) or 0)),
+            )
+        except (TypeError, ValueError, InvalidOperation):
+            continue  # item malformado não derruba o carrinho inteiro
+
+    # Pedido fechado: soma nas métricas agregadas do lead.
+    if cart.checked_out and lead:
+        total = sum((i.price_snapshot * i.quantity) for i in cart.items.all())
+        lead.total_orders = models.F('total_orders') + 1
+        lead.total_spent = models.F('total_spent') + total
+        lead.save(update_fields=['total_orders', 'total_spent'])
+
+    return Response({'id': cart.id}, status=201)

@@ -13,7 +13,8 @@ from django.conf import settings
 # Importa seus modelos de negócio
 from .models import (
     ConsentRecord, CustomUser, Product, InventoryItem, InventoryBatch, Store, 
-    Sale, SaleItem, StockTransaction, PlanConfig, Promotion, ThemeConfig
+    Sale, SaleItem, StockTransaction, PlanConfig, Promotion, ThemeConfig,
+    Lead, Cart, CartItem,
 )
 
 User = get_user_model()
@@ -951,3 +952,31 @@ class ConsentExportSerializer(serializers.Serializer):
             'data_retention_days': getattr(settings, 'LGPD_CONSENT_RETENTION_DAYS', 730),
             'contact_dpo': 'privacidade@minhaamora.com.br',  # Configurar em settings
         }
+
+# ==========================================
+# 📇 CRM DA VITRINE
+# ==========================================
+
+class LeadSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Lead
+        fields = [
+            'id', 'tenant_id', 'name', 'phone', 'email', 'birth_date',
+            'whatsapp_opt_in', 'source', 'consent_version', 'consent_timestamp',
+            'tags', 'total_orders', 'total_spent', 'created_at', 'last_seen',
+            'anonymized_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'last_seen', 'total_orders', 'total_spent']
+
+    def get_tenant_id(self, obj):
+        # O frontend (lib/leads.ts) espera `tenant_id` no formato usado em
+        # toda a vitrine: o ID do usuário dono da loja.
+        return str(obj.store.owner_id) if obj.store.owner_id else None
+
+
+class CartItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CartItem
+        fields = ['inventory_id', 'product_name', 'quantity', 'price_snapshot']
