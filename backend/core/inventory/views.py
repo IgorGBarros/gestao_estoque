@@ -4754,6 +4754,17 @@ def crm_cart_update(request, cart_id):
         return Response({'error': 'Pedido não encontrado'}, status=404)
 
     if request.method == 'DELETE':
+        # ⚠️ CORREÇÃO: total_orders/total_spent do Lead são somados no
+        # checkout (crm_cart_persist), mas excluir o pedido aqui nunca
+        # descontava — os números ficavam "presos" no valor antigo pra
+        # sempre, mesmo depois de excluir todos os pedidos da cliente.
+        if cart.checked_out and cart.lead_id:
+            total_pedido = sum(i.price_snapshot * i.quantity for i in cart.items.all())
+            lead = Lead.objects.filter(id=cart.lead_id).first()
+            if lead:
+                lead.total_orders = max(0, lead.total_orders - 1)
+                lead.total_spent = max(Decimal('0'), lead.total_spent - total_pedido)
+                lead.save(update_fields=['total_orders', 'total_spent'])
         cart.delete()
         return Response(status=204)
 

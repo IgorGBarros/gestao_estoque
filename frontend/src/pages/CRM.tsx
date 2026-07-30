@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { listLeads, getLead, anonymizeLead, deleteLead, exportLeadsCsv, downloadCsv, updateCartPayment, deleteCart, Lead } from "../lib/leads";
+import { listLeads, getLead, anonymizeLead, deleteLead, exportLeadsCsv, downloadCsv, updateCartPayment, deleteCart, Lead, Purchase } from "../lib/leads";
 import { WA_TEMPLATES, WaTemplateKey, buildWaLink, renderTemplate } from "@/lib/whatsapp";
 
 export default function CRM() {
@@ -21,6 +21,10 @@ export default function CRM() {
   // 🔹 Painel de histórico: qual cliente está aberto e os dados dela.
   const [detalheAberto, setDetalheAberto] = useState<Lead | null>(null);
   const [carregandoDetalhe, setCarregandoDetalhe] = useState(false);
+  // 🔹 Modal de confirmação de exclusão de pedido — substitui o confirm()
+  // nativo do navegador (aquele popup feio com a URL do site no título).
+  const [pedidoParaExcluir, setPedidoParaExcluir] = useState<Purchase | null>(null);
+  const [excluindoPedido, setExcluindoPedido] = useState(false);
   // 🔹 Seleção múltipla: quem vai receber a mensagem em massa.
   const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
   const [optInFilter, setOptInFilter] = useState<"all" | "yes" | "no">("all");
@@ -101,8 +105,18 @@ export default function CRM() {
 
   // 🔹 Exclui um pedido que nunca foi pago. Só o pedido some — a cliente
   // (Lead) continua no CRM, com o resto do histórico intacto.
-  const handleExcluirPedido = async (cartId: number) => {
-    if (!confirm("Excluir este pedido? Ele nunca foi pago, então não conta como venda.")) return;
+  // 🔹 Abre o modal de confirmação — não exclui nada ainda.
+  const handleExcluirPedido = (pedido: Purchase) => {
+    setPedidoParaExcluir(pedido);
+  };
+
+  // 🔹 Só executa quando ela confirma no modal. Desconta total_orders e
+  // total_spent do lado do backend (crm_cart_update) — aqui só atualiza a
+  // tela local depois que o servidor confirmar.
+  const confirmarExclusaoPedido = async () => {
+    if (!pedidoParaExcluir) return;
+    const cartId = pedidoParaExcluir.cart_id;
+    setExcluindoPedido(true);
     try {
       await deleteCart(cartId);
       setDetalheAberto((prev) =>
@@ -110,10 +124,13 @@ export default function CRM() {
           ? { ...prev, purchase_history: prev.purchase_history?.filter((p) => p.cart_id !== cartId) }
           : prev
       );
-      load();
+      load(); // atualiza os totais na lista principal também
       toast.success("Pedido excluído");
+      setPedidoParaExcluir(null);
     } catch {
       toast.error("Não foi possível excluir o pedido");
+    } finally {
+      setExcluindoPedido(false);
     }
   };
 
@@ -461,11 +478,17 @@ export default function CRM() {
             </div>
             <div className="rounded-xl border border-border bg-secondary/30 p-3 text-center">
               <p className="text-xs font-bold text-foreground">
-                {detalheAberto.last_purchase_at
-                  ? new Date(detalheAberto.last_purchase_at).toLocaleDateString("pt-BR")
+                {/* 🔹 "última visita" em vez de "última compra": esse campo
+                    (last_seen) sempre tem valor — atualiza toda vez que a
+                    cliente interage na vitrine, mesmo sem fechar pedido — e
+                    é o mesmo campo usado nos gatilhos de notificação
+                    (carrinho abandonado, etc.). "última compra" ficava "—"
+                    sempre que os pedidos eram excluídos. */}
+                {detalheAberto.last_seen
+                  ? new Date(detalheAberto.last_seen).toLocaleDateString("pt-BR")
                   : "—"}
               </p>
-              <p className="text-[11px] text-muted-foreground">última compra</p>
+              <p className="text-[11px] text-muted-foreground">última visita</p>
             </div>
           </div>
 
@@ -544,7 +567,7 @@ export default function CRM() {
                               Marcar como pago
                             </button>
                             <button
-                              onClick={() => handleExcluirPedido(pedido.cart_id)}
+                              onClick={() => handleExcluirPedido(pedido)}
                               title="Ela não pagou — excluir este pedido"
                               className="rounded-full p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                             >
@@ -558,6 +581,51 @@ export default function CRM() {
                 ))}
               </ul>
             )}
+          </div>
+        </div>
+      </div>
+    )}
+    {/* 🔹 Modal de confirmação de exclusão de pedido — no lugar do confirm()
+        nativo do navegador. z-[60] porque abre POR CIMA do painel de
+        histórico (que é z-50). */}
+    {pedidoParaExcluir && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+        onClick={() => !excluindoPedido && setPedidoParaExcluir(null)}
+      >
+        <div
+          className="w-full max-w-sm rounded-2xl bg-card p-5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10">
+            <Trash2 className="h-5 w-5 text-destructive" />
+          </div>
+          <h3 className="text-center font-display text-base font-bold text-foreground">
+            Excluir este pedido?
+          </h3>
+          <p className="mt-1.5 text-center text-sm text-muted-foreground">
+            Pedido de {new Date(pedidoParaExcluir.date).toLocaleDateString("pt-BR")}, no valor de{" "}
+            <strong className="text-foreground">R$ {Number(pedidoParaExcluir.total).toFixed(2)}</strong>.
+            Ele nunca foi pago, então deixa de contar como venda — os números de pedidos e valor
+            gasto da cliente são atualizados automaticamente.
+          </p>
+
+          <div className="mt-5 flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              disabled={excluindoPedido}
+              onClick={() => setPedidoParaExcluir(null)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              className="flex-1 bg-destructive text-white hover:bg-destructive/90"
+              disabled={excluindoPedido}
+              onClick={confirmarExclusaoPedido}
+            >
+              {excluindoPedido ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
+            </Button>
           </div>
         </div>
       </div>
