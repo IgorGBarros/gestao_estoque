@@ -513,6 +513,19 @@ class ProductViewSet(viewsets.ModelViewSet):
     permission_classes = [AllowAny]    
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
+    # ✅ Mesmo motivo do InventoryViewSet e do StockTransactionViewSet: o
+    # frontend (productService.ts) faz `data.map(...)` esperando um ARRAY
+    # puro. A paginação global do DRF embrulharia em {count, results} e
+    # quebraria com "data.map is not a function".
+    #
+    # ⚠️ Diferença importante: aqui é o catálogo GLOBAL (compartilhado por
+    # todas as lojas), não o estoque de uma consultora — pode crescer muito
+    # mais que "algumas dezenas de itens". Se o catálogo passar de alguns
+    # milhares de produtos, isto vai devolver a lista inteira em toda
+    # chamada. Quando isso incomodar, o caminho é paginar de propósito E
+    # atualizar productService.ts para ler `.results` em vez de tratar a
+    # resposta como array direto — as duas pontas têm que mudar juntas.
+    pagination_class = None
 
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop('partial', False)

@@ -138,11 +138,17 @@ urlpatterns = [
 # registrava — o frontend chamava /api/inventory/ e /api/transactions/ e
 # recebia 404. Este bloco fecha essa lacuna.
 from rest_framework.routers import DefaultRouter
-from inventory.views import InventoryViewSet, StockTransactionViewSet, StockEntryView
+from inventory.views import InventoryViewSet, StockTransactionViewSet, StockEntryView, ProductViewSet
 
 router = DefaultRouter()
 router.register(r'api/inventory', InventoryViewSet, basename='inventory')
 router.register(r'api/transactions', StockTransactionViewSet, basename='transactions')
+# ⚠️ CORREÇÃO: em v1.0.0 existia `router.register(r'products', ProductViewSet)`.
+# Na consolidação das URLs deste projeto, o router foi reconstruído do zero e
+# essa linha ficou de fora — GET/POST /api/products/ e /api/products/<id>/
+# passaram a devolver 404. É o catálogo global (AllowAny, sem filtro por
+# loja), usado pelo AddProduct para listar/consultar produtos por ID.
+router.register(r'api/products', ProductViewSet, basename='products')
 
 urlpatterns += router.urls
 urlpatterns += [
