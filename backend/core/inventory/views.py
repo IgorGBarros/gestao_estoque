@@ -2029,8 +2029,15 @@ def feature_gates_view(request):
     ✅ Autenticação via JWT (não requer API Key de gateway)
     """
     # Opcional: filtrar gates baseado no plano do usuário
+    # ⚠️ CORREÇÃO: usava `store.plan == 'pro'` direto, que ignora o trial —
+    # `plan` continua 'free' durante o período de teste, só `has_pro_access`
+    # (ou `plan_config`) sabem que o trial também dá acesso completo. Com o
+    # bug, toda funcionalidade PRO (scanner, gráficos, IA, vitrine, chat,
+    # produtos ilimitados) aparecia BLOQUEADA durante os 14 dias de teste —
+    # o oposto do que o trial promete. Esta view alimenta useFeatureGates,
+    # usado em Dashboard, Index, AddProduct e WithdrawProduct.
     store = get_current_store(request.user)
-    is_pro = store and store.plan == 'pro' if store else False
+    is_pro = bool(store and store.has_pro_access)
     
     gates = [
         {"feature_key": "barcode_scanner", "label": "Scanner de Código", "description": None, "requires_pro": True},
