@@ -69,7 +69,18 @@ export const ChatAssistant: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const res = await api.post("chat/ask/", { question: msg });
+      // 🔹 Monta o histórico das últimas trocas (pergunta+resposta), pra
+      // Amorinha entender perguntas de seguimento como "e esse ano?". Usa
+      // `messages` de ANTES de adicionar a pergunta atual — pega só pares
+      // completos (usuário seguido de resposta da assistente).
+      const historico: { question: string; answer: string }[] = [];
+      for (let i = 0; i < messages.length - 1; i++) {
+        if (messages[i].role === "user" && messages[i + 1].role === "assistant") {
+          historico.push({ question: messages[i].content, answer: messages[i + 1].content });
+        }
+      }
+
+      const res = await api.post("chat/ask/", { question: msg, history: historico.slice(-3) });
       const answerText = res.data.response || JSON.stringify(res.data);
       setMessages((prev) => [
         ...prev,
@@ -80,14 +91,23 @@ export const ChatAssistant: React.FC = () => {
           timestamp: new Date(),
         },
       ]);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro no chat:", error);
+      // ⚠️ CORREÇÃO: antes, QUALQUER erro (rede fora do ar, 500, ou falta de
+      // consentimento) mostrava a mesma mensagem genérica. O backend recusa
+      // com 403 especificamente quando a consultora nunca ativou o
+      // consentimento de IA (LGPD, opt-in — desligado por padrão). Sem essa
+      // distinção, ela via "ocorreu um erro" sem saber que é só um botão
+      // pra ligar em Configurações.
+      const semConsentimento = error?.response?.status === 403;
       setMessages((prev) => [
         ...prev,
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: "⚠️ Ocorreu um erro ao contatar o assistente IA.",
+          content: semConsentimento
+            ? "Pra eu poder te ajudar, preciso que você ative o uso de IA. Vá em Configurações → Privacidade e ligue \"Recursos de inteligência artificial\" — aí é só voltar aqui e perguntar de novo. 💜"
+            : "⚠️ Ocorreu um erro ao contatar o assistente IA.",
           timestamp: new Date(),
         },
       ]);
