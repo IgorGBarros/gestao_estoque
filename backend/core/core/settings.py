@@ -498,6 +498,15 @@ LGPD_CONSENT_VERSION = "v1.0_2026-05"
 TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "14"))
 
 # ==========================================
+# 🤖 AMORINHA (assistente de IA) — Groq
+# ==========================================
+# Substituiu o Ollama local (não funcionava em produção — dependia de
+# localhost:11434, que só existe na máquina de quem desenvolveu). A chave é
+# gratuita para começar: console.groq.com, sem cartão de crédito.
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+
+# ==========================================
 # 🔐 ADMINISTRADORES DO SISTEMA (acesso ao painel)
 # ==========================================
 # Lista de emails autorizados a acessar o /admin-panel. Definida por variável

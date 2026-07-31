@@ -15,21 +15,74 @@ quais parâmetros. O `store` é sempre passado pelo código Python (vem de
 request.user.store no view), nunca é algo que o modelo decide — portanto
 não existe caminho, nem por prompt injection, para vazar dados de outra loja
 por aqui.
+
+CORREÇÃO DE INFRAESTRUTURA:
+Antes, isto chamava `Ollama(model="deepseek-r1:14b")` via langchain_community
+— um modelo rodando em localhost:11434, que não existe no Render (só existe
+na máquina de quem desenvolveu). Em produção, a resposta era sempre um erro
+de conexão. Pior: `langchain_community` nem está nos requirements de
+produção, então o import deste módulo falhava sozinho, antes mesmo de
+tentar falar com o Ollama.
+
+Agora usa a API da Groq (https://groq.com), compatível com o formato da
+OpenAI — mesma ideia de prompt, resposta em nuvem de verdade, sem precisar
+manter servidor de LLM nenhum. Precisa da variável de ambiente GROQ_API_KEY
+configurada no Render (dev e produção podem usar a mesma chave, ou chaves
+diferentes — ver README/documentação de deploy).
 """
 import json
 import logging
 import re
 from datetime import timedelta
 
+from django.conf import settings
 from django.db.models import F, Sum
 from django.utils import timezone
-from langchain_community.llms import Ollama
+from groq import Groq, GroqError
 
 from inventory.models import InventoryItem, Sale
 
 logger = logging.getLogger(__name__)
 
 THINK_TAG_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL | re.IGNORECASE)
+
+# ⚠️ Modelo: a Groq descontinuou os antigos Llama 3.x de chat. O recomendado
+# hoje pra tarefas de raciocínio/uso geral é a linha "gpt-oss". Usamos o
+# 20B — as duas tarefas daqui (escolher uma função de uma lista fechada, e
+# explicar um resultado numérico em 1-2 frases) são simples o bastante pra
+# não precisar do 120B, que custa o dobro por token. Se a qualidade das
+# respostas não for boa o suficiente, trocar aqui para "openai/gpt-oss-120b"
+# é a única mudança necessária.
+GROQ_MODEL = getattr(settings, "GROQ_MODEL", "openai/gpt-oss-20b")
+
+_client = None
+
+
+def _get_client() -> Groq:
+    """
+    Client da Groq, criado uma vez só (é thread-safe e reaproveitável).
+    Lançar aqui, e não no import do módulo, evita quebrar o site inteiro se
+    a variável de ambiente não estiver configurada — só o endpoint da
+    Amorinha falha, com uma mensagem clara, em vez do Django não subir.
+    """
+    global _client
+    if _client is None:
+        api_key = getattr(settings, "GROQ_API_KEY", None)
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY não configurada")
+        _client = Groq(api_key=api_key)
+    return _client
+
+
+def _chamar_groq(prompt: str, temperature: float) -> str:
+    """Uma chamada simples de texto — o equivalente ao antigo `.invoke(prompt)` do Ollama."""
+    resposta = _get_client().chat.completions.create(
+        model=GROQ_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        max_completion_tokens=600,
+    )
+    return resposta.choices[0].message.content or ""
 
 
 def _strip_llm_noise(text: str) -> str:
@@ -131,8 +184,7 @@ def query_database_with_llm(user_question: str, store) -> str:
 
     try:
         # PASSO 1: o modelo escolhe UMA ferramenta da lista fechada (não SQL)
-        llm_router = Ollama(model="deepseek-r1:14b", temperature=0.0, num_ctx=4096)
-        raw_route = llm_router.invoke(ROUTER_PROMPT.format(question=user_question))
+        raw_route = _chamar_groq(ROUTER_PROMPT.format(question=user_question), temperature=0.0)
         clean_route = _strip_llm_noise(raw_route)
 
         try:
@@ -166,8 +218,7 @@ def query_database_with_llm(user_question: str, store) -> str:
 
         # PASSO 3: transforma o resultado estruturado em resposta natural
         final_prompt = EXPLAIN_PROMPT.format(question=user_question, data=json.dumps(dados, default=str))
-        llm_explain = Ollama(model="deepseek-r1:14b", temperature=0.3, num_ctx=4096)
-        raw_answer = llm_explain.invoke(final_prompt)
+        raw_answer = _chamar_groq(final_prompt, temperature=0.3)
         final_answer = _strip_llm_noise(raw_answer)
 
         if len(final_answer) < 5:
@@ -175,6 +226,14 @@ def query_database_with_llm(user_question: str, store) -> str:
 
         return final_answer
 
+    except RuntimeError:
+        # GROQ_API_KEY não configurada — erro de configuração, não do usuário.
+        logger.error("Amorinha: GROQ_API_KEY não configurada no ambiente")
+        return "A assistente está temporariamente indisponível. Tente novamente mais tarde."
+    except GroqError:
+        # Rate limit, chave inválida, indisponibilidade momentânea da Groq etc.
+        logger.exception("Amorinha: erro na chamada à API da Groq")
+        return "Desculpe, tive um problema para me conectar. Tente novamente em instantes."
     except Exception:
         logger.exception("Erro no assistente de IA (query_database_with_llm)")
         return "Desculpe, tive um problema técnico ao processar sua pergunta."
