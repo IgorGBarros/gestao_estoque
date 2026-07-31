@@ -80,7 +80,7 @@ def _chamar_groq(prompt: str, temperature: float) -> str:
         model=GROQ_MODEL,
         messages=[{"role": "user", "content": prompt}],
         temperature=temperature,
-        max_completion_tokens=600,
+        max_tokens=600,
     )
     return resposta.choices[0].message.content or ""
 
