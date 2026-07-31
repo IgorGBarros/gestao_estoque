@@ -35,12 +35,15 @@ import logging
 import re
 from datetime import timedelta
 
+from decimal import Decimal
+
 from django.conf import settings
 from django.db.models import F, Sum
+from django.db.models.functions import Abs
 from django.utils import timezone
 from groq import Groq, GroqError
 
-from inventory.models import InventoryItem, Sale
+from inventory.models import InventoryItem, StockTransaction
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +118,71 @@ def _valor_total_estoque(store) -> dict:
 
 
 def _vendas_periodo(store, dias: int = 30) -> dict:
+    # ⚠️ Usa StockTransaction, não o modelo Sale (mais antigo) — é a mesma
+    # fonte de dados do MEI e dos Relatórios. Manter os três (Amorinha, MEI,
+    # Relatórios) na mesma tabela evita a Amorinha dar um número e a tela de
+    # Relatórios mostrar outro pro mesmo período.
     dias = max(1, min(int(dias or 30), 365))
     desde = timezone.now() - timedelta(days=dias)
-    qs = Sale.objects.filter(store=store, created_at__gte=desde, transaction_type="VENDA")
-    total = qs.aggregate(total=Sum("total_amount"))["total"] or 0
-    return {"periodo_dias": dias, "quantidade_vendas": qs.count(), "valor_total_vendas": float(total)}
+    qs = StockTransaction.objects.filter(store=store, transaction_type="VENDA", created_at__gte=desde)
+    agregado = qs.aggregate(
+        receita=Sum(F("unit_price") * Abs(F("quantity"))),
+        qtd_vendida=Sum(Abs(F("quantity"))),
+    )
+    return {
+        "periodo_dias": dias,
+        "quantidade_pedidos": qs.count(),
+        "unidades_vendidas": agregado["qtd_vendida"] or 0,
+        "valor_total_vendas": float(agregado["receita"] or 0),
+    }
+
+
+def _lucro_periodo(store, dias: int = 30) -> dict:
+    """Lucro = receita (preço de venda) menos custo, nas vendas do período."""
+    dias = max(1, min(int(dias or 30), 365))
+    desde = timezone.now() - timedelta(days=dias)
+    qs = StockTransaction.objects.filter(store=store, transaction_type="VENDA", created_at__gte=desde)
+    agregado = qs.aggregate(
+        receita=Sum(F("unit_price") * Abs(F("quantity"))),
+        custo=Sum(F("unit_cost") * Abs(F("quantity"))),
+    )
+    receita = agregado["receita"] or Decimal("0")
+    custo = agregado["custo"] or Decimal("0")
+    return {
+        "periodo_dias": dias,
+        "receita_total": float(receita),
+        "custo_total": float(custo),
+        "lucro_total": float(receita - custo),
+    }
+
+
+def _produtos_vendidos(store, termo: str = "", dias: int = 30) -> dict:
+    """
+    Quais produtos foram VENDIDOS no período — cobre tanto "quais produtos
+    vendi" (termo vazio, lista os mais vendidos) quanto "vendi algum X"
+    (termo="X", filtra por nome). Antes não existia NENHUMA ferramenta que
+    respondesse isso — só dava pra saber o que TEM no estoque, não o que
+    foi VENDIDO.
+    """
+    dias = max(1, min(int(dias or 30), 365))
+    desde = timezone.now() - timedelta(days=dias)
+    qs = StockTransaction.objects.filter(store=store, transaction_type="VENDA", created_at__gte=desde)
+    if termo:
+        qs = qs.filter(product__name__icontains=termo[:100])
+
+    agrupado = (
+        qs.values("product__name")
+        .annotate(quantidade=Sum(Abs(F("quantity"))), receita=Sum(F("unit_price") * Abs(F("quantity"))))
+        .order_by("-quantidade")[:10]
+    )
+    return {
+        "periodo_dias": dias,
+        "termo_buscado": termo or None,
+        "produtos_vendidos": [
+            {"produto": p["product__name"], "quantidade": p["quantidade"], "receita": float(p["receita"] or 0)}
+            for p in agrupado
+        ],
+    }
 
 
 def _produtos_baixo_estoque(store) -> dict:
@@ -137,17 +200,29 @@ FUNCOES_PERMITIDAS = {
     "buscar_estoque": (_buscar_estoque, {"termo": str}),
     "valor_total_estoque": (_valor_total_estoque, {}),
     "vendas_periodo": (_vendas_periodo, {"dias": int}),
+    "lucro_periodo": (_lucro_periodo, {"dias": int}),
+    "produtos_vendidos": (_produtos_vendidos, {"termo": str, "dias": int}),
     "produtos_baixo_estoque": (_produtos_baixo_estoque, {}),
 }
 
 ROUTER_PROMPT = """Você escolhe qual ferramenta usar para responder a pergunta de uma consultora sobre a loja DELA.
 
 Ferramentas disponíveis:
-- buscar_estoque(termo): busca produtos no estoque pelo nome. Use termo="" para listar em geral.
-- valor_total_estoque(): valor total do estoque atual.
-- vendas_periodo(dias): total de vendas nos últimos N dias.
-- produtos_baixo_estoque(): produtos abaixo da quantidade mínima.
+- buscar_estoque(termo): o que TEM no estoque agora (quantidade, preço). Use termo="" para listar em geral.
+- valor_total_estoque(): valor total do estoque parado hoje.
+- vendas_periodo(dias): quantas vendas e quanto faturou nos últimos N dias (visão geral, sem detalhar produto).
+- produtos_vendidos(termo, dias): quais produtos foram VENDIDOS nos últimos N dias. termo="" lista os mais
+  vendidos; termo="nome do produto" responde se um produto específico foi vendido e quanto.
+- lucro_periodo(dias): lucro (receita menos custo) das vendas nos últimos N dias.
+- produtos_baixo_estoque(): produtos abaixo da quantidade mínima, precisando repor.
 
+Como escolher:
+- "o que vendi", "quais produtos vendi", "vendi algum X", "vendi X?" → produtos_vendidos (é sobre o que foi
+  VENDIDO, não sobre o estoque atual)
+- "lucro", "quanto lucrei", "ganhei quanto" → lucro_periodo
+- "tenho X?", "quanto custa X", "quantidade de X" → buscar_estoque (é sobre o que TEM agora)
+- período: "esse ano"/"ano todo" → dias=365 · "essa semana" → dias=7 · "hoje" → dias=1 · sem período dito → dias=30
+{historico}
 Responda APENAS com um JSON, sem explicação, sem markdown, exatamente neste formato:
 {{"funcao": "nome_da_ferramenta", "argumentos": {{}}}}
 
@@ -169,11 +244,50 @@ Resposta:
 """
 
 
-def query_database_with_llm(user_question: str, store) -> str:
+def _formatar_historico(history: list) -> str:
+    """
+    Monta o bloco de contexto da conversa pro prompt do roteador — é o que
+    permite perguntas de seguimento tipo "e esse ano?" entenderem que ainda
+    é sobre o mesmo produto perguntado antes. Sem isso, cada pergunta era
+    tratada como se fosse a primeira, sem nenhuma memória.
+
+    Limita a 3 trocas (6 mensagens) e 300 caracteres cada — o suficiente pra
+    dar contexto, sem deixar o prompt (e o custo por chamada) crescer sem
+    limite numa conversa longa.
+    """
+    if not history or not isinstance(history, list):
+        return ""
+
+    trocas = []
+    for item in history[-3:]:
+        if not isinstance(item, dict):
+            continue
+        pergunta = str(item.get("question") or "")[:300]
+        resposta = str(item.get("answer") or "")[:300]
+        if pergunta and resposta:
+            trocas.append(f'Cliente perguntou: "{pergunta}"\nVocê respondeu: "{resposta}"')
+
+    if not trocas:
+        return ""
+
+    return (
+        "\nConversa até agora, pra entender perguntas de seguimento "
+        "(tipo \"e esse ano?\" depois de perguntar sobre um produto):\n"
+        + "\n\n".join(trocas) + "\n"
+    )
+
+
+def query_database_with_llm(user_question: str, store, history: list = None) -> str:
     """
     `store`: instância de inventory.models.Store do usuário autenticado.
     Deve vir SEMPRE de request.user.store (no view) — nunca de input do
     usuário ou de algo que o LLM produza.
+
+    `history`: últimas trocas da conversa (lista de {"question", "answer"}),
+    usada só para o roteador entender perguntas de seguimento. Não afeta
+    quais ferramentas existem nem o que elas podem consultar — é só
+    contexto de linguagem, o isolamento por loja continua sendo feito 100%
+    pelo `store` vindo do código.
     """
     if store is None:
         return "Não encontrei uma loja associada à sua conta."
@@ -184,7 +298,10 @@ def query_database_with_llm(user_question: str, store) -> str:
 
     try:
         # PASSO 1: o modelo escolhe UMA ferramenta da lista fechada (não SQL)
-        raw_route = _chamar_groq(ROUTER_PROMPT.format(question=user_question), temperature=0.0)
+        historico_fmt = _formatar_historico(history)
+        raw_route = _chamar_groq(
+            ROUTER_PROMPT.format(question=user_question, historico=historico_fmt), temperature=0.0
+        )
         clean_route = _strip_llm_noise(raw_route)
 
         try:

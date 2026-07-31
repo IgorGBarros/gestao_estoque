@@ -44,6 +44,16 @@ class ChatAskView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # 🔹 Histórico opcional (últimas trocas), pra Amorinha entender
+        # perguntas de seguimento tipo "e esse ano?". Vem do frontend, então
+        # é tratado como não confiável: só aceita lista, com limite de
+        # tamanho — quem sanitiza de verdade (limite de caracteres por
+        # mensagem, quantas trocas usar de fato) é o services.py.
+        history = request.data.get("history")
+        if not isinstance(history, list):
+            history = []
+        history = history[-6:]  # nunca repassa mais que isso adiante
+
         store = getattr(request.user, "store", None)
         if store is None:
             return Response(
@@ -58,7 +68,7 @@ class ChatAskView(APIView):
             )
 
         try:
-            answer = query_database_with_llm(question, store)
+            answer = query_database_with_llm(question, store, history=history)
             return Response({"response": answer}, status=status.HTTP_200_OK)
         except Exception:
             logger.exception("Erro no ChatAskView")

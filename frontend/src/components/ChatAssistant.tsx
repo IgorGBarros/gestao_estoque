@@ -69,7 +69,18 @@ export const ChatAssistant: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const res = await api.post("chat/ask/", { question: msg });
+      // 🔹 Monta o histórico das últimas trocas (pergunta+resposta), pra
+      // Amorinha entender perguntas de seguimento como "e esse ano?". Usa
+      // `messages` de ANTES de adicionar a pergunta atual — pega só pares
+      // completos (usuário seguido de resposta da assistente).
+      const historico: { question: string; answer: string }[] = [];
+      for (let i = 0; i < messages.length - 1; i++) {
+        if (messages[i].role === "user" && messages[i + 1].role === "assistant") {
+          historico.push({ question: messages[i].content, answer: messages[i + 1].content });
+        }
+      }
+
+      const res = await api.post("chat/ask/", { question: msg, history: historico.slice(-3) });
       const answerText = res.data.response || JSON.stringify(res.data);
       setMessages((prev) => [
         ...prev,
