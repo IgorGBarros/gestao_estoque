@@ -48,6 +48,7 @@ from .serializers import (
     ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer,  # ✅ Serializers LGPD
     PlanConfigSerializer,
     LeadSerializer, CartItemSerializer,  # ✅ CRM da vitrine
+    PromotionSerializer,
 )
 
 from .scraper import search_google_shopping
@@ -4186,6 +4187,59 @@ def public_plans_view(request):
     """
     plans = PlanConfig.objects.filter(is_visible=True).order_by('sort_order')
     return Response(PlanConfigSerializer(plans, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def active_promotions_view(request):
+    """
+    GET /api/promotions/active/ — promoções que a loja de quem está logado
+    deve ver agora. Sem isso, o admin podia criar e ativar uma promoção que
+    NUNCA aparecia pra ninguém — o recurso não tinha efeito nenhum fora do
+    próprio painel administrativo.
+
+    Prioridade: se a promoção tem `target_stores` preenchido, só aparece
+    pras lojas selecionadas ali (alvo específico, mais forte). Senão, cai no
+    segmento amplo de `target_audience` (todos / free / pro / novos /
+    inativos) — o comportamento que já existia.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response([])
+
+    agora = timezone.now()
+    base = Promotion.objects.filter(is_active=True, starts_at__lte=agora).filter(
+        Q(ends_at__isnull=True) | Q(ends_at__gte=agora)
+    ).exclude(
+        max_views__isnull=False, current_views__gte=F('max_views')
+    )
+
+    candidatas = []
+    for promo in base:
+        if promo.target_stores.exists():
+            # Alvo específico: só vale se ESTA loja estiver na lista.
+            if promo.target_stores.filter(id=store.id).exists():
+                candidatas.append(promo)
+            continue
+
+        # Sem alvo específico: cai no segmento amplo de sempre.
+        alvo = promo.target_audience
+        if alvo == 'all':
+            candidatas.append(promo)
+        elif alvo == 'free' and store.plan != 'pro':
+            candidatas.append(promo)
+        elif alvo == 'pro' and store.plan == 'pro':
+            candidatas.append(promo)
+        elif alvo == 'new_users' and store.created_at >= agora - timedelta(days=7):
+            candidatas.append(promo)
+        elif alvo == 'inactive':
+            ativo_recente = UserBehaviorLog.objects.filter(
+                store=store, created_at__gte=agora - timedelta(days=30)
+            ).exists()
+            if not ativo_recente:
+                candidatas.append(promo)
+
+    return Response(PromotionSerializer(candidatas, many=True).data)
 
 
 @api_view(['GET'])

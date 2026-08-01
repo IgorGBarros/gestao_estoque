@@ -23,6 +23,7 @@ from inventory.views import (
     movements_report_csv,
     stock_report_csv,
     public_plans_view,
+    active_promotions_view,
     mei_report_csv,
 )
 
@@ -89,6 +90,7 @@ urlpatterns = [
     path('api/dashboard/inventory/', dashboard_inventory_analysis, name='dashboard_inventory'),
     path('api/cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
     path('api/plans/', public_plans_view, name='public_plans'),
+    path('api/promotions/active/', active_promotions_view, name='active_promotions'),
 
     # 📊 Relatórios da consultora (dashboard com filtro de período)
     path('api/reports/', consultant_reports, name='consultant_reports'),

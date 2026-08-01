@@ -111,24 +111,101 @@ def update_plan_config(request, plan_type):
     return Response(_serialize_plan_config(config))
 
 
-@api_view(['GET'])
-@permission_classes([IsAdminUser])
-def list_promotions(request):
-    """GET /api/admin/promotions/ → Lista promoções"""
-    promotions = Promotion.objects.all().order_by('-created_at')
-    return Response([{
+def _serialize_promotion(p):
+    return {
         'id': str(p.id),
         'title': p.title,
         'message': p.message,
+        'promotion_type': p.promotion_type,
         'target_audience': p.target_audience,
+        'target_store_ids': list(p.target_stores.values_list('id', flat=True)),
         'discount_percent': p.discount_percent,
         'discount_amount': float(p.discount_amount),
         'is_active': p.is_active,
         'starts_at': p.starts_at.isoformat(),
         'ends_at': p.ends_at.isoformat() if p.ends_at else None,
         'max_views_per_store': p.max_views,
-        'created_at': p.created_at.isoformat()
-    } for p in promotions])
+        'background_color': p.background_color,
+        'text_color': p.text_color,
+        'created_at': p.created_at.isoformat(),
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def list_promotions(request):
+    """GET /api/admin/promotions/ → Lista promoções"""
+    promotions = Promotion.objects.all().order_by('-created_at')
+    return Response([_serialize_promotion(p) for p in promotions])
+
+
+# ⚠️ CORREÇÃO GRAVE: até aqui só existia LISTAR. O botão "Salvar" do
+# admin-panel nunca chamava nenhuma API — só mexia em estado local do
+# React, com um id falso (Date.now()). Uma promoção "criada" sumia ao
+# atualizar a página; ativar/desativar tinha o mesmo problema. O recurso
+# inteiro era cosmético.
+
+_CAMPOS_PROMOCAO = [
+    'title', 'message', 'promotion_type', 'target_audience',
+    'discount_percent', 'discount_amount', 'is_active',
+    'starts_at', 'ends_at', 'max_views', 'background_color', 'text_color',
+]
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def create_promotion(request):
+    """POST /api/admin/promotions/create/"""
+    data = request.data
+    if not data.get('title') or not data.get('message'):
+        return Response({'error': 'title e message são obrigatórios'}, status=400)
+
+    promo = Promotion()
+    for campo in _CAMPOS_PROMOCAO:
+        if campo in data and data[campo] is not None:
+            setattr(promo, campo, data[campo])
+    try:
+        promo.save()
+    except Exception as e:
+        return Response({'error': f'Não foi possível salvar: {e}'}, status=400)
+
+    # target_store_ids: lista de IDs de Store (não de usuário — ver
+    # list_users, que já tem essa mesma ressalva marcada).
+    ids_lojas = data.get('target_store_ids')
+    if isinstance(ids_lojas, list):
+        promo.target_stores.set(Store.objects.filter(id__in=ids_lojas))
+
+    return Response(_serialize_promotion(promo), status=201)
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAdminUser])
+def promotion_detail(request, promotion_id):
+    """
+    PATCH  /api/admin/promotions/<id>/ — edita (inclui ativar/desativar).
+    DELETE /api/admin/promotions/<id>/ — exclui definitivamente.
+    """
+    promo = Promotion.objects.filter(id=promotion_id).first()
+    if not promo:
+        return Response({'error': 'Promoção não encontrada'}, status=404)
+
+    if request.method == 'DELETE':
+        promo.delete()
+        return Response(status=204)
+
+    data = request.data
+    for campo in _CAMPOS_PROMOCAO:
+        if campo in data and data[campo] is not None:
+            setattr(promo, campo, data[campo])
+    try:
+        promo.save()
+    except Exception as e:
+        return Response({'error': f'Não foi possível salvar: {e}'}, status=400)
+
+    if 'target_store_ids' in data and isinstance(data['target_store_ids'], list):
+        promo.target_stores.set(Store.objects.filter(id__in=data['target_store_ids']))
+
+    return Response(_serialize_promotion(promo))
 
 
 # ─────────────────────────────────────────────────────────────
@@ -176,6 +253,8 @@ def list_users(request):
             
         data.append({
             'id': owner.id,  # ID do owner para compatibilidade com update_plan
+            'store_id': store.id,  # ⚠️ ID da LOJA — necessário pra Promotion.target_stores,
+                                    # que é M2M com Store, não com o usuário.
             'email': owner.email,
             'display_name': owner.name,
             'plan': store.plan,
@@ -246,7 +325,34 @@ def get_system_stats(request):
     monthly_revenue = StockTransaction.objects.filter(
         transaction_type='VENDA', created_at__gte=month_start
     ).aggregate(s=revenue_expr)['s'] or Decimal('0')
-    
+
+    # 💰 Receita REAL da plataforma — assinaturas efetivamente pagas via
+    # Asaas, vinda direto dos webhooks (ProcessedPaymentEvent.value). É
+    # diferente de `total_revenue`/`monthly_revenue` acima, que são as
+    # VENDAS DE PRODUTO das consultoras nas lojas delas — GMV da plataforma,
+    # não receita do próprio Minha Amora. As duas métricas são legítimas,
+    # mas não podem ser confundidas: o negócio (assinatura PRO) só aparece
+    # nesta aqui.
+    from inventory.models import ProcessedPaymentEvent
+    platform_revenue_total = ProcessedPaymentEvent.objects.aggregate(
+        s=Sum('value')
+    )['s'] or Decimal('0')
+    platform_revenue_month = ProcessedPaymentEvent.objects.filter(
+        processed_at__gte=month_start
+    ).aggregate(s=Sum('value'))['s'] or Decimal('0')
+
+    # Últimos 30 dias, por dia — pra um gráfico de tendência, como qualquer
+    # painel de assinatura (Stripe, Chargebee) mostra receita ao longo do
+    # tempo, não só um número estático.
+    from django.db.models.functions import TruncDate
+    receita_por_dia = (
+        ProcessedPaymentEvent.objects.filter(processed_at__gte=now - timedelta(days=30))
+        .annotate(dia=TruncDate('processed_at'))
+        .values('dia')
+        .annotate(total=Sum('value'))
+        .order_by('dia')
+    )
+
     # Conversão: lojas que viraram PRO nos últimos 30 dias
     recent_upgrades = Store.objects.filter(
         plan='pro', 
@@ -269,6 +375,12 @@ def get_system_stats(request):
         'total_products': total_products,
         'total_revenue': float(total_revenue),
         'monthly_revenue': float(monthly_revenue),
+        'platform_revenue_total': float(platform_revenue_total),
+        'platform_revenue_month': float(platform_revenue_month),
+        'platform_revenue_by_day': [
+            {'date': r['dia'].isoformat(), 'value': float(r['total'] or 0)}
+            for r in receita_por_dia
+        ],
         'churn_rate': safe_div(len(inactive_pro_ids), pro_stores),
         'conversion_rate': safe_div(recent_upgrades, total_stores),
         'avg_products_per_store': round(avg_products, 1)

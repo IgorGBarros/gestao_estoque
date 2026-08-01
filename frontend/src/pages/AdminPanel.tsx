@@ -31,6 +31,7 @@ import ApiManagementTab from "../components/admin/ApiManagementTab";
 
 export interface AdminUser {
   id: string | number;
+  store_id?: string | number;  // ⚠️ ID da LOJA — usado pra vincular Promotion.target_stores
   email: string;
   display_name: string | null;
   plan: string;
@@ -89,8 +90,11 @@ export interface SystemStats {
   pro_stores: number;
   free_stores: number;
   total_products: number;
-  total_revenue: number;
+  total_revenue: number;      // ⚠️ vendas de produto das consultoras (GMV), NÃO é receita do Minha Amora
   monthly_revenue: number;
+  platform_revenue_total: number;   // 💰 receita REAL da plataforma — assinaturas pagas via Asaas
+  platform_revenue_month: number;
+  platform_revenue_by_day: { date: string; value: number }[];
   churn_rate: number;
   conversion_rate: number;
   avg_products_per_store: number;
@@ -379,14 +383,16 @@ const PromotionModal = ({
   isOpen,
   onClose,
   promotion,
-  onSave
+  onSave,
+  stores
 }: {
   isOpen: boolean;
   onClose: () => void;
   promotion: Promotion | null;
   onSave: (data: Partial<Promotion>) => void;
+  stores: AdminUser[];
 }) => {
-  const [formData, setFormData] = useState<Partial<Promotion>>({
+  const [formData, setFormData] = useState<Partial<Promotion> & { target_store_ids?: (string | number)[] }>({
     title: '',
     message: '',
     target_audience: 'free',
@@ -395,7 +401,8 @@ const PromotionModal = ({
     is_active: true,
     starts_at: new Date().toISOString().slice(0, 16),
     ends_at: null,
-    max_views_per_store: null
+    max_views_per_store: null,
+    target_store_ids: [],
   });
 
   useEffect(() => {
@@ -456,9 +463,67 @@ const PromotionModal = ({
                 <option value="all">Todos</option>
                 <option value="free">Plano Free</option>
                 <option value="pro">Plano PRO</option>
-                <option value="new_stores">Lojas Novas</option>
+                {/* ⚠️ CORREÇÃO: era "new_stores", mas o modelo espera
+                    "new_users" — o valor nunca batia com nada, essa opção
+                    nunca funcionou. E faltava "inativos", que já existe no
+                    modelo mas nunca aparecia aqui pra escolher. */}
+                <option value="new_users">Lojas Novas (menos de 7 dias)</option>
+                <option value="inactive">Inativas (mais de 30 dias sem uso)</option>
               </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Usado só se nenhuma consultora específica for selecionada abaixo.
+              </p>
             </div>
+          </div>
+
+          {/* 🎯 Alvo por consultora específica — o que faltava pra o admin
+              conseguir mandar uma promoção só pra quem ele quiser, em vez de
+              só um segmento amplo. Quando alguém aqui está marcado, vale
+              MAIS que o Público-Alvo acima (ver active_promotions_view). */}
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Ou consultoras específicas
+              {(formData.target_store_ids?.length || 0) > 0 && (
+                <span className="ml-1.5 text-xs font-normal text-brand">
+                  ({formData.target_store_ids!.length} selecionada{formData.target_store_ids!.length > 1 ? "s" : ""})
+                </span>
+              )}
+            </label>
+            <div className="max-h-40 overflow-y-auto rounded-lg border border-input p-2 space-y-1">
+              {stores.length === 0 ? (
+                <p className="p-2 text-xs text-muted-foreground">Nenhuma consultora encontrada.</p>
+              ) : (
+                stores.map((s) => {
+                  const marcado = (formData.target_store_ids || []).includes(s.store_id ?? s.id);
+                  return (
+                    <label
+                      key={s.store_id ?? s.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-secondary/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={marcado}
+                        onChange={(e) => {
+                          const idLoja = s.store_id ?? s.id;
+                          const atual = formData.target_store_ids || [];
+                          setFormData({
+                            ...formData,
+                            target_store_ids: e.target.checked
+                              ? [...atual, idLoja]
+                              : atual.filter((v) => v !== idLoja),
+                          });
+                        }}
+                        className="h-4 w-4 rounded border-input"
+                      />
+                      <span className="truncate">{s.display_name || s.email}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Desconto (%)</label>
               <input
@@ -760,6 +825,9 @@ export default function AdminPanel() {
           total_products: total * 15,
           total_revenue: pro * 39.90,
           monthly_revenue: pro * 39.90,
+          platform_revenue_total: pro * 39.90,
+          platform_revenue_month: pro * 39.90,
+          platform_revenue_by_day: [],
           churn_rate: 5.2,
           conversion_rate: total > 0 ? (pro / total) * 100 : 0,
           avg_products_per_store: 15,
@@ -901,23 +969,18 @@ export default function AdminPanel() {
   const savePromotion = useCallback(async (promotionData: Partial<Promotion>) => {
     try {
       if (editingPromotion) {
-        setPromotions(prev => prev.map(p => 
-          p.id === editingPromotion.id ? { ...p, ...promotionData } : p
-        ));
+        const atualizada = await adminApi.updatePromotion(String(editingPromotion.id), promotionData);
+        setPromotions(prev => prev.map(p => (p.id === editingPromotion.id ? atualizada : p)));
         toast({ title: "Promoção atualizada" });
       } else {
-        const newPromotion = { 
-          ...promotionData, 
-          id: Date.now().toString(),
-          created_at: new Date().toISOString()
-        } as Promotion;
-        setPromotions(prev => [...prev, newPromotion]);
+        const nova = await adminApi.createPromotion(promotionData);
+        setPromotions(prev => [...prev, nova]);
         toast({ title: "Promoção criada" });
       }
-      
+
       setShowPromotionModal(false);
       setEditingPromotion(null);
-      
+
     } catch (err: any) {
       toast({ title: "Erro", description: "Falha ao salvar promoção", variant: "destructive" });
     }
@@ -925,16 +988,26 @@ export default function AdminPanel() {
 
   const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
     try {
-      setPromotions(prev => prev.map(p => 
-        p.id === promotion.id ? { ...p, is_active: !p.is_active } : p
-      ));
-      
-      toast({ 
-        title: `Promoção ${promotion.is_active ? 'desativada' : 'ativada'}` 
+      const atualizada = await adminApi.updatePromotion(String(promotion.id), { is_active: !promotion.is_active });
+      setPromotions(prev => prev.map(p => (p.id === promotion.id ? atualizada : p)));
+
+      toast({
+        title: `Promoção ${promotion.is_active ? 'desativada' : 'ativada'}`
       });
-      
+
     } catch (err: any) {
       toast({ title: "Erro", description: "Falha ao alterar status", variant: "destructive" });
+    }
+  }, [setPromotions, toast]);
+
+  const deletePromotion = useCallback(async (promotion: Promotion) => {
+    if (!confirm(`Excluir a promoção "${promotion.title}"? Não tem como desfazer.`)) return;
+    try {
+      await adminApi.deletePromotion(String(promotion.id));
+      setPromotions(prev => prev.filter(p => p.id !== promotion.id));
+      toast({ title: "Promoção excluída" });
+    } catch (err: any) {
+      toast({ title: "Erro", description: "Falha ao excluir promoção", variant: "destructive" });
     }
   }, [setPromotions, toast]);
 
@@ -1121,6 +1194,7 @@ export default function AdminPanel() {
         }}
         promotion={editingPromotion}
         onSave={savePromotion}
+        stores={users}
       />
 
       {/* Header */}
@@ -1198,7 +1272,7 @@ export default function AdminPanel() {
             ) : dashboardStats ? (
               <>
                 {/* Cards de Estatísticas */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[
                     { 
                       label: "Total de Lojas", 
@@ -1229,11 +1303,24 @@ export default function AdminPanel() {
                       change: `${dashboardStats.avg_products_per_store.toFixed(1)} por loja`
                     },
                     { 
-                      label: "Receita Total", 
+                      // ⚠️ Renomeado de "Receita Total": era fácil confundir com a
+                      // receita da PLATAFORMA. Isto aqui é quanto as consultoras
+                      // venderam de produto nas lojas delas (GMV) — não é dinheiro
+                      // que o Minha Amora recebeu.
+                      label: "Vendas nas Lojas", 
                       value: formatCurrency(dashboardStats.total_revenue), 
+                      icon: Package, 
+                      color: "text-muted-foreground",
+                      change: `${formatCurrency(dashboardStats.monthly_revenue)} este mês`
+                    },
+                    { 
+                      // 💰 Esta sim é a receita do NEGÓCIO — assinaturas pagas de
+                      // verdade, direto dos webhooks confirmados do Asaas.
+                      label: "Receita da Assinatura", 
+                      value: formatCurrency(dashboardStats.platform_revenue_total), 
                       icon: DollarSign, 
                       color: "text-success",
-                      change: `${formatCurrency(dashboardStats.monthly_revenue)} este mês`
+                      change: `${formatCurrency(dashboardStats.platform_revenue_month)} este mês`
                     },
                     { 
                       label: "Taxa Conversão", 
@@ -1829,12 +1916,7 @@ export default function AdminPanel() {
                           <Edit2 className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => {
-                            if (confirm('Tem certeza que deseja excluir esta promoção?')) {
-                              setPromotions(prev => prev.filter(p => p.id !== promotion.id));
-                              toast({ title: "Promoção excluída" });
-                            }
-                          }}
+                          onClick={() => deletePromotion(promotion)}
                           className="p-2 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
                           title="Excluir"
                         >

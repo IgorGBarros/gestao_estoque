@@ -625,6 +625,12 @@ class Promotion(models.Model):
     
     promotion_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='banner')
     target_audience = models.CharField(max_length=20, choices=TARGET_CHOICES, default='free')
+
+    # 🎯 Alvo por consultora específica — além do segmento amplo acima
+    # (target_audience). Quando preenchido, a promoção só aparece pras
+    # lojas selecionadas aqui, IGNORANDO target_audience (é mais específico
+    # e vence). Vazio = mantém o comportamento de sempre (segmento amplo).
+    target_stores = models.ManyToManyField(Store, blank=True, related_name='targeted_promotions')
     
     discount_percent = models.IntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
@@ -1067,6 +1073,14 @@ class ProcessedPaymentEvent(models.Model):
     event = models.CharField(max_length=50, blank=True)
     days_granted = models.IntegerField(default=0)
     processed_at = models.DateTimeField(auto_now_add=True)
+
+    # 💰 O valor realmente pago (payment.value do payload) e a forma de
+    # pagamento — o webhook sempre trouxe isso, mas era descartado depois de
+    # calcular quantos dias liberar. Sem isso, o admin não tinha como saber
+    # a receita REAL da plataforma (assinaturas pagas de verdade), só uma
+    # estimativa baseada em quem está com plan='pro' hoje.
+    value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    billing_type = models.CharField(max_length=20, blank=True)  # PIX, CREDIT_CARD, BOLETO...
 
     class Meta:
         verbose_name = "Cobrança processada"

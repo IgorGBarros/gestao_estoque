@@ -15,6 +15,7 @@ import { ThemeProvider } from "./hooks/useTheme";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ImpersonationBanner from "./components/ImpersonationBanner";
 import { TrialBanner } from "./components/TrailBanner";
+import { PromotionBanner } from "./components/PromotionBanner";
 // ✅ ErrorBoundary REMOVIDO
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
@@ -73,6 +74,10 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
     <ImpersonationBanner />
     {/* Contagem regressiva do teste. Some sozinha fora do período. */}
     <TrialBanner />
+    {/* Promoção ativa pra esta loja — segmento amplo ou selecionada
+        especificamente pelo admin. Sem isto, nenhuma promoção criada no
+        admin-panel jamais chegava até a consultora. */}
+    <PromotionBanner />
     <main className="flex-1">{children}</main>
   </div>
 );

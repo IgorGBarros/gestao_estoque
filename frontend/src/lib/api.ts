@@ -470,6 +470,18 @@ export const adminApi = {
       body: JSON.stringify(data),
     }),
   listPromotions: () => apiRequest<any[]>("/admin/promotions/"),
+  createPromotion: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/promotions/create/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updatePromotion: (id: string, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/promotions/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deletePromotion: (id: string) =>
+    apiRequest<void>(`/admin/promotions/${id}/`, { method: "DELETE" }),
   getSystemStats: () => apiRequest<any>("/admin/stats/"),
   getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
   getAsaasConfig: () => apiRequest<AsaasConfig>("/payments/asaas/config/"),
