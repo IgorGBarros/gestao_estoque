@@ -482,6 +482,13 @@ export const adminApi = {
     }),
   deletePromotion: (id: string) =>
     apiRequest<void>(`/admin/promotions/${id}/`, { method: "DELETE" }),
+  // ⚙️ Configuração global — substitui os dois localStorage fantasmas
+  // (manutenção e feature flags) por um estado real, compartilhado.
+  updateSystemConfig: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/system-config/", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
   getSystemStats: () => apiRequest<any>("/admin/stats/"),
   getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
   getAsaasConfig: () => apiRequest<AsaasConfig>("/payments/asaas/config/"),
@@ -822,8 +829,30 @@ let statsInFlight: Promise<DashboardStats> | null = null;
 const STATS_CACHE_MS = 30_000;
 
 // ✅ Planos públicos (preços reais do PlanConfig, mesma fonte do checkout).
+// 🔹 Registra que a loja viu uma promoção — chamado pelo PromotionBanner.
+// É o que alimenta "Visualizações" e "Taxa de Conversão" de verdade no
+// admin-panel, em vez do Math.random() de antes.
+export const promotionTrackingApi = {
+  registerView: (promotionId: string) =>
+    apiRequest<void>(`/promotions/${promotionId}/view/`, { method: "POST" }),
+};
+
 export const plansApi = {
   list: () => apiRequest<any[]>("/plans/"),
+};
+
+export interface SystemConfigStatus {
+  maintenance_mode: boolean;
+  maintenance_message: string;
+  ai_enabled: boolean;
+  storefront_enabled: boolean;
+  ocr_enabled: boolean;
+}
+
+// 🔹 Pública — precisa funcionar até pra quem ainda não conseguiu logar,
+// pra avisar de manutenção antes mesmo da tentativa de autenticação.
+export const systemConfigApi = {
+  get: () => apiRequest<SystemConfigStatus>("/system-config/"),
 };
 
 /** Janelas de período usadas nos relatórios e no painel do MEI. */

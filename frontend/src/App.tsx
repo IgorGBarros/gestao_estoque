@@ -16,6 +16,7 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import ImpersonationBanner from "./components/ImpersonationBanner";
 import { TrialBanner } from "./components/TrailBanner";
 import { PromotionBanner } from "./components/PromotionBanner";
+import { MaintenanceBanner } from "./components/MaintenanceBanner";
 // ✅ ErrorBoundary REMOVIDO
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
@@ -74,6 +75,9 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
     <ImpersonationBanner />
     {/* Contagem regressiva do teste. Some sozinha fora do período. */}
     <TrialBanner />
+    {/* Aviso de manutenção — vem antes da promoção de propósito: um alerta
+        de possível instabilidade é mais importante que uma oferta. */}
+    <MaintenanceBanner />
     {/* Promoção ativa pra esta loja — segmento amplo ou selecionada
         especificamente pelo admin. Sem isto, nenhuma promoção criada no
         admin-panel jamais chegava até a consultora. */}

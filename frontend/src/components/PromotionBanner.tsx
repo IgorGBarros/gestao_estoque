@@ -8,6 +8,7 @@
 import { useState, useEffect } from "react";
 import { X, Sparkles } from "lucide-react";
 import { api } from "../services/api";
+import { promotionTrackingApi } from "../lib/api";
 
 interface Promocao {
   id: string;
@@ -31,7 +32,12 @@ export function PromotionBanner() {
         const lista: Promocao[] = res.data || [];
         const dispensadas: string[] = JSON.parse(localStorage.getItem(DISPENSADAS_KEY) || "[]");
         const proxima = lista.find((p) => !dispensadas.includes(p.id));
-        if (proxima) setPromocao(proxima);
+        if (proxima) {
+          setPromocao(proxima);
+          // 📊 É isto que faz "Visualizações" no admin-panel virar um
+          // número real — antes não existia nenhum registro de quem viu.
+          promotionTrackingApi.registerView(proxima.id).catch(() => { /* não é motivo pra esconder o banner */ });
+        }
       })
       .catch(() => { /* sem promoção ativa ou erro de rede — não é motivo pra mostrar nada */ });
   }, []);

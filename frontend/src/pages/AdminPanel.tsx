@@ -10,7 +10,7 @@ import {
   Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy
 } from "lucide-react";
 
-import { profileApi, adminApi, adminHealthApi } from "../lib/api";
+import { profileApi, adminApi, adminHealthApi, systemConfigApi, SystemConfigStatus } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import ConsultantsHealthTab from "../components/admin/ConsultantsHealthTab";
 import CrmOverviewTab from "../components/admin/CrmOverviewTab";
@@ -75,6 +75,7 @@ export interface Promotion {
   title: string;
   message: string;
   target_audience: string;
+  target_store_ids?: (string | number)[];
   discount_percent: number;
   discount_amount: number;
   is_active: boolean;
@@ -82,6 +83,10 @@ export interface Promotion {
   ends_at: string | null;
   max_views_per_store: number | null;
   created_at: string;
+  // 📊 Métricas reais — ver active_promotions_view/_serialize_promotion no backend
+  views_count?: number;
+  conversions_count?: number;
+  conversion_rate?: number;
 }
 
 export interface SystemStats {
@@ -653,6 +658,33 @@ export default function AdminPanel() {
 
   // Estados Enterprise: Health & Audit
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  // ⚙️ Configuração global real (manutenção + feature flags) — substitui
+  // os dois localStorage que só valiam pro navegador do próprio admin.
+  const [systemConfig, setSystemConfig] = useState<SystemConfigStatus | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const fetchSystemConfig = useCallback(async () => {
+    try {
+      const cfg = await systemConfigApi.get();
+      setSystemConfig(cfg);
+    } catch {
+      /* mantém o que já estava — não derruba a tela por isso */
+    }
+  }, []);
+
+  const updateConfig = useCallback(async (patch: Partial<SystemConfigStatus>) => {
+    setSavingConfig(true);
+    try {
+      const atualizado = await adminApi.updateSystemConfig(patch);
+      setSystemConfig(atualizado);
+      return true;
+    } catch {
+      toast({ title: "Erro", description: "Não foi possível salvar a configuração", variant: "destructive" });
+      return false;
+    } finally {
+      setSavingConfig(false);
+    }
+  }, [toast]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<Set<string | number>>(new Set());
 
@@ -1019,6 +1051,7 @@ export default function AdminPanel() {
     if (authenticated) {
       fetchCriticalData();      // Dados rápidos no mount
       fetchSystemHealth();
+      fetchSystemConfig();
       logAuditEvent('LOGIN_ADMIN');
     }
   }, [authenticated]);
@@ -1925,23 +1958,26 @@ export default function AdminPanel() {
                       </div>
                     </div>
 
-                    {/* Métricas da promoção (simuladas) */}
+                    {/* 📊 Métricas reais — antes eram Math.random(), recalculadas
+                        (e diferentes!) a cada vez que a tela renderizava. Agora
+                        vêm de PromotionView (quem viu de verdade) e de quem
+                        virou PRO DEPOIS de ver. */}
                     <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border">
                       <div className="text-center">
                         <p className="text-2xl font-bold text-primary">
-                          {Math.floor(Math.random() * 50) + 10}
+                          {promotion.views_count ?? 0}
                         </p>
                         <p className="text-xs text-muted-foreground">Visualizações</p>
                       </div>
                       <div className="text-center">
                         <p className="text-2xl font-bold text-success">
-                          {Math.floor(Math.random() * 15) + 1}
+                          {promotion.conversions_count ?? 0}
                         </p>
                         <p className="text-xs text-muted-foreground">Conversões</p>
                       </div>
                       <div className="text-center">
                         <p className="text-2xl font-bold text-amber-600">
-                          {((Math.floor(Math.random() * 15) + 1) / (Math.floor(Math.random() * 50) + 10) * 100).toFixed(1)}%
+                          {(promotion.conversion_rate ?? 0).toFixed(1)}%
                         </p>
                         <p className="text-xs text-muted-foreground">Taxa Conversão</p>
                       </div>
@@ -2358,11 +2394,11 @@ export default function AdminPanel() {
                 </h3>
                 <div className="space-y-3">
                   {[
-                    { key: 'ai_enabled', label: 'Assistente IA', desc: 'Liga/desliga chat IA globalmente' },
-                    { key: 'storefront_enabled', label: 'Vitrine Pública', desc: 'Permite vitrines públicas' },
-                    { key: 'ocr_enabled', label: 'OCR de Validade', desc: 'Reconhecimento via foto' },
+                    { key: 'ai_enabled' as const, label: 'Assistente IA', desc: 'Liga/desliga a Amorinha globalmente' },
+                    { key: 'storefront_enabled' as const, label: 'Vitrine Pública', desc: 'Permite vitrines públicas' },
+                    { key: 'ocr_enabled' as const, label: 'OCR de Validade', desc: 'Reconhecimento via foto' },
                   ].map((f) => {
-                    const active = (localStorage.getItem(`flag_${f.key}`) ?? 'true') === 'true';
+                    const active = systemConfig?.[f.key] ?? true;
                     return (
                       <div key={f.key} className="flex items-center justify-between p-3 border border-border rounded-lg">
                         <div>
@@ -2370,13 +2406,15 @@ export default function AdminPanel() {
                           <p className="text-xs text-muted-foreground">{f.desc}</p>
                         </div>
                         <button
-                          onClick={() => {
-                            localStorage.setItem(`flag_${f.key}`, active ? 'false' : 'true');
-                            logAuditEvent(active ? `DISABLE_${f.key.toUpperCase()}` : `ENABLE_${f.key.toUpperCase()}`);
-                            toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
-                            setSystemHealth(h => h ? { ...h } : h);
+                          disabled={savingConfig}
+                          onClick={async () => {
+                            const ok = await updateConfig({ [f.key]: !active });
+                            if (ok) {
+                              logAuditEvent(active ? `DISABLE_${f.key.toUpperCase()}` : `ENABLE_${f.key.toUpperCase()}`);
+                              toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
+                            }
                           }}
-                          className={active ? 'text-success' : 'text-muted-foreground'}
+                          className={`disabled:opacity-60 ${active ? 'text-success' : 'text-muted-foreground'}`}
                         >
                           {active ? <ToggleRight className="h-7 w-7" /> : <ToggleLeft className="h-7 w-7" />}
                         </button>
@@ -2391,7 +2429,7 @@ export default function AdminPanel() {
                   <AlertCircle className="h-5 w-5 text-amber-500" /> Modo de Manutenção
                 </h3>
                 {(() => {
-                  const maintenance = localStorage.getItem('maintenance_mode') === 'true';
+                  const maintenance = systemConfig?.maintenance_mode ?? false;
                   return (
                     <>
                       <div className={`p-4 rounded-lg mb-4 ${maintenance ? 'bg-amber-50 border border-amber-200' : 'bg-secondary/30'}`}>
@@ -2399,18 +2437,32 @@ export default function AdminPanel() {
                           Status: {maintenance ? '🟡 EM MANUTENÇÃO' : '🟢 Operação normal'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {maintenance ? 'Usuários veem tela de manutenção ao acessar.' : 'Sistema disponível para todos os usuários.'}
+                          {maintenance
+                            ? 'Toda consultora vê um aviso ao entrar no sistema — não bloqueia o acesso, só avisa.'
+                            : 'Sistema disponível para todos os usuários, sem nenhum aviso.'}
                         </p>
                       </div>
+                      {maintenance && (
+                        <textarea
+                          value={systemConfig?.maintenance_message ?? ''}
+                          onChange={(e) => setSystemConfig(cfg => cfg ? { ...cfg, maintenance_message: e.target.value } : cfg)}
+                          onBlur={(e) => updateConfig({ maintenance_message: e.target.value })}
+                          placeholder="Mensagem que a consultora vai ver..."
+                          className="w-full mb-3 rounded-lg border border-input px-3 py-2 text-sm"
+                          rows={2}
+                        />
+                      )}
                       <button
-                        onClick={() => {
+                        disabled={savingConfig}
+                        onClick={async () => {
                           const next = !maintenance;
-                          localStorage.setItem('maintenance_mode', String(next));
-                          logAuditEvent(next ? 'ENABLE_MAINTENANCE' : 'DISABLE_MAINTENANCE');
-                          toast({ title: next ? "Manutenção ativada" : "Manutenção desativada", variant: next ? "destructive" : "default" });
-                          setSystemHealth(h => h ? { ...h } : h);
+                          const ok = await updateConfig({ maintenance_mode: next });
+                          if (ok) {
+                            logAuditEvent(next ? 'ENABLE_MAINTENANCE' : 'DISABLE_MAINTENANCE');
+                            toast({ title: next ? "Manutenção ativada" : "Manutenção desativada", variant: next ? "destructive" : "default" });
+                          }
                         }}
-                        className={`w-full py-2 rounded-lg font-medium ${maintenance ? 'bg-primary text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
+                        className={`w-full py-2 rounded-lg font-medium disabled:opacity-60 ${maintenance ? 'bg-primary text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
                       >
                         {maintenance ? 'Desativar Manutenção' : 'Ativar Modo Manutenção'}
                       </button>

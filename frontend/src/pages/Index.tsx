@@ -16,6 +16,7 @@ import UpgradeModal from "../components/UpgradeModal";
 import ProfileCompletionBanner from "../components/ProfileCompletionBanner";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
 import AiTrainingConsentBanner from "@/components/AitrainingConsentBanner";
+import { useSystemConfig } from "../hooks/useSystemConfig";
 
 interface Stats {
   investedValue: number;
@@ -29,6 +30,7 @@ export default function Index() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isLocked, loading: gatesLoading } = useFeatureGates();
+  const { aiEnabled } = useSystemConfig();
   const [stats, setStats] = useState<Stats>({
     investedValue: 0,
     potentialValue: 0,
@@ -229,7 +231,10 @@ export default function Index() {
         </div>
       </main>
 
-      {!gatesLoading && !isLocked("chat_assistant") && <ChatAssistant />}
+      {/* ⚙️ Além do gate por plano (chat_assistant), agora também respeita o
+          flag global "Assistente IA" do admin-panel — antes essa flag não
+          controlava nada de verdade, era só localStorage sem consumidor. */}
+      {!gatesLoading && !isLocked("chat_assistant") && aiEnabled && <ChatAssistant />}
       <UpgradeModal
         isOpen={showUpgrade}
         onClose={() => setShowUpgrade(false)}
