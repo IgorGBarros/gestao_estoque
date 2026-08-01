@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from .models import (
     Product, Store, InventoryItem, Sale, UserBehaviorLog, 
     PlanConfig, Promotion, CustomUser, ConsentRecord, StockTransaction,
-    Lead, Cart, CartItem,
+    Lead, Cart, CartItem, SystemConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,6 +112,25 @@ def update_plan_config(request, plan_type):
 
 
 def _serialize_promotion(p):
+    # 📊 Métricas REAIS — antes eram Math.random() no frontend, recalculadas
+    # (e diferentes!) a cada renderização da tela.
+    #
+    # "Visualizações" = quantas lojas DIFERENTES viram esta promoção
+    # (PromotionView, uma linha por loja — repetição não infla).
+    #
+    # "Conversões" = dessas lojas que viram, quantas são PRO hoje E viraram
+    # PRO DEPOIS de terem visto a promoção — sem o "depois", uma loja que já
+    # era PRO antes da promoção existir contaria como se a promoção tivesse
+    # convertido ela, o que não é verdade.
+    visualizacoes = p.views.select_related('store').all()
+    total_visualizacoes = visualizacoes.count()
+    conversoes = 0
+    for v in visualizacoes:
+        loja = v.store
+        if loja.plan == 'pro' and loja.subscription_started_at and loja.subscription_started_at >= v.viewed_at:
+            conversoes += 1
+    taxa_conversao = round((conversoes / total_visualizacoes * 100), 1) if total_visualizacoes else 0.0
+
     return {
         'id': str(p.id),
         'title': p.title,
@@ -128,6 +147,9 @@ def _serialize_promotion(p):
         'background_color': p.background_color,
         'text_color': p.text_color,
         'created_at': p.created_at.isoformat(),
+        'views_count': total_visualizacoes,
+        'conversions_count': conversoes,
+        'conversion_rate': taxa_conversao,
     }
 
 
@@ -1268,4 +1290,37 @@ def admin_crm_overview(request):
             'leads_capturados': sum(l['total_leads'] for l in linhas),
         },
         'lojas': linhas,
+    })
+
+# ─────────────────────────────────────────────────────────────
+# ⚙️ CONFIGURAÇÃO GLOBAL (manutenção + feature flags) — de verdade
+# ─────────────────────────────────────────────────────────────
+# ⚠️ CORREÇÃO GRAVE: "Modo de Manutenção" e "Feature Flags Globais"
+# salvavam tudo em localStorage do navegador do PRÓPRIO ADMIN. Não existia
+# nenhum endpoint pra isso — o texto "usuários veem tela de manutenção ao
+# acessar" nunca foi verdade, porque nada no backend sabia que existia
+# manutenção nenhuma. Igual ao que já tínhamos achado com "Salvar
+# Promoção": um controle que parecia funcionar, mas não tinha efeito nenhum
+# fora do próprio navegador de quem clicou.
+
+@api_view(['PATCH'])
+@permission_classes([IsAdminUser])
+def update_system_config(request):
+    """PATCH /api/admin/system-config/ — liga/desliga manutenção e feature flags globais."""
+    cfg = SystemConfig.get_solo()
+    data = request.data
+    campos = ['maintenance_mode', 'maintenance_message', 'ai_enabled', 'storefront_enabled', 'ocr_enabled']
+    alterados = []
+    for campo in campos:
+        if campo in data:
+            setattr(cfg, campo, data[campo])
+            alterados.append(campo)
+    cfg.save()
+    return Response({
+        'maintenance_mode': cfg.maintenance_mode,
+        'maintenance_message': cfg.maintenance_message,
+        'ai_enabled': cfg.ai_enabled,
+        'storefront_enabled': cfg.storefront_enabled,
+        'ocr_enabled': cfg.ocr_enabled,
+        'updated_fields': alterados,
     })

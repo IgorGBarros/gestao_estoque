@@ -1184,3 +1184,66 @@ class CartItem(models.Model):
     product_name = models.CharField(max_length=255)
     quantity = models.PositiveIntegerField(default=1)
     price_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+# ==========================================
+# ⚙️ CONFIGURAÇÃO GLOBAL DO SISTEMA
+# ==========================================
+# Antes, "Modo de Manutenção" e "Feature Flags Globais" no admin-panel
+# salvavam tudo em localStorage do NAVEGADOR DO PRÓPRIO ADMIN — não mudava
+# nada pra ninguém além de quem estava com aquele navegador aberto naquele
+# momento. O texto até dizia "usuários veem tela de manutenção ao acessar",
+# o que nunca foi verdade: nada no backend sabia que existia manutenção.
+# Isto aqui é a peça que faltava — um estado real, compartilhado, que
+# qualquer consultora loga e vê de verdade.
+
+class SystemConfig(models.Model):
+    """
+    Configuração global — linha única (padrão singleton, sempre pk=1).
+    Use SystemConfig.get_solo() em vez de instanciar direto.
+    """
+    maintenance_mode = models.BooleanField(default=False)
+    maintenance_message = models.TextField(
+        blank=True,
+        default="O sistema está em manutenção programada e pode apresentar instabilidade ou "
+                "indisponibilidade temporária em algumas funcionalidades. Já estamos de olho — "
+                "pode continuar usando normalmente."
+    )
+
+    # Feature flags globais — hoje só desligam a interface (ver comentário
+    # em cada consumidor). Nome do campo bate com a chave usada no frontend.
+    ai_enabled = models.BooleanField(default=True)
+    storefront_enabled = models.BooleanField(default=True)
+    ocr_enabled = models.BooleanField(default=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuração do sistema"
+        verbose_name_plural = "Configuração do sistema"
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return "Configuração global do sistema"
+
+
+class PromotionView(models.Model):
+    """
+    Uma consultora viu uma promoção específica. É a base real de
+    "Visualizações" e "Taxa de Conversão" no admin-panel — antes esses dois
+    números eram Math.random() no frontend, recalculados (diferentes!) a
+    cada nova renderização da tela.
+
+    Uma linha por (promoção, loja) — visualizações repetidas da MESMA loja
+    não inflam a contagem; o que importa é quantas lojas DIFERENTES viram.
+    """
+    promotion = models.ForeignKey(Promotion, on_delete=models.CASCADE, related_name='views')
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='promotion_views')
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('promotion', 'store')]
+        indexes = [models.Index(fields=['promotion', 'store'])]

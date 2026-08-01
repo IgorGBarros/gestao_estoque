@@ -59,6 +59,7 @@ from inventory.views import public_storefront, public_storefront_view, lookup_pr
 from inventory.views import (
     crm_leads_list, crm_lead_detail, crm_lead_upsert,
     crm_lead_anonymize, crm_cart_persist, crm_notifications, crm_cart_update,
+    register_promotion_view, system_config_view, health_check_view,
 )
 
 # Swagger/Documentação
@@ -91,6 +92,9 @@ urlpatterns = [
     path('api/cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
     path('api/plans/', public_plans_view, name='public_plans'),
     path('api/promotions/active/', active_promotions_view, name='active_promotions'),
+    path('api/promotions/<uuid:promotion_id>/view/', register_promotion_view, name='register_promotion_view'),
+    path('api/system-config/', system_config_view, name='system_config'),
+    path('api/health/', health_check_view, name='health_check'),
 
     # 📊 Relatórios da consultora (dashboard com filtro de período)
     path('api/reports/', consultant_reports, name='consultant_reports'),

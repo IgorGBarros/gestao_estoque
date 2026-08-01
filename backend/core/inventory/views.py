@@ -37,6 +37,7 @@ from .models import (
     Sale, SaleItem, PriceHistory, StockTransaction,
     PlanConfig, Promotion, ConsentRecord,  # ✅ Novo modelo LGPD
     Lead, Cart, CartItem,  # ✅ CRM da vitrine
+    SystemConfig, PromotionView,  # ⚙️ Configuração global + métricas reais de promoção
 )
 
 # Imports dos seus serializers
@@ -4847,3 +4848,86 @@ def crm_cart_update(request, cart_id):
         'payment_method': cart.payment_method,
         'payment_confirmed': cart.payment_confirmed,
     })
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_promotion_view(request, promotion_id):
+    """
+    POST /api/promotions/<id>/view/ — a loja de quem está logado viu esta
+    promoção agora. Chamado pelo PromotionBanner quando ele efetivamente
+    mostra uma promoção na tela.
+
+    Idempotente por (promoção, loja): repetir a chamada na mesma sessão não
+    infla a contagem — é o que torna "Visualizações" e "Taxa de Conversão"
+    do admin-panel um número real, em vez de aleatório.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response(status=204)  # sem loja, não há o que registrar — não é erro do cliente
+
+    promo = Promotion.objects.filter(id=promotion_id).first()
+    if not promo:
+        return Response(status=204)
+
+    PromotionView.objects.get_or_create(promotion=promo, store=store)
+    return Response(status=204)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def system_config_view(request):
+    """
+    GET /api/system-config/ — status de manutenção e feature flags globais,
+    do jeito que QUALQUER consultora (ou a tela de login, antes mesmo de
+    autenticar) precisa ver. Público de propósito: se o sistema está em
+    manutenção, isso precisa aparecer mesmo pra quem ainda não conseguiu
+    logar.
+    """
+    cfg = SystemConfig.get_solo()
+    return Response({
+        'maintenance_mode': cfg.maintenance_mode,
+        'maintenance_message': cfg.maintenance_message if cfg.maintenance_mode else '',
+        'ai_enabled': cfg.ai_enabled,
+        'storefront_enabled': cfg.storefront_enabled,
+        'ocr_enabled': cfg.ocr_enabled,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check_view(request):
+    """
+    GET /api/health/ — checagem real de infraestrutura, pro card
+    "Saúde do Sistema" do admin-panel. Antes: "Banco de Dados" só repetia o
+    resultado da própria API (nunca testava o banco de verdade), e
+    "Gateway Pagamento" estava sempre fixo em "operational", sem checar
+    nada. Latência era texto fixo ("~80ms"), não medida.
+    """
+    import time
+    from django.db import connection
+
+    resultado = {'api_status': 'operational'}
+
+    # Banco: consulta real, cronometrada — não um espelho do status da API.
+    inicio_db = time.monotonic()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+        resultado['database_status'] = 'operational'
+    except Exception:
+        resultado['database_status'] = 'down'
+    resultado['database_latency_ms'] = round((time.monotonic() - inicio_db) * 1000, 1)
+
+    # Asaas: chamada real à API deles, reaproveitando o mesmo client já
+    # usado no teste de conexão do admin (apps/payments).
+    inicio_asaas = time.monotonic()
+    try:
+        from apps.payments.services.asaas_service import asaas_service
+        asaas_service._request('GET', 'finance/balance')
+        resultado['payment_gateway_status'] = 'operational'
+    except Exception:
+        resultado['payment_gateway_status'] = 'down'
+    resultado['payment_gateway_latency_ms'] = round((time.monotonic() - inicio_asaas) * 1000, 1)
+
+    resultado['last_check'] = timezone.now().isoformat()
+    return Response(resultado)

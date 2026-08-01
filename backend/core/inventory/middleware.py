@@ -52,6 +52,16 @@ class ApiKeyMiddleware(MiddlewareMixin):
         # login geral do app, então excluir o prefixo inteiro é seguro.
         r'^/api/crm/',
 
+        # ⚠️ Duas rotas públicas novas, mesma classe de bug de sempre —
+        # esquecer de excluir uma rota nova quebra com 401 "API Key
+        # ausente" pra quem nunca deveria precisar de chave nenhuma:
+        # /api/system-config/ precisa funcionar ATÉ pra visitante sem
+        # login (precisa saber se o sistema está em manutenção antes de
+        # tentar entrar), e /api/health/ é uma checagem de infraestrutura,
+        # não uma chamada de negócio.
+        r'^/api/system-config/',
+        r'^/api/health/',
+
         # Painel admin e pagamentos: autenticam por JWT (IsAdminUser /
         # IsAuthenticated), não pela API Key comercial. Sem estas linhas o
         # middleware bloqueava o painel inteiro e o checkout do Asaas.
