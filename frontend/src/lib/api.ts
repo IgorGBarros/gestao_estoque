@@ -491,6 +491,13 @@ export const adminApi = {
     }),
   getSystemStats: () => apiRequest<any>("/admin/stats/"),
   getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
+  // 💰 Fase 4 — planos de API (starter/pro/enterprise) que o admin configura.
+  listApiPlanConfigs: () => apiRequest<any[]>("/admin/api-plan-configs/"),
+  updateApiPlanConfig: (planType: string, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/api-plan-configs/${planType}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
   getAsaasConfig: () => apiRequest<AsaasConfig>("/payments/asaas/config/"),
   testAsaasConnection: () =>
     apiRequest<AsaasConnectionTest>("/payments/asaas/test/", {

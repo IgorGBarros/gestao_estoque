@@ -222,6 +222,19 @@ export default function ApiDashboard() {
 
           {/* Tab: Minhas Chaves */}
           <TabsContent value="keys" className="space-y-4">
+            {/* 💰 Fase 4: aviso de upgrade — antes não existia nenhum caminho
+                daqui pra assinar um plano pago. */}
+            {keys.length > 0 && keys.every((k) => k.plan === 'starter') && (
+              <Card className="border-primary/40 bg-primary/5">
+                <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+                  <div>
+                    <p className="text-sm font-medium">Você está no plano Starter (grátis)</p>
+                    <p className="text-xs text-muted-foreground">Precisa de mais cota ou limite por minuto? Dá pra assinar Pro ou Enterprise.</p>
+                  </div>
+                  <Button size="sm" onClick={() => navigate('/api/pricing')}>Ver planos</Button>
+                </CardContent>
+              </Card>
+            )}
             {keys.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center">

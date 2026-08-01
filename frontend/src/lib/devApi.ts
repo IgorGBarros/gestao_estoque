@@ -93,7 +93,23 @@ export const devApi = {
       { method: "POST", body: JSON.stringify(data) }
     ),
 
+  // 🔑 Login social (Google/GitHub) — o token já vem verificado pelo popup
+  // do Firebase no navegador; o backend confirma de novo com o Admin SDK
+  // antes de criar/logar a conta.
+  firebaseLogin: (firebaseToken: string) =>
+    devRequest<{ developer: DeveloperAccount; created: boolean; access: string; refresh: string }>(
+      "/developers/firebase-login/",
+      { method: "POST", body: JSON.stringify({ token: firebaseToken }) }
+    ),
+
   me: () => devRequest<{ developer: DeveloperAccount; api_keys: DevApiKeySummary[] }>("/developers/me/"),
 
   dashboard: () => devRequest<DevDashboardData>("/developers/dashboard/"),
+
+  // 💰 Fase 4 — gera o link de pagamento pra assinar um plano pago.
+  checkout: (data: { plan_type: "starter" | "pro" | "enterprise"; billing_cycle: "monthly" | "yearly" }) =>
+    devRequest<{ checkout_url: string; payment_link_id: string; plan_type: string; billing_cycle: string }>(
+      "/developers/checkout/",
+      { method: "POST", body: JSON.stringify(data) }
+    ),
 };

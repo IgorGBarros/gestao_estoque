@@ -12,12 +12,23 @@
 // Agora: só as duas abas que mostram dado de verdade, vindo de
 // DeveloperAccount/ApiKey/ApiUsageLog (ver monitor_api_usage no backend).
 import { useState, useEffect } from "react";
-import { Key, Activity, RefreshCw, TrendingUp, AlertCircle, Clock, Users } from "lucide-react";
+import { Key, Activity, RefreshCw, TrendingUp, AlertCircle, Clock, Users, DollarSign, Save, ToggleLeft, ToggleRight } from "lucide-react";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../ui/table";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
 import { adminApi } from "../../lib/api";
+
+interface ApiPlanoConfig {
+  plan_type: string;
+  display_name: string;
+  monthly_price: number;
+  yearly_price: number;
+  monthly_quota: number;
+  rate_limit: number;
+  is_visible: boolean;
+}
 
 interface ApiMonitorKey {
   id: string;
@@ -56,6 +67,8 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
   const [data, setData] = useState<ApiMonitorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState("overview");
+  const [planos, setPlanos] = useState<ApiPlanoConfig[]>([]);
+  const [salvandoPlano, setSalvandoPlano] = useState<string | null>(null);
 
   const carregar = async () => {
     setLoading(true);
@@ -69,8 +82,41 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
     }
   };
 
+  const carregarPlanos = async () => {
+    try {
+      const resultado = await adminApi.listApiPlanConfigs();
+      setPlanos(resultado);
+    } catch {
+      toast({ title: "Erro", description: "Não foi possível carregar os planos de API", variant: "destructive" });
+    }
+  };
+
+  const salvarPlano = async (plano: ApiPlanoConfig) => {
+    setSalvandoPlano(plano.plan_type);
+    try {
+      const atualizado = await adminApi.updateApiPlanConfig(plano.plan_type, {
+        monthly_price: plano.monthly_price,
+        yearly_price: plano.yearly_price,
+        monthly_quota: plano.monthly_quota,
+        rate_limit: plano.rate_limit,
+        is_visible: plano.is_visible,
+      });
+      setPlanos((prev) => prev.map((p) => (p.plan_type === plano.plan_type ? atualizado : p)));
+      toast({ title: "Plano salvo", description: `${plano.display_name} atualizado — reflete em /api/pricing na hora.` });
+    } catch {
+      toast({ title: "Erro", description: "Não foi possível salvar o plano", variant: "destructive" });
+    } finally {
+      setSalvandoPlano(null);
+    }
+  };
+
+  const atualizarCampoPlano = (planType: string, campo: keyof ApiPlanoConfig, valor: any) => {
+    setPlanos((prev) => prev.map((p) => (p.plan_type === planType ? { ...p, [campo]: valor } : p)));
+  };
+
   useEffect(() => {
     carregar();
+    carregarPlanos();
   }, []);
 
   if (loading && !data) {
@@ -106,6 +152,7 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
         <TabsList>
           <TabsTrigger value="overview" className="text-xs">Visão Geral</TabsTrigger>
           <TabsTrigger value="keys" className="text-xs">Chaves</TabsTrigger>
+          <TabsTrigger value="plans" className="text-xs">Planos</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4">
@@ -217,6 +264,87 @@ export default function ApiManagementTab({ formatCurrency, toast }: Props) {
                     ))}
                   </TableBody>
                 </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="plans" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <DollarSign className="h-5 w-5 text-primary" /> Planos de API
+              </CardTitle>
+              <CardDescription>
+                Mudar aqui reflete na hora em /api/pricing e no checkout de novas assinaturas.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {planos.map((plano) => (
+                <div key={plano.plan_type} className="rounded-lg border border-border p-4">
+                  <div className="mb-3 flex items-center justify-between">
+                    <p className="font-medium">{plano.display_name}</p>
+                    <button
+                      onClick={() => atualizarCampoPlano(plano.plan_type, "is_visible", !plano.is_visible)}
+                      className={plano.is_visible ? "text-success" : "text-muted-foreground"}
+                      title={plano.is_visible ? "Visível em /api/pricing" : "Oculto de /api/pricing"}
+                    >
+                      {plano.is_visible ? <ToggleRight className="h-6 w-6" /> : <ToggleLeft className="h-6 w-6" />}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground">Preço mensal (R$)</label>
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={plano.monthly_price}
+                        onChange={(e) => atualizarCampoPlano(plano.plan_type, "monthly_price", parseFloat(e.target.value) || 0)}
+                        className="w-full rounded-lg border border-input px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Preço anual (R$)</label>
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={plano.yearly_price}
+                        onChange={(e) => atualizarCampoPlano(plano.plan_type, "yearly_price", parseFloat(e.target.value) || 0)}
+                        className="w-full rounded-lg border border-input px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Cota mensal (requisições)</label>
+                      <input
+                        type="number" min="0"
+                        value={plano.monthly_quota}
+                        onChange={(e) => atualizarCampoPlano(plano.plan_type, "monthly_quota", parseInt(e.target.value) || 0)}
+                        className="w-full rounded-lg border border-input px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Limite por minuto</label>
+                      <input
+                        type="number" min="0"
+                        value={plano.rate_limit}
+                        onChange={(e) => atualizarCampoPlano(plano.plan_type, "rate_limit", parseInt(e.target.value) || 0)}
+                        className="w-full rounded-lg border border-input px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="mt-3 gap-2"
+                    disabled={salvandoPlano === plano.plan_type}
+                    onClick={() => salvarPlano(plano)}
+                  >
+                    <Save className="h-3.5 w-3.5" />
+                    {salvandoPlano === plano.plan_type ? "Salvando..." : "Salvar"}
+                  </Button>
+                </div>
+              ))}
+              {planos.length === 0 && (
+                <p className="py-6 text-center text-sm text-muted-foreground">
+                  Nenhum plano de API configurado ainda.
+                </p>
               )}
             </CardContent>
           </Card>
