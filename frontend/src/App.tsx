@@ -29,6 +29,7 @@ import NotFound from "./pages/NotFound";
 
 // Pages - API / Dev
 import ApiLanding from "./pages/ApiLanding";
+import ApiDevAuth from "./pages/ApiDevAuth";
 import ApiDocs from "./pages/ApiDocs";
 import ApiPricing from "./pages/ApiPricing";
 import ApiSandbox from "./pages/ApiSandbox";
@@ -165,6 +166,7 @@ const App = () => {
 
                       {/* Rotas de API / Desenvolvedores */}
                       <Route path="/api" element={<ApiLanding />} />
+                      <Route path="/api/login" element={<ApiDevAuth />} />
                       <Route path="/api/docs" element={<ApiDocs />} />
                       <Route path="/api/pricing" element={<ApiPricing />} />
                       <Route path="/api/sandbox" element={<ApiSandbox />} />

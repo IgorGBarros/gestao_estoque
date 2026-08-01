@@ -15,7 +15,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status, permissions, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.decorators import api_view, permission_classes, action, authentication_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -4931,3 +4931,40 @@ def health_check_view(request):
 
     resultado['last_check'] = timezone.now().isoformat()
     return Response(resultado)
+
+@api_view(['GET'])
+@authentication_classes([])  # ⚠️ crítico: sem isto, o JWTAuthentication padrão do
+                             # DRF tenta decodificar a pk_test_/pk_live_ como se
+                             # fosse um JWT e falha ANTES do AllowAny sequer ser
+                             # checado — AllowAny só libera a PERMISSÃO, não pula
+                             # a etapa de autenticação. A validação de verdade já
+                             # aconteceu no ApiKeyMiddleware.
+@permission_classes([AllowAny])
+def api_ping_view(request):
+    """
+    GET /api/v1/ping/ — testa se uma API Key comercial funciona de verdade.
+
+    A autenticação, o limite por minuto, a cota mensal e o registro em
+    ApiUsageLog já acontecem no ApiKeyMiddleware antes desta view rodar —
+    se chegou até aqui, a chave passou por tudo isso. É o mesmo pipeline
+    que qualquer endpoint real da Fase 3 (catálogo, analytics) vai usar,
+    só que este aqui não devolve nenhum dado de negócio — só confirma que
+    a chave está funcionando, no mesmo espírito do `/v1/account` da Stripe
+    ou do `/user` do GitHub.
+
+    ⚠️ AllowAny aqui é proposital: quem bloqueia é o middleware (que exige
+    a API Key), não esta view. Sem chave válida, a requisição nem chega
+    até aqui.
+    """
+    api_key = getattr(request, 'api_key', None)
+    if api_key is None:
+        return Response({'error': 'Nenhuma API Key válida foi usada nesta requisição.'}, status=401)
+
+    return Response({
+        'status': 'ok',
+        'message': f'Olá, {api_key.name}! Sua chave está funcionando.',
+        'plan': api_key.plan,
+        'scopes': api_key.scopes,
+        'rate_limit_per_minute': api_key.rate_limit,
+        'monthly_quota': api_key.monthly_quota,
+    })

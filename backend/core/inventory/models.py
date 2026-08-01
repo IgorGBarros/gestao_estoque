@@ -942,9 +942,15 @@ class ApiKey(models.Model):
         super().save(*args, **kwargs)
     
     def check_quota(self):
-        """Verifica se quota mensal foi excedida"""
-        # Implementar lógica real com ApiUsageLog
-        return True
+        """
+        Verifica se a cota mensal foi excedida — conta requisições reais
+        registradas em ApiUsageLog neste mês. Antes disto, era só um
+        comentário "Implementar lógica real", sempre retornava True.
+        """
+        from django.utils import timezone
+        inicio_mes = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        usadas = self.usage_logs.filter(created_at__gte=inicio_mes).count()
+        return usadas < self.monthly_quota
     
     def __str__(self):
         return f"{self.name} ({self.key[:16]}•••) - {self.plan}"

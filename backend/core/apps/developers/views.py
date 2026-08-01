@@ -1,13 +1,16 @@
 import logging
+from datetime import timedelta
 
 from django.db import transaction
+from django.db.models import Count, Q, Avg
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
-from inventory.models import ApiKey
+from inventory.models import ApiKey, ApiUsageLog
 
 from .authentication import DeveloperJWTAuthentication, issue_tokens_for_developer
 from .models import DeveloperAccount
@@ -114,5 +117,67 @@ def me(request):
                 'created_at': k.created_at.isoformat(),
             }
             for k in chaves
+        ],
+    })
+
+
+@api_view(['GET'])
+@authentication_classes([DeveloperJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def dashboard(request):
+    """
+    GET /api/developers/dashboard/ — dados reais de uso, pro
+    ApiDashboard.tsx (que hoje mostra tudo simulado, com uma chamada real
+    comentada e um setTimeout(500ms) fingindo carregar).
+
+    Tudo aqui vem de ApiUsageLog de verdade — nada é calculado, estimado
+    ou aleatório.
+    """
+    dev = request.user
+    chaves = list(dev.api_keys.all().order_by('-created_at'))
+    logs = ApiUsageLog.objects.filter(api_key__developer=dev)
+
+    agora = timezone.now()
+    inicio_mes = agora.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    logs_mes = logs.filter(created_at__gte=inicio_mes)
+
+    total_mes = logs_mes.count()
+    erros_mes = logs_mes.filter(status_code__gte=400).count()
+    taxa_erro = round(erros_mes / total_mes * 100, 1) if total_mes else 0.0
+    latencia_media = logs_mes.aggregate(m=Avg('response_time_ms'))['m'] or 0
+
+    desde = agora - timedelta(days=30)
+    por_dia = (
+        logs.filter(created_at__gte=desde)
+        .annotate(dia=TruncDate('created_at'))
+        .values('dia')
+        .annotate(total=Count('id'))
+        .order_by('dia')
+    )
+
+    quota_total = sum(k.monthly_quota for k in chaves) or 0
+
+    return Response({
+        'keys': [
+            {
+                'id': str(k.id),
+                'name': k.name,
+                'key_prefix': k.key[:12] + '...',
+                'plan': k.plan,
+                'is_active': k.is_active,
+                'rate_limit': k.rate_limit,
+                'monthly_quota': k.monthly_quota,
+                'last_used': k.last_used.isoformat() if k.last_used else None,
+            }
+            for k in chaves
+        ],
+        'requests_this_month': total_mes,
+        'error_rate_percent': taxa_erro,
+        'success_rate_percent': round(100 - taxa_erro, 1),
+        'avg_latency_ms': round(latencia_media, 0),
+        'quota_used': total_mes,
+        'quota_limit': quota_total,
+        'requests_by_day': [
+            {'date': r['dia'].isoformat(), 'count': r['total']} for r in por_dia
         ],
     })

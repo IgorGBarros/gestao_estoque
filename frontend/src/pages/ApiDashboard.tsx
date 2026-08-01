@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { devApi, isDevLoggedIn, clearDevTokens } from '../lib/devApi';
 
 // Tipos
 interface ApiKey {
@@ -42,51 +43,43 @@ export default function ApiDashboard() {
   const [newKeyName, setNewKeyName] = useState('');
   const [newKeyPlan, setNewKeyPlan] = useState<'starter' | 'pro' | 'enterprise'>('starter');
 
-  // Carregar dados (mock para demo)
+  // 🔹 CORREÇÃO: antes tinha uma chamada real COMENTADA, substituída por um
+  // setTimeout(500ms) fingindo carregar, seguido de dados inventados na
+  // tela toda. Agora busca de verdade — chaves reais, uso real, tudo vindo
+  // de ApiUsageLog através de /api/developers/dashboard/.
   useEffect(() => {
+    if (!isDevLoggedIn()) {
+      navigate('/api/login');
+      return;
+    }
+
     const loadData = async () => {
-      // Em produção: buscar da API real
-      // const [keysData, usageData] = await Promise.all([
-      //   commercialApi.listKeys(),
-      //   commercialApi.getUsage()
-      // ]);
-      
-      // Mock data para demo
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setKeys([
-        {
-          id: 'key_1',
-          name: 'Meu App de Vendas',
-          key_prefix: 'pk_live_a8f2c91••••',
-          plan: 'pro',
-          scopes: ['read:products', 'read:storefront'],
-          rate_limit: 100,
-          monthly_quota: 50000,
-          last_used: new Date(Date.now() - 3600000).toISOString(),
-          is_active: true,
-        },
-        {
-          id: 'key_2',
-          name: 'Integração ERP',
-          key_prefix: 'pk_live_b3d7e44••••',
-          plan: 'enterprise',
-          scopes: ['read:products', 'read:analytics', 'write:webhooks'],
-          rate_limit: 500,
-          monthly_quota: 999999,
-          last_used: new Date(Date.now() - 7200000).toISOString(),
-          is_active: true,
-        },
-      ]);
-      
-      setUsage({
-        requests_30d: 12450,
-        quota: 50000,
-        success_rate: 99.2,
-        avg_latency_ms: 142,
-      });
-      
-      setLoading(false);
+      try {
+        const dados = await devApi.dashboard();
+        setKeys(dados.keys.map((k) => ({
+          id: k.id,
+          name: k.name,
+          key_prefix: k.key_prefix,
+          plan: k.plan as ApiKey['plan'],
+          scopes: k.scopes,
+          rate_limit: k.rate_limit,
+          monthly_quota: k.monthly_quota,
+          last_used: k.last_used,
+          is_active: k.is_active,
+        })));
+        setUsage({
+          requests_30d: dados.requests_this_month,
+          quota: dados.quota_limit,
+          success_rate: dados.success_rate_percent,
+          avg_latency_ms: dados.avg_latency_ms,
+        });
+      } catch {
+        // Token inválido/expirado — manda pra tela de login de novo.
+        clearDevTokens();
+        navigate('/api/login');
+      } finally {
+        setLoading(false);
+      }
     };
     
     loadData();
@@ -439,7 +432,7 @@ export default function ApiDashboard() {
                     size="sm" 
                     className="gap-2"
                     onClick={() => {
-                      localStorage.removeItem('api_key_demo');
+                      clearDevTokens();
                       navigate('/api');
                     }}
                   >
