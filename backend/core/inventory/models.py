@@ -902,6 +902,18 @@ class ApiKey(models.Model):
         blank=True,
         help_text="Loja associada (para consultoras)"
     )
+    # ⚠️ Adicionado junto com a fundação do produto de API (apps/developers):
+    # chave emitida pra um desenvolvedor de verdade, não uma loja disfarçada
+    # de "cliente de API" — antes o admin-panel simulava chaves a partir de
+    # lojas com vitrine ativa, sem nenhuma chave real ter sido emitida.
+    developer = models.ForeignKey(
+        'developers.DeveloperAccount',
+        on_delete=models.CASCADE,
+        related_name='api_keys',
+        null=True,
+        blank=True,
+        help_text="Desenvolvedor dono da chave (produto de API comercial)"
+    )
     
     plan = models.CharField(max_length=20, choices=PLAN_CHOICES, default='starter')
     scopes = models.JSONField(default=list, help_text="Lista de scopes permitidos")
@@ -976,6 +988,15 @@ class ConsentRecord(models.Model):
         ('behavior_tracking', 'Captura de comportamento para IA'),
         ('ai_features', 'Recursos de IA/Amorinha'),
         ('ai_training', 'Uso de dados de estoque e vendas para treinamento de modelos de IA'),
+        # ⚠️ ENCAIXE PARA LGPD (API comercial, Fase 3 do produto de dados):
+        # cobre a loja entrar em agregados de inteligência de mercado
+        # (vendas por marca/época) vendidos a terceiros via API. Só o TIPO
+        # existe por enquanto — nenhuma query hoje checa esse consentimento,
+        # porque o endpoint que venderia esse dado ainda não existe. Quando
+        # a Fase 3 for construída, cada agregação precisa filtrar por
+        # has_consent_for_purpose(loja.owner, 'data_commercialization')
+        # antes de incluir a loja no cálculo.
+        ('data_commercialization', 'Uso de dados agregados e anonimizados de vendas em produtos comerciais vendidos a terceiros'),
     ]
 
     # Identificação do titular

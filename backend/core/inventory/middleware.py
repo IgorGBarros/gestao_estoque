@@ -62,6 +62,13 @@ class ApiKeyMiddleware(MiddlewareMixin):
         r'^/api/system-config/',
         r'^/api/health/',
 
+        # Cadastro/login de desenvolvedor: por definição, ninguém tem token
+        # nenhum nesse momento — /me/ e as próximas rotas do produto de API
+        # NÃO entram aqui, porque já mandam Bearer JWT (passa no branch
+        # "eyJ" acima, sem precisar de exclusão).
+        r'^/api/developers/register/',
+        r'^/api/developers/login/',
+
         # Painel admin e pagamentos: autenticam por JWT (IsAdminUser /
         # IsAuthenticated), não pela API Key comercial. Sem estas linhas o
         # middleware bloqueava o painel inteiro e o checkout do Asaas.

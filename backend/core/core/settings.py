@@ -138,6 +138,7 @@ INSTALLED_APPS = [
     'inventory',
     'ai',
     'apps.payments',
+    'apps.developers',
 ]
 
 # ✅ ORDEM CRÍTICA DO MIDDLEWARE
