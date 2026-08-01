@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Key, BarChart3, Bell, Settings, 
-  Copy, RefreshCw, TrendingUp, AlertCircle, LogOut
+  Copy, RefreshCw, TrendingUp, AlertCircle, LogOut, Play, Check, Terminal
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -42,6 +42,48 @@ export default function ApiDashboard() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newKeyName, setNewKeyName] = useState('');
   const [newKeyPlan, setNewKeyPlan] = useState<'starter' | 'pro' | 'enterprise'>('starter');
+
+  // 🧪 Sandbox — antes era uma página pública separada (/api/sandbox), com
+  // resposta 100% inventada (mockResponse) e o botão de copiar curl
+  // apontando pra um domínio que nunca existiu. Agora mora aqui dentro do
+  // painel autenticado, e as chamadas são reais. A chave completa só
+  // aparece uma vez no cadastro (por segurança), então ela precisa colar a
+  // chave que já guardou — igual o Postman ou o próprio painel da Stripe.
+  const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || 'https://dev-brih.onrender.com').replace(/\/$/, '');
+  const [sbEndpoint, setSbEndpoint] = useState('/api/v1/products/');
+  const [sbParams, setSbParams] = useState('');
+  const [sbApiKey, setSbApiKey] = useState('');
+  const [sbResponse, setSbResponse] = useState<{ status: number; body: any } | null>(null);
+  const [sbLoading, setSbLoading] = useState(false);
+  const [sbCopied, setSbCopied] = useState(false);
+
+  const runSandboxRequest = async () => {
+    if (!sbApiKey.trim()) {
+      setSbResponse({ status: 0, body: { error: 'Cole sua API Key acima antes de testar.' } });
+      return;
+    }
+    setSbLoading(true);
+    setSbResponse(null);
+    try {
+      const url = `${API_BASE_URL}${sbEndpoint}${sbParams ? `?${sbParams}` : ''}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${sbApiKey.trim()}` },
+      });
+      const body = await res.json().catch(() => ({}));
+      setSbResponse({ status: res.status, body });
+    } catch (err: any) {
+      setSbResponse({ status: 0, body: { error: err.message || 'Falha de rede' } });
+    } finally {
+      setSbLoading(false);
+    }
+  };
+
+  const copySandboxCurl = () => {
+    const curl = `curl "${API_BASE_URL}${sbEndpoint}${sbParams ? `?${sbParams}` : ''}" \\\n  -H "Authorization: Bearer ${sbApiKey || 'pk_test_•••'}"`;
+    navigator.clipboard.writeText(curl);
+    setSbCopied(true);
+    setTimeout(() => setSbCopied(false), 2000);
+  };
 
   // 🔹 CORREÇÃO: antes tinha uma chamada real COMENTADA, substituída por um
   // setTimeout(500ms) fingindo carregar, seguido de dados inventados na
@@ -164,6 +206,9 @@ export default function ApiDashboard() {
             <TabsTrigger value="keys" className="gap-2">
               <Key className="h-4 w-4" /> Minhas Chaves
             </TabsTrigger>
+            <TabsTrigger value="sandbox" className="gap-2">
+              <Terminal className="h-4 w-4" /> Sandbox
+            </TabsTrigger>
             <TabsTrigger value="usage" className="gap-2">
               <BarChart3 className="h-4 w-4" /> Uso
             </TabsTrigger>
@@ -263,6 +308,79 @@ export default function ApiDashboard() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          {/* Tab: Sandbox — chamadas reais, não mais mock */}
+          <TabsContent value="sandbox" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Testar a API</CardTitle>
+                <CardDescription>
+                  Chamadas de verdade contra {API_BASE_URL} — cole sua chave abaixo.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="sb-key">Sua API Key</Label>
+                  <Input
+                    id="sb-key"
+                    placeholder="pk_test_••••"
+                    value={sbApiKey}
+                    onChange={(e) => setSbApiKey(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A chave completa só aparece uma vez, no cadastro — cole a que você guardou.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sb-endpoint">Endpoint</Label>
+                    <Select value={sbEndpoint} onValueChange={setSbEndpoint}>
+                      <SelectTrigger id="sb-endpoint"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="/api/v1/ping/">GET /api/v1/ping/</SelectItem>
+                        <SelectItem value="/api/v1/products/">GET /api/v1/products/</SelectItem>
+                        <SelectItem value="/api/v1/products/lookup/">GET /api/v1/products/lookup/</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sb-params">Parâmetros (query string)</Label>
+                    <Input
+                      id="sb-params"
+                      placeholder="brand=Natura ou barcode=7891234567890"
+                      value={sbParams}
+                      onChange={(e) => setSbParams(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button onClick={runSandboxRequest} disabled={sbLoading} className="gap-2">
+                    {sbLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                    Executar
+                  </Button>
+                  <Button variant="outline" onClick={copySandboxCurl} className="gap-2">
+                    {sbCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+                    Copiar como curl
+                  </Button>
+                </div>
+
+                {sbResponse && (
+                  <div>
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <Badge variant={sbResponse.status >= 200 && sbResponse.status < 300 ? "default" : "destructive"}>
+                        {sbResponse.status || "erro de rede"}
+                      </Badge>
+                    </div>
+                    <pre className="max-h-80 overflow-auto rounded-lg border border-border bg-secondary/30 p-3 text-xs">
+                      {JSON.stringify(sbResponse.body, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Tab: Uso */}

@@ -2,7 +2,7 @@
 import { Toaster } from "./components/ui/toaster";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 
 // ✅ Providers - ORDEM CRÍTICA:
 import { AuthProvider, useAuth } from "./hooks/useAuth";
@@ -32,7 +32,6 @@ import ApiLanding from "./pages/ApiLanding";
 import ApiDevAuth from "./pages/ApiDevAuth";
 import ApiDocs from "./pages/ApiDocs";
 import ApiPricing from "./pages/ApiPricing";
-import ApiSandbox from "./pages/ApiSandbox";
 import ApiDashboard from "./pages/ApiDashboard";
 
 // Pages - Protected (App Core)
@@ -169,7 +168,11 @@ const App = () => {
                       <Route path="/api/login" element={<ApiDevAuth />} />
                       <Route path="/api/docs" element={<ApiDocs />} />
                       <Route path="/api/pricing" element={<ApiPricing />} />
-                      <Route path="/api/sandbox" element={<ApiSandbox />} />
+                      {/* ⚠️ O sandbox saiu daqui — agora é uma aba dentro do
+                          painel autenticado (ApiDashboard), com chamadas
+                          reais em vez do mockResponse fixo de antes. Link
+                          antigo redireciona em vez de dar 404. */}
+                      <Route path="/api/sandbox" element={<Navigate to="/api/dashboard" replace />} />
                       <Route path="/api/dashboard" element={<ApiDashboard />} />
 
                       {/* ==========================================
