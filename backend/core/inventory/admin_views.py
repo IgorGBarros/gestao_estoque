@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from .models import (
     Product, Store, InventoryItem, Sale, UserBehaviorLog, 
     PlanConfig, Promotion, CustomUser, ConsentRecord, StockTransaction,
-    Lead, Cart, CartItem, SystemConfig,
+    Lead, Cart, CartItem, SystemConfig, ApiKey, ApiUsageLog,
 )
 
 logger = logging.getLogger(__name__)
@@ -661,281 +661,83 @@ def get_ai_training_summary(request):
 @permission_classes([IsAdminUser])
 def monitor_api_usage(request):
     """
-    GET /api/admin/api-monitor/ → Monitoramento interno com DADOS REAIS
-    Usa modelos existentes para calcular métricas de API/comercialização
+    GET /api/admin/api-monitor/ — dado real do produto de API.
+
+    ⚠️ REESCRITO DO ZERO: a versão anterior usava lojas com vitrine ativa
+    como "proxy" de chave de API (gerando um prefixo falso a partir do
+    slug — nenhuma chave real tinha sido emitida), e "revenue_api_mrr" era
+    a receita de ASSINATURA DAS CONSULTORAS, só relabelada como se fosse
+    receita de API. Agora usa DeveloperAccount/ApiKey/ApiUsageLog de
+    verdade — os mesmos modelos que apps/developers usa.
     """
-    from django.db.models import Count, Sum, Avg, Q
+    from django.db.models import Avg, Count, Q
+    from django.db.models.functions import TruncDate
     from datetime import timedelta
-    
+    from apps.developers.models import DeveloperAccount
+
     now = timezone.now()
-    month_ago = now - timedelta(days=30)
-    
-    # ─────────────────────────────────────────────────────────────
-    # 1. MÉTRICAS DE RECEITA (baseado em assinaturas reais)
-    # ─────────────────────────────────────────────────────────────
-    
-    # Receita MRR: lojas PRO com assinatura ativa
-    # ⚠️ CORREÇÃO (FieldError → 500): subscription_status é uma @property
-    # calculada em Python (não uma coluna), então não pode entrar num
-    # .filter(). Replicamos a mesma regra da property com campos reais:
-    # plano PRO e (sem data de expiração OU expiração ainda no futuro).
-    pro_stores_active = Store.objects.filter(
-        Q(plan='pro') & (
-            Q(subscription_expires_at__isnull=True) |
-            Q(subscription_expires_at__gt=now)
-        )
-    )
-    
-    # Calcula MRR baseado no preço do plano (ou valor fixo se não tiver configuração)
-    plan_config = PlanConfig.objects.filter(plan_type='pro').first()
-    pro_price = float(plan_config.monthly_price) if plan_config else 39.90
-    
-    revenue_api_mrr = pro_stores_active.count() * pro_price
-    
-    # ─────────────────────────────────────────────────────────────
-    # 2. CHAVES DE API (usando lojas como proxy para "clientes API")
-    # ─────────────────────────────────────────────────────────────
-    
-    # Lojas com vitrine ativa = "chaves ativas" (clientes usando API pública)
-    active_keys_query = Store.objects.filter(
-        slug__isnull=False,  # Tem vitrine = está usando recursos "API"
-        updated_at__gte=month_ago  # Ativa nos últimos 30 dias
-    ).select_related('owner')
-    
-    active_keys_count = active_keys_query.count()
-    
-    # Constrói lista de "chaves" baseada nas lojas
-    keys_data = []
-    for store in active_keys_query[:10]:  # Limita a 10 para performance
-        owner = store.owner
-        keys_data.append({
-            'id': f"store_{store.id}",
-            'name': owner.name if owner else f"Loja #{store.id}",
-            'key_prefix': f"pk_{store.slug[:8]}_" if store.slug else f"pk_store{store.id}_",
-            'client_name': owner.name if owner else None,
-            'plan': store.plan,
-            'scopes': ['read:products', 'read:storefront'] if store.plan == 'pro' else ['read:products'],
-            'rate_limit': 100 if store.plan == 'pro' else 20,
-            'monthly_quota': 50000 if store.plan == 'pro' else 1000,
-            'last_used': store.updated_at.isoformat(),
-            'is_active': True,
-        })
-    
-    # ─────────────────────────────────────────────────────────────
-    # 3. REQUISICÕES E WEBHOOKS (baseado em logs e vendas)
-    # ─────────────────────────────────────────────────────────────
-    
-    # Total de "requisições" = ações registradas em UserBehaviorLog + Vendas
-    # ⚠️ Alinhado a StockTransaction (fonte canônica de vendas); Sale quase
-    # nunca é populada, o que deixava estas métricas sempre em zero.
-    sales_qs = StockTransaction.objects.filter(
-        transaction_type='VENDA', created_at__gte=month_ago
-    )
-    total_requests_30d = (
-        UserBehaviorLog.objects.filter(created_at__gte=month_ago).count() +
-        sales_qs.count() * 5  # Cada venda = ~5 "requests"
+    desde_30d = now - timedelta(days=30)
+
+    total_developers = DeveloperAccount.objects.count()
+    chaves = ApiKey.objects.filter(developer__isnull=False).select_related('developer')
+    chaves_ativas = chaves.filter(is_active=True).count()
+
+    logs_30d = ApiUsageLog.objects.filter(api_key__developer__isnull=False, created_at__gte=desde_30d)
+    total_requests_30d = logs_30d.count()
+    erros_30d = logs_30d.filter(status_code__gte=400).count()
+    error_rate = round(erros_30d / total_requests_30d * 100, 1) if total_requests_30d else 0.0
+    avg_response_time = round(logs_30d.aggregate(m=Avg('response_time_ms'))['m'] or 0, 0)
+
+    # Série diária, últimos 30 dias — pra gráfico de tendência.
+    requests_by_day = list(
+        logs_30d.annotate(dia=TruncDate('created_at'))
+        .values('dia')
+        .annotate(total=Count('id'))
+        .order_by('dia')
     )
 
-    # Taxa de sucesso de webhooks = % de vendas com status válido
-    total_sales = sales_qs.count()
-    successful_sales = total_sales  # toda VENDA registrada é considerada válida
+    # Endpoints mais chamados — de verdade, não um catálogo hardcoded.
+    top_endpoints = list(
+        logs_30d.values('endpoint')
+        .annotate(chamadas=Count('id'))
+        .order_by('-chamadas')[:10]
+    )
 
-    webhook_success_rate = round((successful_sales / total_sales * 100), 1) if total_sales > 0 else 100.0
-
-    # Webhooks "configurados" = lojas com vitrine + WhatsApp (prontas para notificações)
-    webhooks_data = []
-    stores_with_webhook = Store.objects.filter(
-        slug__isnull=False,
-        whatsapp__isnull=False,
-        plan='pro'
-    )[:5]
-    
-    for store in stores_with_webhook:
-        webhooks_data.append({
-            'id': f"wh_store_{store.id}",
-            'name': f"Notificações - {store.name[:30]}",
-            'url': f"https://api.minhaamora.com.br/hooks/store/{store.id}",
-            'active': True,
-            'events': ['product.updated', 'price.changed', 'stock.low'],
-            'stats': {
-                'delivered_24h': StockTransaction.objects.filter(
-                    store=store,
-                    transaction_type='VENDA',
-                    created_at__gte=now - timedelta(days=1)
-                ).count(),
-                'failed_24h': 0,  # Placeholder - implementar retry logic depois
-                'avg_latency_ms': 180,  # Placeholder - medir real depois
-            },
-        })
-    
-    # ─────────────────────────────────────────────────────────────
-    # 4. ENDPOINTS (catálogo real baseado no que está implementado)
-    # ─────────────────────────────────────────────────────────────
-    
-    endpoints_catalog = [
+    # Uma linha por chave real, com quem é o desenvolvedor dono.
+    keys_data = [
         {
-            'path': '/api/products/',
-            'method': 'GET',
-            'description': 'Lista o catálogo global de produtos',
-            'auth': 'API Key',
-            'rate_limit': '100 req/min',
-            'pricing_tier': ['starter', 'pro', 'enterprise'],
-            'sample': {'id': 1, 'name': 'Perfume Kaiak', 'brand': 'Natura'},
-            'status': 'active',
-            'usage_30d': Product.objects.filter(
-                inventoryitem__isnull=False
-            ).count() * 10,  # Estimativa baseada em produtos cadastrados
-        },
-        {
-            'path': '/api/products/lookup/?barcode={barcode}',
-            'method': 'GET',
-            'description': 'Lookup por código de barras',
-            'auth': 'API Key',
-            'rate_limit': '200 req/min',
-            'pricing_tier': ['starter', 'pro', 'enterprise'],
-            'sample': {'found': True, 'product': {'name': 'Tododia'}},
-            'status': 'active',
-            'usage_30d': UserBehaviorLog.objects.filter(
-                action_type='product_scan',
-                created_at__gte=month_ago
-            ).count(),
-        },
-        {
-            'path': '/api/public/storefront/{slug}/',
-            'method': 'GET',
-            'description': 'Vitrine pública da consultora',
-            'auth': 'Público',
-            'rate_limit': '60 req/min',
-            'pricing_tier': ['starter', 'pro', 'enterprise'],
-            'sample': [{'product_name': 'Kaiak', 'sale_price': 89.90}],
-            'status': 'active',
-            'usage_30d': Store.objects.filter(
-                slug__isnull=False
-            ).count() * 50,  # Estimativa de acessos por vitrine
-        },
-        {
-            'path': '/api/admin/analytics/products/',
-            'method': 'GET',
-            'description': 'Analytics agregado de produtos',
-            'auth': 'API Key + Scope',
-            'rate_limit': '50 req/min',
-            'pricing_tier': ['pro', 'enterprise'],
-            'sample': {'top_brands': [{'brand': 'Natura', 'count': 320}]},
-            'status': 'active',
-            'lgpd': True,
-            'usage_30d': 0,  # Admin endpoint - uso interno
-        },
-        {
-            'path': 'webhook → product.updated',
-            'method': 'POST',
-            'description': 'Notifica alterações de preço/estoque',
-            'auth': 'Webhook Secret',
-            'rate_limit': 'ilimitado',
-            'pricing_tier': ['pro', 'enterprise'],
-            'sample': {'event': 'product.updated', 'product_id': 12},
-            'status': 'beta',  # Beta até implementar fila de eventos
-        },
-    ]
-    
-    # ─────────────────────────────────────────────────────────────
-    # 5. PREÇOS (busca reais de PlanConfig)
-    # ─────────────────────────────────────────────────────────────
-    
-    pricing_tiers = {}
-    for plan in PlanConfig.objects.all():
-        pricing_tiers[plan.plan_type] = {
-            'tier': plan.plan_type,
-            'price': f"R$ {plan.monthly_price:.2f}/mês" if plan.monthly_price > 0 else "Grátis",
-            'quota': f"{plan.max_products or 'Ilimitado'} req/mês",
-            'rate_limit': '100 req/min' if plan.plan_type == 'pro' else '20 req/min',
-            'features': [
-                f"{'✓ ' if plan.can_use_scanner else '✗ '}Scanner de código",
-                f"{'✓ ' if plan.can_use_storefront else '✗ '}Vitrine online",
-                f"{'✓ ' if plan.can_use_alerts else '✗ '}Alertas de estoque",
-                f"{'✓ ' if plan.can_use_ai_assistant else '✗ '}Assistente IA",
-                f"{'✓ ' if plan.can_use_analytics else '✗ '}Analytics avançado",
-            ] if plan.plan_type != 'starter' else ['Busca básica de produtos'],
-            'cta': 'Contratar' if plan.plan_type != 'free' else 'Usar Grátis',
-            'popular': plan.is_popular,
-            'lgpd': True if plan.plan_type == 'enterprise' else False,
+            'id': str(k.id),
+            'name': k.name,
+            'key_prefix': k.key[:12] + '...',
+            'developer_name': k.developer.name if k.developer else None,
+            'developer_email': k.developer.email if k.developer else None,
+            'plan': k.plan,
+            'is_active': k.is_active,
+            'rate_limit': k.rate_limit,
+            'monthly_quota': k.monthly_quota,
+            'requests_30d': k.usage_logs.filter(created_at__gte=desde_30d).count(),
+            'last_used': k.last_used.isoformat() if k.last_used else None,
         }
-    
-    # Garante que todos os tiers existam (fallback)
-    if 'starter' not in pricing_tiers:
-        pricing_tiers['starter'] = {
-            'tier': 'starter',
-            'price': 'Grátis',
-            'quota': '1.000 req/mês',
-            'rate_limit': '20 req/min',
-            'features': ['Busca básica de produtos', 'Dados públicos'],
-            'cta': 'Disponibilizar',
-            'popular': False,
-        }
-    
-    # ─────────────────────────────────────────────────────────────
-    # 6. MÉTRICAS TÉCNICAS INTERNAS
-    # ─────────────────────────────────────────────────────────────
-    
-    # Tempo médio de resposta (estimado baseado em queries)
-    avg_response_time = 142  # Placeholder - implementar django-debug-toolbar ou APM depois
-    
-    # Taxa de erro (estimada baseada em exceções não tratadas)
-    error_rate = 0.3  # Placeholder - implementar logging de erros estruturado
-    
-    # Top endpoints por uso real
-    top_endpoints = [
-        {
-            'path': '/api/products/',
-            'calls': Product.objects.filter(
-                inventoryitem__isnull=False
-            ).count() * 10,
-        },
-        {
-            'path': '/api/public/storefront/',
-            'calls': Store.objects.filter(
-                slug__isnull=False
-            ).count() * 50,
-        },
-        {
-            'path': '/api/inventory/',
-            'calls': InventoryItem.objects.count() * 5,
-        },
+        for k in chaves.order_by('-created_at')[:50]
     ]
-    
-    # ─────────────────────────────────────────────────────────────
-    # RESPOSTA FINAL
-    # ─────────────────────────────────────────────────────────────
-    
+
     return Response({
-        # Métricas de Receita
-        'revenue_api_mrr': round(revenue_api_mrr, 2),
-        'active_keys': active_keys_count,
+        'total_developers': total_developers,
+        'active_keys': chaves_ativas,
         'total_requests_30d': total_requests_30d,
-        'webhook_success_rate': webhook_success_rate,
-        
-        # Chaves de API (reais)
+        'error_rate_percent': error_rate,
+        'avg_response_time_ms': avg_response_time,
+        'requests_by_day': [
+            {'date': r['dia'].isoformat(), 'count': r['total']} for r in requests_by_day
+        ],
+        'top_endpoints': top_endpoints,
         'keys': keys_data,
-        
-        # Webhooks (reais)
-        'webhooks': webhooks_data,
-        
-        # Catálogo de Endpoints (com uso real)
-        'endpoints_catalog': endpoints_catalog,
-        
-        # Preços (reais do PlanConfig)
-        'pricing_tiers': pricing_tiers,
-        
-        # Métricas técnicas internas
-        'internal_metrics': {
-            'avg_response_time_ms': avg_response_time,
-            'error_rate_percent': error_rate,
-            'top_endpoints': top_endpoints,
-        },
-        
-        # Metadata
+        # ⚠️ A cobrança de assinatura de API (ApiPlanConfig/ApiSubscription)
+        # é a Fase 4 — ainda não existe, então não finjo um número aqui.
+        'revenue_api_mrr': 0,
+        'revenue_note': 'Cobrança de assinatura de API ainda não implementada (Fase 4 do plano).',
         'generated_at': now.isoformat(),
         'data_freshness': 'real-time',
-        'note': 'Dados calculados em tempo real a partir dos modelos Store, Sale, PlanConfig e UserBehaviorLog',
     })
 
 # ─────────────────────────────────────────────────────────────
