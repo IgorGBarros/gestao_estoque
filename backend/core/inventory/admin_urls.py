@@ -17,8 +17,13 @@ from .admin_views import (
     admin_impersonate_user,
     admin_toggle_block_user,
     list_plan_configs,
+    list_api_plan_configs,
+    update_api_plan_config,
     update_plan_config,
     list_promotions,
+    update_system_config,
+    create_promotion,
+    promotion_detail,
     list_users,
     get_system_stats,
     get_product_analytics,
@@ -38,8 +43,13 @@ urlpatterns = [
     # Visão geral / configuração
     path('stats/', get_system_stats, name='admin_system_stats'),
     path('plan-configs/', list_plan_configs, name='admin_plan_configs'),
+    path('api-plan-configs/', list_api_plan_configs, name='admin_api_plan_configs'),
+    path('api-plan-configs/<str:plan_type>/', update_api_plan_config, name='admin_update_api_plan_config'),
     path('plan-configs/<str:plan_type>/', update_plan_config, name='admin_update_plan_config'),
     path('promotions/', list_promotions, name='admin_promotions'),
+    path('system-config/', update_system_config, name='admin_system_config'),
+    path('promotions/create/', create_promotion, name='admin_promotion_create'),
+    path('promotions/<uuid:promotion_id>/', promotion_detail, name='admin_promotion_detail'),
     path('api-monitor/', monitor_api_usage, name='admin_api_monitor'),
 
     # Analytics (filtrado por consentimento LGPD — ver admin_views.py)

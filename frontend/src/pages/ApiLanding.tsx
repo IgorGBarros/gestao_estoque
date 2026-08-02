@@ -83,16 +83,16 @@ export default function ApiLanding() {
             <CodeExample 
               language="curl" 
               code={`# Buscar produto por barcode
-curl -X GET "https://api.minhaamora.com.br/api/v1/products/lookup/?barcode=7891234567890" \\
-  -H "Authorization: Bearer pk_live_••••••••" \\
+curl -X GET "https://dev-brih.onrender.com/api/v1/products/lookup/?barcode=7891234567890" \\
+  -H "Authorization: Bearer pk_test_••••••••" \\
   -H "Content-Type: application/json"`} 
             />
             <CodeExample 
               language="python" 
               code={`import requests
 
-API_KEY = "pk_live_••••••••"
-BASE_URL = "https://api.minhaamora.com.br/api/v1"
+API_KEY = "pk_test_••••••••"
+BASE_URL = "https://dev-brih.onrender.com/api/v1"
 
 headers = {"Authorization": f"Bearer {API_KEY}"}
 

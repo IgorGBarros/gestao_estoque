@@ -15,7 +15,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status, permissions, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.decorators import api_view, permission_classes, action, authentication_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -37,6 +37,7 @@ from .models import (
     Sale, SaleItem, PriceHistory, StockTransaction,
     PlanConfig, Promotion, ConsentRecord,  # ✅ Novo modelo LGPD
     Lead, Cart, CartItem,  # ✅ CRM da vitrine
+    SystemConfig, PromotionView,  # ⚙️ Configuração global + métricas reais de promoção
 )
 
 # Imports dos seus serializers
@@ -48,6 +49,7 @@ from .serializers import (
     ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer,  # ✅ Serializers LGPD
     PlanConfigSerializer,
     LeadSerializer, CartItemSerializer,  # ✅ CRM da vitrine
+    PromotionSerializer,
 )
 
 from .scraper import search_google_shopping
@@ -160,85 +162,25 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 # Firebase imports
-import firebase_admin
-from firebase_admin import auth as firebase_auth, credentials
+from firebase_admin import auth as firebase_auth
 
 from .models import CustomUser
 from .utils import ensure_user_has_store
+from .firebase_utils import init_firebase_safe
 
 logger = logging.getLogger(__name__)
 
 
 class FirebaseLoginView(APIView):
     permission_classes = [permissions.AllowAny]
-    
-    def _init_firebase_safe(self) -> bool:
-        """
-        Inicializa Firebase com correção agressiva de caracteres.
-        Retorna True se sucesso, False se falhou (NUNCA lança exceção).
-        """
-        try:
-            # Se já inicializado, retorna
-            if firebase_admin._apps:
-                return True
-            
-            creds_json = os.environ.get("FIREBASE_CREDENTIALS")
-            if not creds_json:
-                logger.error("❌ FIREBASE_CREDENTIALS não configurada")
-                return False
-            
-            # 🔧 CORREÇÃO AGRESSIVA DE CARACTERES
-            # 1. Placeholder para \\ (para não duplicar escapes)
-            creds_json = creds_json.replace('\\\\', '\x00BSLASH\x00')
-            
-            # 2. Escapar caracteres de controle REAIS
-            creds_json = (creds_json
-                .replace('\n', '\\n')
-                .replace('\r', '\\r')
-                .replace('\t', '\\t')
-                .replace('\b', '\\b')
-                .replace('\f', '\\f')
-            )
-            
-            # 3. Restaurar \\
-            creds_json = creds_json.replace('\x00BSLASH\x00', '\\\\')
-            
-            # 4. Parse JSON
-            creds_dict = json.loads(creds_json)
-            
-            # 5. Validar campos obrigatórios
-            required = ['type', 'project_id', 'private_key', 'client_email']
-            missing = [k for k in required if k not in creds_dict]
-            if missing:
-                logger.error(f"❌ Firebase JSON missing: {missing}")
-                return False
-            
-            # 6. Inicializar SDK
-            cred = credentials.Certificate(creds_dict)
-            firebase_admin.initialize_app(cred, {'projectId': creds_dict.get('project_id')})
-            logger.info("✅ Firebase inicializado com sucesso")
-            return True
-            
-        except json.JSONDecodeError as e:
-            pos = getattr(e, 'pos', '?')
-            logger.error(f"❌ JSON decode error at pos {pos}: {str(e)[:150]}")
-            # Log de diagnóstico seguro (primeiros 200 chars)
-            if creds_json and isinstance(pos, int) and pos < len(creds_json):
-                start = max(0, pos - 30)
-                end = min(len(creds_json), pos + 30)
-                logger.error(f"🔍 Context: ...{creds_json[start:end]}...")
-            return False
-        except Exception as e:
-            logger.error(f"❌ Firebase init error: {type(e).__name__}: {str(e)[:150]}")
-            return False
-    
+
     def post(self, request):
         token = request.data.get("token")
         if not token:
             return Response({"error": "Token ausente"}, status=400)
         
         # Inicializar Firebase AGORA (na request, não no startup)
-        if not self._init_firebase_safe():
+        if not init_firebase_safe():
             # Fallback para DEBUG: mock user
             if settings.DEBUG:
                 user, _ = CustomUser.objects.get_or_create(
@@ -4190,6 +4132,59 @@ def public_plans_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def active_promotions_view(request):
+    """
+    GET /api/promotions/active/ — promoções que a loja de quem está logado
+    deve ver agora. Sem isso, o admin podia criar e ativar uma promoção que
+    NUNCA aparecia pra ninguém — o recurso não tinha efeito nenhum fora do
+    próprio painel administrativo.
+
+    Prioridade: se a promoção tem `target_stores` preenchido, só aparece
+    pras lojas selecionadas ali (alvo específico, mais forte). Senão, cai no
+    segmento amplo de `target_audience` (todos / free / pro / novos /
+    inativos) — o comportamento que já existia.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response([])
+
+    agora = timezone.now()
+    base = Promotion.objects.filter(is_active=True, starts_at__lte=agora).filter(
+        Q(ends_at__isnull=True) | Q(ends_at__gte=agora)
+    ).exclude(
+        max_views__isnull=False, current_views__gte=F('max_views')
+    )
+
+    candidatas = []
+    for promo in base:
+        if promo.target_stores.exists():
+            # Alvo específico: só vale se ESTA loja estiver na lista.
+            if promo.target_stores.filter(id=store.id).exists():
+                candidatas.append(promo)
+            continue
+
+        # Sem alvo específico: cai no segmento amplo de sempre.
+        alvo = promo.target_audience
+        if alvo == 'all':
+            candidatas.append(promo)
+        elif alvo == 'free' and store.plan != 'pro':
+            candidatas.append(promo)
+        elif alvo == 'pro' and store.plan == 'pro':
+            candidatas.append(promo)
+        elif alvo == 'new_users' and store.created_at >= agora - timedelta(days=7):
+            candidatas.append(promo)
+        elif alvo == 'inactive':
+            ativo_recente = UserBehaviorLog.objects.filter(
+                store=store, created_at__gte=agora - timedelta(days=30)
+            ).exists()
+            if not ativo_recente:
+                candidatas.append(promo)
+
+    return Response(PromotionSerializer(candidatas, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def movements_report_csv(request):
     """
     GET /api/movements/report/?period=dia|mes|ano|tudo
@@ -4793,3 +4788,91 @@ def crm_cart_update(request, cart_id):
         'payment_method': cart.payment_method,
         'payment_confirmed': cart.payment_confirmed,
     })
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_promotion_view(request, promotion_id):
+    """
+    POST /api/promotions/<id>/view/ — a loja de quem está logado viu esta
+    promoção agora. Chamado pelo PromotionBanner quando ele efetivamente
+    mostra uma promoção na tela.
+
+    Idempotente por (promoção, loja): repetir a chamada na mesma sessão não
+    infla a contagem — é o que torna "Visualizações" e "Taxa de Conversão"
+    do admin-panel um número real, em vez de aleatório.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response(status=204)  # sem loja, não há o que registrar — não é erro do cliente
+
+    promo = Promotion.objects.filter(id=promotion_id).first()
+    if not promo:
+        return Response(status=204)
+
+    PromotionView.objects.get_or_create(promotion=promo, store=store)
+    return Response(status=204)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def system_config_view(request):
+    """
+    GET /api/system-config/ — status de manutenção e feature flags globais,
+    do jeito que QUALQUER consultora (ou a tela de login, antes mesmo de
+    autenticar) precisa ver. Público de propósito: se o sistema está em
+    manutenção, isso precisa aparecer mesmo pra quem ainda não conseguiu
+    logar.
+    """
+    cfg = SystemConfig.get_solo()
+    return Response({
+        'maintenance_mode': cfg.maintenance_mode,
+        'maintenance_message': cfg.maintenance_message if cfg.maintenance_mode else '',
+        'ai_enabled': cfg.ai_enabled,
+        'storefront_enabled': cfg.storefront_enabled,
+        'ocr_enabled': cfg.ocr_enabled,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check_view(request):
+    """
+    GET /api/health/ — checagem real de infraestrutura, pro card
+    "Saúde do Sistema" do admin-panel. Antes: "Banco de Dados" só repetia o
+    resultado da própria API (nunca testava o banco de verdade), e
+    "Gateway Pagamento" estava sempre fixo em "operational", sem checar
+    nada. Latência era texto fixo ("~80ms"), não medida.
+    """
+    import time
+    from django.db import connection
+
+    resultado = {'api_status': 'operational'}
+
+    # Banco: consulta real, cronometrada — não um espelho do status da API.
+    inicio_db = time.monotonic()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+        resultado['database_status'] = 'operational'
+    except Exception:
+        resultado['database_status'] = 'down'
+    resultado['database_latency_ms'] = round((time.monotonic() - inicio_db) * 1000, 1)
+
+    # Asaas: chamada real à API deles, reaproveitando o mesmo client já
+    # usado no teste de conexão do admin (apps/payments).
+    inicio_asaas = time.monotonic()
+    try:
+        from apps.payments.services.asaas_service import asaas_service
+        asaas_service._request('GET', 'finance/balance')
+        resultado['payment_gateway_status'] = 'operational'
+    except Exception:
+        resultado['payment_gateway_status'] = 'down'
+    resultado['payment_gateway_latency_ms'] = round((time.monotonic() - inicio_asaas) * 1000, 1)
+
+    resultado['last_check'] = timezone.now().isoformat()
+    return Response(resultado)
+
+# ⚠️ api_ping_view foi movida pra inventory/api_comercial_views.py — junto
+# com os outros endpoints de /api/v1/ (products, lookup, storefront), pra
+# não ter dois arquivos diferentes definindo pedaços da mesma superfície
+# comercial. Ver api_comercial_urls.py.

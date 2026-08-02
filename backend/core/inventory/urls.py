@@ -23,6 +23,7 @@ from inventory.views import (
     movements_report_csv,
     stock_report_csv,
     public_plans_view,
+    active_promotions_view,
     mei_report_csv,
 )
 
@@ -58,6 +59,7 @@ from inventory.views import public_storefront, public_storefront_view, lookup_pr
 from inventory.views import (
     crm_leads_list, crm_lead_detail, crm_lead_upsert,
     crm_lead_anonymize, crm_cart_persist, crm_notifications, crm_cart_update,
+    register_promotion_view, system_config_view, health_check_view,
 )
 
 # Swagger/Documentação
@@ -89,6 +91,16 @@ urlpatterns = [
     path('api/dashboard/inventory/', dashboard_inventory_analysis, name='dashboard_inventory'),
     path('api/cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
     path('api/plans/', public_plans_view, name='public_plans'),
+
+    # ⚠️ A superfície /api/v1/ (produto de dados pra desenvolvedores) mudou
+    # de lugar — agora é toda registrada em inventory/api_comercial_urls.py,
+    # incluída direto em core/urls.py. Antes só o /ping/ estava aqui,
+    # separado dos outros endpoints da mesma API — duas fontes de verdade
+    # pra uma coisa só.
+    path('api/promotions/active/', active_promotions_view, name='active_promotions'),
+    path('api/promotions/<uuid:promotion_id>/view/', register_promotion_view, name='register_promotion_view'),
+    path('api/system-config/', system_config_view, name='system_config'),
+    path('api/health/', health_check_view, name='health_check'),
 
     # 📊 Relatórios da consultora (dashboard com filtro de período)
     path('api/reports/', consultant_reports, name='consultant_reports'),

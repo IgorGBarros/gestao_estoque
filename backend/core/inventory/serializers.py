@@ -149,9 +149,10 @@ class PromotionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Promotion
         fields = [
-            'id', 'title', 'message', 'target_audience',
+            'id', 'title', 'message', 'target_audience', 'promotion_type',
             'discount_percent', 'discount_amount', 'is_active',
-            'starts_at', 'ends_at', 'is_valid', 'created_at'
+            'starts_at', 'ends_at', 'is_valid', 'created_at',
+            'background_color', 'text_color',
         ]
     
     def get_is_valid(self, obj):

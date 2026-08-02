@@ -625,6 +625,12 @@ class Promotion(models.Model):
     
     promotion_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='banner')
     target_audience = models.CharField(max_length=20, choices=TARGET_CHOICES, default='free')
+
+    # 🎯 Alvo por consultora específica — além do segmento amplo acima
+    # (target_audience). Quando preenchido, a promoção só aparece pras
+    # lojas selecionadas aqui, IGNORANDO target_audience (é mais específico
+    # e vence). Vazio = mantém o comportamento de sempre (segmento amplo).
+    target_stores = models.ManyToManyField(Store, blank=True, related_name='targeted_promotions')
     
     discount_percent = models.IntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
@@ -896,6 +902,18 @@ class ApiKey(models.Model):
         blank=True,
         help_text="Loja associada (para consultoras)"
     )
+    # ⚠️ Adicionado junto com a fundação do produto de API (apps/developers):
+    # chave emitida pra um desenvolvedor de verdade, não uma loja disfarçada
+    # de "cliente de API" — antes o admin-panel simulava chaves a partir de
+    # lojas com vitrine ativa, sem nenhuma chave real ter sido emitida.
+    developer = models.ForeignKey(
+        'developers.DeveloperAccount',
+        on_delete=models.CASCADE,
+        related_name='api_keys',
+        null=True,
+        blank=True,
+        help_text="Desenvolvedor dono da chave (produto de API comercial)"
+    )
     
     plan = models.CharField(max_length=20, choices=PLAN_CHOICES, default='starter')
     scopes = models.JSONField(default=list, help_text="Lista de scopes permitidos")
@@ -924,9 +942,15 @@ class ApiKey(models.Model):
         super().save(*args, **kwargs)
     
     def check_quota(self):
-        """Verifica se quota mensal foi excedida"""
-        # Implementar lógica real com ApiUsageLog
-        return True
+        """
+        Verifica se a cota mensal foi excedida — conta requisições reais
+        registradas em ApiUsageLog neste mês. Antes disto, era só um
+        comentário "Implementar lógica real", sempre retornava True.
+        """
+        from django.utils import timezone
+        inicio_mes = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        usadas = self.usage_logs.filter(created_at__gte=inicio_mes).count()
+        return usadas < self.monthly_quota
     
     def __str__(self):
         return f"{self.name} ({self.key[:16]}•••) - {self.plan}"
@@ -970,6 +994,15 @@ class ConsentRecord(models.Model):
         ('behavior_tracking', 'Captura de comportamento para IA'),
         ('ai_features', 'Recursos de IA/Amorinha'),
         ('ai_training', 'Uso de dados de estoque e vendas para treinamento de modelos de IA'),
+        # ⚠️ ENCAIXE PARA LGPD (API comercial, Fase 3 do produto de dados):
+        # cobre a loja entrar em agregados de inteligência de mercado
+        # (vendas por marca/época) vendidos a terceiros via API. Só o TIPO
+        # existe por enquanto — nenhuma query hoje checa esse consentimento,
+        # porque o endpoint que venderia esse dado ainda não existe. Quando
+        # a Fase 3 for construída, cada agregação precisa filtrar por
+        # has_consent_for_purpose(loja.owner, 'data_commercialization')
+        # antes de incluir a loja no cálculo.
+        ('data_commercialization', 'Uso de dados agregados e anonimizados de vendas em produtos comerciais vendidos a terceiros'),
     ]
 
     # Identificação do titular
@@ -1062,11 +1095,29 @@ class ProcessedPaymentEvent(models.Model):
         help_text="ID da cobrança no Asaas (ex.: pay_080225913252)"
     )
     store = models.ForeignKey(
-        Store, on_delete=models.CASCADE, related_name='processed_payments'
+        Store, on_delete=models.CASCADE, related_name='processed_payments',
+        null=True, blank=True,
+        help_text="Preenchido só pra pagamento de assinatura de consultora (PRO)."
+    )
+    # 💰 Fase 4 — mesma tabela de idempotência, agora também usada pelas
+    # assinaturas de API dos desenvolvedores. Exatamente um dos dois
+    # (store OU developer) é preenchido por evento, nunca os dois.
+    developer = models.ForeignKey(
+        'developers.DeveloperAccount', on_delete=models.CASCADE, related_name='processed_payments',
+        null=True, blank=True,
+        help_text="Preenchido só pra pagamento de assinatura de API (desenvolvedor)."
     )
     event = models.CharField(max_length=50, blank=True)
     days_granted = models.IntegerField(default=0)
     processed_at = models.DateTimeField(auto_now_add=True)
+
+    # 💰 O valor realmente pago (payment.value do payload) e a forma de
+    # pagamento — o webhook sempre trouxe isso, mas era descartado depois de
+    # calcular quantos dias liberar. Sem isso, o admin não tinha como saber
+    # a receita REAL da plataforma (assinaturas pagas de verdade), só uma
+    # estimativa baseada em quem está com plan='pro' hoje.
+    value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    billing_type = models.CharField(max_length=20, blank=True)  # PIX, CREDIT_CARD, BOLETO...
 
     class Meta:
         verbose_name = "Cobrança processada"
@@ -1074,7 +1125,8 @@ class ProcessedPaymentEvent(models.Model):
         ordering = ['-processed_at']
 
     def __str__(self):
-        return f"{self.payment_id} → loja {self.store_id} (+{self.days_granted}d)"
+        alvo = f"loja {self.store_id}" if self.store_id else f"dev {self.developer_id}"
+        return f"{self.payment_id} → {alvo} (+{self.days_granted}d)"
 
 # ==========================================
 # 📇 CRM DA VITRINE (leads e carrinhos)
@@ -1170,3 +1222,66 @@ class CartItem(models.Model):
     product_name = models.CharField(max_length=255)
     quantity = models.PositiveIntegerField(default=1)
     price_snapshot = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+# ==========================================
+# ⚙️ CONFIGURAÇÃO GLOBAL DO SISTEMA
+# ==========================================
+# Antes, "Modo de Manutenção" e "Feature Flags Globais" no admin-panel
+# salvavam tudo em localStorage do NAVEGADOR DO PRÓPRIO ADMIN — não mudava
+# nada pra ninguém além de quem estava com aquele navegador aberto naquele
+# momento. O texto até dizia "usuários veem tela de manutenção ao acessar",
+# o que nunca foi verdade: nada no backend sabia que existia manutenção.
+# Isto aqui é a peça que faltava — um estado real, compartilhado, que
+# qualquer consultora loga e vê de verdade.
+
+class SystemConfig(models.Model):
+    """
+    Configuração global — linha única (padrão singleton, sempre pk=1).
+    Use SystemConfig.get_solo() em vez de instanciar direto.
+    """
+    maintenance_mode = models.BooleanField(default=False)
+    maintenance_message = models.TextField(
+        blank=True,
+        default="O sistema está em manutenção programada e pode apresentar instabilidade ou "
+                "indisponibilidade temporária em algumas funcionalidades. Já estamos de olho — "
+                "pode continuar usando normalmente."
+    )
+
+    # Feature flags globais — hoje só desligam a interface (ver comentário
+    # em cada consumidor). Nome do campo bate com a chave usada no frontend.
+    ai_enabled = models.BooleanField(default=True)
+    storefront_enabled = models.BooleanField(default=True)
+    ocr_enabled = models.BooleanField(default=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Configuração do sistema"
+        verbose_name_plural = "Configuração do sistema"
+
+    @classmethod
+    def get_solo(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return "Configuração global do sistema"
+
+
+class PromotionView(models.Model):
+    """
+    Uma consultora viu uma promoção específica. É a base real de
+    "Visualizações" e "Taxa de Conversão" no admin-panel — antes esses dois
+    números eram Math.random() no frontend, recalculados (diferentes!) a
+    cada nova renderização da tela.
+
+    Uma linha por (promoção, loja) — visualizações repetidas da MESMA loja
+    não inflam a contagem; o que importa é quantas lojas DIFERENTES viram.
+    """
+    promotion = models.ForeignKey(Promotion, on_delete=models.CASCADE, related_name='views')
+    store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='promotion_views')
+    viewed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = [('promotion', 'store')]
+        indexes = [models.Index(fields=['promotion', 'store'])]
