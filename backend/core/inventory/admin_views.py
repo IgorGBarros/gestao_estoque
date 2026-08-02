@@ -355,11 +355,18 @@ def get_system_stats(request):
     # não receita do próprio Minha Amora. As duas métricas são legítimas,
     # mas não podem ser confundidas: o negócio (assinatura PRO) só aparece
     # nesta aqui.
+    #
+    # ⚠️ Fase 4: ProcessedPaymentEvent passou a registrar TAMBÉM assinatura
+    # de API de desenvolvedor (mesma tabela de idempotência, ver modelo).
+    # store__isnull=False garante que este widget continue mostrando só a
+    # receita de assinatura das CONSULTORAS — a de API tem o próprio widget
+    # em monitor_api_usage.
     from inventory.models import ProcessedPaymentEvent
-    platform_revenue_total = ProcessedPaymentEvent.objects.aggregate(
+    eventos_consultora = ProcessedPaymentEvent.objects.filter(store__isnull=False)
+    platform_revenue_total = eventos_consultora.aggregate(
         s=Sum('value')
     )['s'] or Decimal('0')
-    platform_revenue_month = ProcessedPaymentEvent.objects.filter(
+    platform_revenue_month = eventos_consultora.filter(
         processed_at__gte=month_start
     ).aggregate(s=Sum('value'))['s'] or Decimal('0')
 
@@ -368,7 +375,7 @@ def get_system_stats(request):
     # tempo, não só um número estático.
     from django.db.models.functions import TruncDate
     receita_por_dia = (
-        ProcessedPaymentEvent.objects.filter(processed_at__gte=now - timedelta(days=30))
+        eventos_consultora.filter(processed_at__gte=now - timedelta(days=30))
         .annotate(dia=TruncDate('processed_at'))
         .values('dia')
         .annotate(total=Sum('value'))
@@ -673,7 +680,7 @@ def monitor_api_usage(request):
     from django.db.models import Avg, Count, Q
     from django.db.models.functions import TruncDate
     from datetime import timedelta
-    from apps.developers.models import DeveloperAccount
+    from apps.developers.models import DeveloperAccount, ApiSubscription
 
     now = timezone.now()
     desde_30d = now - timedelta(days=30)
@@ -721,6 +728,16 @@ def monitor_api_usage(request):
         for k in chaves.order_by('-created_at')[:50]
     ]
 
+    # 💰 Fase 4: receita REAL de assinatura de API — mesma tabela de
+    # idempotência que a receita de assinatura das consultoras usa
+    # (ProcessedPaymentEvent), filtrando pelo lado developer desta vez.
+    from inventory.models import ProcessedPaymentEvent
+    eventos_api = ProcessedPaymentEvent.objects.filter(developer__isnull=False)
+    revenue_api_mrr = eventos_api.filter(
+        processed_at__gte=now - timedelta(days=30)
+    ).aggregate(s=Sum('value'))['s'] or 0
+    assinaturas_ativas = ApiSubscription.objects.filter(expires_at__gt=now).count()
+
     return Response({
         'total_developers': total_developers,
         'active_keys': chaves_ativas,
@@ -732,10 +749,8 @@ def monitor_api_usage(request):
         ],
         'top_endpoints': top_endpoints,
         'keys': keys_data,
-        # ⚠️ A cobrança de assinatura de API (ApiPlanConfig/ApiSubscription)
-        # é a Fase 4 — ainda não existe, então não finjo um número aqui.
-        'revenue_api_mrr': 0,
-        'revenue_note': 'Cobrança de assinatura de API ainda não implementada (Fase 4 do plano).',
+        'revenue_api_mrr': float(revenue_api_mrr),
+        'active_api_subscriptions': assinaturas_ativas,
         'generated_at': now.isoformat(),
         'data_freshness': 'real-time',
     })
@@ -1126,3 +1141,71 @@ def update_system_config(request):
         'ocr_enabled': cfg.ocr_enabled,
         'updated_fields': alterados,
     })
+
+# ─────────────────────────────────────────────────────────────
+# 💰 PLANOS DE API (Fase 4) — mesmo padrão do plan-configs das consultoras
+# ─────────────────────────────────────────────────────────────
+
+def _serialize_api_plan_config(c):
+    return {
+        'plan_type': c.plan_type,
+        'display_name': c.display_name,
+        'monthly_price': float(c.monthly_price),
+        'yearly_price': float(c.yearly_price),
+        'monthly_quota': c.monthly_quota,
+        'rate_limit': c.rate_limit,
+        'is_visible': c.is_visible,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def list_api_plan_configs(request):
+    """GET /api/admin/api-plan-configs/"""
+    from apps.developers.models import ApiPlanConfig
+    configs = ApiPlanConfig.objects.all().order_by('monthly_price')
+    return Response([_serialize_api_plan_config(c) for c in configs])
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAdminUser])
+def update_api_plan_config(request, plan_type):
+    """
+    PATCH /api/admin/api-plan-configs/<plan_type>/
+
+    Mesmo elo que update_plan_config já tem pras consultoras: mudar
+    monthly_price/yearly_price aqui reflete direto no checkout
+    (asaas_service.create_developer_payment_link) e em /api/pricing.
+    """
+    from apps.developers.models import ApiPlanConfig
+    config = ApiPlanConfig.objects.filter(plan_type=plan_type).first()
+    if not config:
+        return Response({'error': f"Plano de API '{plan_type}' não encontrado."}, status=404)
+
+    editable_decimal = {'monthly_price', 'yearly_price'}
+    editable_int = {'monthly_quota', 'rate_limit'}
+    editable_bool = {'is_visible'}
+    editable_str = {'display_name'}
+
+    data = request.data or {}
+    errors = {}
+    for field, value in data.items():
+        try:
+            if field in editable_decimal:
+                setattr(config, field, Decimal(str(value)))
+            elif field in editable_int:
+                setattr(config, field, int(value))
+            elif field in editable_bool:
+                setattr(config, field, bool(value))
+            elif field in editable_str:
+                setattr(config, field, str(value)[:50])
+            # campos fora dessas listas são ignorados silenciosamente —
+            # mesma postura de segurança do update_plan_config.
+        except (ValueError, TypeError):
+            errors[field] = 'Valor inválido'
+
+    if errors:
+        return Response({'error': 'Campos inválidos', 'details': errors}, status=400)
+
+    config.save()
+    return Response(_serialize_api_plan_config(config))

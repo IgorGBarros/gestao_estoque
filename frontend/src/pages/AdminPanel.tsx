@@ -2084,7 +2084,7 @@ export default function AdminPanel() {
                       Top Marcas por Quantidade
                     </h3>
                     <div className="space-y-3">
-                      {productAnalytics.brands.slice(0, 10).map((brand, index) => (
+                      {(productAnalytics.brands ?? []).slice(0, 10).map((brand, index) => (
                         <div key={index} className="flex justify-between items-center">
                           <div>
                             <span className="text-sm font-medium">{brand.name}</span>
@@ -2115,7 +2115,7 @@ export default function AdminPanel() {
                       Distribuição por Categoria
                     </h3>
                     <div className="space-y-3">
-                      {productAnalytics.categories.slice(0, 10).map((cat, index) => (
+                      {(productAnalytics.categories ?? []).slice(0, 10).map((cat, index) => (
                         <div key={index} className="flex justify-between items-center">
                           <span className="text-sm font-medium">{cat.name}</span>
                           <div className="flex items-center gap-2">
@@ -2152,7 +2152,7 @@ export default function AdminPanel() {
                         </tr>
                       </thead>
                       <tbody>
-                        {productAnalytics.popular_products.map((product, index) => (
+                        {(productAnalytics.popular_products ?? []).map((product, index) => (
                           <tr key={index} className="border-b border-border/50 last:border-0">
                             <td className="py-3 px-3">
                               <span className="text-sm font-medium">{product.name}</span>
@@ -2177,7 +2177,7 @@ export default function AdminPanel() {
                 <div className="rounded-xl border border-border bg-card p-6">
                   <h3 className="font-semibold text-lg mb-4">Distribuição de Preços</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {Object.entries(productAnalytics.price_ranges).map(([range, count]) => (
+                    {Object.entries(productAnalytics.price_ranges ?? {}).map(([range, count]) => (
                       <div key={range} className="text-center p-4 bg-secondary/30 rounded-lg">
                         <p className="text-2xl font-bold text-primary">{count}</p>
                         <p className="text-xs text-muted-foreground mt-1">R$ {range}</p>
@@ -2201,7 +2201,7 @@ export default function AdminPanel() {
                 <div className="rounded-xl border border-border bg-card p-6">
                   <h4 className="font-medium mb-4">Padrões de Onboarding por Período</h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {Object.entries(behaviorAnalytics.behavior_patterns.onboarding_patterns).map(([period, data]: [string, any]) => (
+                    {Object.entries(behaviorAnalytics.behavior_patterns?.onboarding_patterns ?? {}).map(([period, data]: [string, any]) => (
                       <div key={period} className="p-4 border border-border rounded-lg">
                         <p className="text-sm font-medium capitalize mb-2">{period.replace('_', ' ')}</p>
                         <div className="space-y-1 text-xs">
@@ -2223,7 +2223,7 @@ export default function AdminPanel() {
                 <div className="rounded-xl border border-border bg-card p-6">
                   <h4 className="font-medium mb-4">Preferências de Marca por Segmento</h4>
                   <div className="space-y-4">
-                    {behaviorAnalytics.behavior_patterns.product_preferences.slice(0, 5).map((pref: any, index: number) => (
+                    {(behaviorAnalytics.behavior_patterns?.product_preferences ?? []).slice(0, 5).map((pref: any, index: number) => (
                       <div key={index} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">

@@ -11,12 +11,24 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from inventory.models import ApiKey, ApiUsageLog
+from firebase_admin import auth as firebase_auth
+from inventory.firebase_utils import init_firebase_safe
 
 from .authentication import DeveloperJWTAuthentication, issue_tokens_for_developer
 from .models import DeveloperAccount
 from .serializers import DeveloperAccountSerializer, DeveloperLoginSerializer, DeveloperRegisterSerializer
 
 logger = logging.getLogger(__name__)
+
+
+def _provision_free_key(dev: DeveloperAccount) -> ApiKey:
+    """Mesma chave gratuita automática do cadastro manual — reaproveitada aqui pro login social."""
+    return ApiKey.objects.create(
+        name=f"Chave padrão — {dev.name}",
+        developer=dev,
+        plan='starter',
+        scopes=['read:catalogo', 'read:analytics'],
+    )
 
 
 @api_view(['POST'])
@@ -46,12 +58,7 @@ def register(request):
         # Escopos batem com os dois produtos planejados (catálogo e
         # analytics agregada) mesmo que os endpoints ainda não existam —
         # a chave já nasce pronta pra quando existirem.
-        chave = ApiKey.objects.create(
-            name=f"Chave padrão — {dev.name}",
-            developer=dev,
-            plan='starter',
-            scopes=['read:catalogo', 'read:analytics'],
-        )
+        chave = _provision_free_key(dev)
 
     tokens = issue_tokens_for_developer(dev)
     logger.info(f"[DEVELOPERS] Nova conta registrada: {dev.email}")
@@ -90,6 +97,66 @@ def login(request):
     tokens = issue_tokens_for_developer(dev)
     return Response({
         'developer': DeveloperAccountSerializer(dev).data,
+        **tokens,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def firebase_login(request):
+    """
+    POST /api/developers/firebase-login/ — login social (Google, GitHub e
+    qualquer outro provedor habilitado no mesmo projeto Firebase que a
+    consultora já usa). O frontend faz o popup do provedor com o Firebase
+    Auth SDK, pega o ID token, e manda só o token pra cá — a verificação
+    de verdade acontece aqui, no servidor.
+
+    Primeiro acesso = cadastro automático (com chave gratuita, igual ao
+    cadastro manual). Acessos seguintes = login na mesma conta, contanto
+    que o e-mail bata.
+    """
+    token = request.data.get('token')
+    if not token:
+        return Response({'error': 'Token do Firebase ausente.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not init_firebase_safe():
+        return Response({'error': 'Login social temporariamente indisponível.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    try:
+        decoded = firebase_auth.verify_id_token(token)
+    except Exception as e:
+        logger.warning(f"[DEVELOPERS] Token Firebase inválido: {type(e).__name__}")
+        return Response({'error': 'Token inválido.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    email = decoded.get('email')
+    if not email:
+        return Response({'error': 'Provedor não retornou e-mail.'}, status=status.HTTP_400_BAD_REQUEST)
+    email = email.strip().lower()
+    firebase_uid = decoded.get('uid', '')
+    nome = decoded.get('name') or email.split('@')[0]
+
+    with transaction.atomic():
+        dev = DeveloperAccount.objects.filter(email=email).first()
+        criado = False
+        if not dev:
+            dev = DeveloperAccount(email=email, name=nome, firebase_uid=firebase_uid)
+            dev.save()
+            _provision_free_key(dev)
+            criado = True
+        elif not dev.firebase_uid:
+            # Conta já existia (cadastro manual antigo) e agora também
+            # logou via social com o mesmo e-mail — vincula as duas.
+            dev.firebase_uid = firebase_uid
+            dev.save(update_fields=['firebase_uid'])
+
+    dev.last_login_at = timezone.now()
+    dev.save(update_fields=['last_login_at'])
+
+    tokens = issue_tokens_for_developer(dev)
+    logger.info(f"[DEVELOPERS] Login social: {dev.email} ({'nova conta' if criado else 'existente'})")
+    return Response({
+        'developer': DeveloperAccountSerializer(dev).data,
+        'created': criado,
         **tokens,
     })
 
@@ -181,3 +248,58 @@ def dashboard(request):
             {'date': r['dia'].isoformat(), 'count': r['total']} for r in por_dia
         ],
     })
+
+@api_view(['POST'])
+@authentication_classes([DeveloperJWTAuthentication])
+@permission_classes([IsAuthenticated])
+def checkout(request):
+    """
+    POST /api/developers/checkout/ — gera o link de pagamento pra assinar
+    um plano de API pago.
+
+    Body: {"plan_type": "pro", "billing_cycle": "monthly"}
+    """
+    from apps.payments.services.asaas_service import asaas_service
+    from apps.payments.services.asaas_service import AsaasAPIError
+
+    dev = request.user
+    plan_type = request.data.get('plan_type')
+    billing_cycle = request.data.get('billing_cycle', 'monthly')
+
+    if plan_type not in ('starter', 'pro', 'enterprise'):
+        return Response({'error': 'plan_type inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+    if billing_cycle not in ('monthly', 'yearly'):
+        return Response({'error': 'billing_cycle inválido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        result = asaas_service.create_developer_payment_link(dev, plan_type, billing_cycle)
+        return Response({
+            'checkout_url': result.get('url'),
+            'payment_link_id': result.get('id'),
+            'plan_type': plan_type,
+            'billing_cycle': billing_cycle,
+        }, status=status.HTTP_201_CREATED)
+    except AsaasAPIError as e:
+        return Response({'error': e.message}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_api_plans(request):
+    """
+    GET /api/developers/plans/ — planos de API visíveis, com preço real.
+    Pública, pra /api/pricing (que hoje mostra preço fixo no texto).
+    """
+    from apps.developers.models import ApiPlanConfig
+    planos = ApiPlanConfig.objects.filter(is_visible=True).order_by('monthly_price')
+    return Response([
+        {
+            'plan_type': p.plan_type,
+            'display_name': p.display_name,
+            'monthly_price': float(p.monthly_price),
+            'yearly_price': float(p.yearly_price),
+            'monthly_quota': p.monthly_quota,
+            'rate_limit': p.rate_limit,
+        }
+        for p in planos
+    ])

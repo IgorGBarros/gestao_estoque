@@ -23,7 +23,6 @@ from inventory.views import (
     movements_report_csv,
     stock_report_csv,
     public_plans_view,
-    api_ping_view,
     active_promotions_view,
     mei_report_csv,
 )
@@ -93,10 +92,11 @@ urlpatterns = [
     path('api/cash-flow/summary/', cash_flow_summary, name='cash_flow_summary'),
     path('api/plans/', public_plans_view, name='public_plans'),
 
-    # 🔑 API comercial (produto de dados pra desenvolvedores) — autenticada
-    # por API Key (pk_live_/pk_test_), não por JWT. Fase 3 adiciona os
-    # endpoints reais (catálogo, analytics) aqui do lado.
-    path('api/v1/ping/', api_ping_view, name='api_v1_ping'),
+    # ⚠️ A superfície /api/v1/ (produto de dados pra desenvolvedores) mudou
+    # de lugar — agora é toda registrada em inventory/api_comercial_urls.py,
+    # incluída direto em core/urls.py. Antes só o /ping/ estava aqui,
+    # separado dos outros endpoints da mesma API — duas fontes de verdade
+    # pra uma coisa só.
     path('api/promotions/active/', active_promotions_view, name='active_promotions'),
     path('api/promotions/<uuid:promotion_id>/view/', register_promotion_view, name='register_promotion_view'),
     path('api/system-config/', system_config_view, name='system_config'),

@@ -1095,7 +1095,17 @@ class ProcessedPaymentEvent(models.Model):
         help_text="ID da cobrança no Asaas (ex.: pay_080225913252)"
     )
     store = models.ForeignKey(
-        Store, on_delete=models.CASCADE, related_name='processed_payments'
+        Store, on_delete=models.CASCADE, related_name='processed_payments',
+        null=True, blank=True,
+        help_text="Preenchido só pra pagamento de assinatura de consultora (PRO)."
+    )
+    # 💰 Fase 4 — mesma tabela de idempotência, agora também usada pelas
+    # assinaturas de API dos desenvolvedores. Exatamente um dos dois
+    # (store OU developer) é preenchido por evento, nunca os dois.
+    developer = models.ForeignKey(
+        'developers.DeveloperAccount', on_delete=models.CASCADE, related_name='processed_payments',
+        null=True, blank=True,
+        help_text="Preenchido só pra pagamento de assinatura de API (desenvolvedor)."
     )
     event = models.CharField(max_length=50, blank=True)
     days_granted = models.IntegerField(default=0)
@@ -1115,7 +1125,8 @@ class ProcessedPaymentEvent(models.Model):
         ordering = ['-processed_at']
 
     def __str__(self):
-        return f"{self.payment_id} → loja {self.store_id} (+{self.days_granted}d)"
+        alvo = f"loja {self.store_id}" if self.store_id else f"dev {self.developer_id}"
+        return f"{self.payment_id} → {alvo} (+{self.days_granted}d)"
 
 # ==========================================
 # 📇 CRM DA VITRINE (leads e carrinhos)

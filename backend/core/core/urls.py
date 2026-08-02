@@ -18,10 +18,11 @@ Agora a regra é simples:
   • rota do assistente                          → ai/urls.py
   • rota de pagamento                           → apps/payments/urls.py
   • rota de desenvolvedor (produto de API)       → apps/developers/urls.py
+  • rota da API comercial (/api/v1/...)         → inventory/api_comercial_urls.py
 
 Se precisar de uma rota nova, ela vai no arquivo do app — nunca aqui.
 
-⚠️ As 5 linhas de inclusão abaixo são críticas: sem elas o sistema responde 404
+⚠️ As 6 linhas de inclusão abaixo são críticas: sem elas o sistema responde 404
 em tudo. Antes de qualquer push:
     grep -c "path('' , include" ... ou simplesmente confira que as 5
     linhas marcadas abaixo continuam presentes.
@@ -34,10 +35,11 @@ urlpatterns = [
     # inventory/admin_urls.py. Expor o /admin/ do Django acrescentaria uma
     # tela de login pública sem necessidade.
 
-    # ⚠️ AS 5 LINHAS CRÍTICAS ⚠️
+    # ⚠️ AS 6 LINHAS CRÍTICAS ⚠️
     path('', include('inventory.urls')),                    # estoque, vendas, perfil, relatórios
     path('api/admin/', include('inventory.admin_urls')),    # painel administrativo
     path('api/chat/', include('ai.urls')),                  # assistente Amorinha
     path('api/payments/', include('apps.payments.urls')),   # Asaas
     path('api/developers/', include('apps.developers.urls')),  # login/cadastro de desenvolvedor (produto de API)
+    path('api/v1/', include('inventory.api_comercial_urls')),  # catálogo/lookup/ping — a API comercial de verdade
 ]
