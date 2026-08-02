@@ -98,7 +98,10 @@ export default function ApiDashboard() {
     const loadData = async () => {
       try {
         const dados = await devApi.dashboard();
-        setKeys(dados.keys.map((k) => ({
+        // ⚠️ Blindagem: se a resposta vier num formato inesperado (erro
+        // tratado como sucesso, campo ausente), não deixa a tela inteira
+        // quebrar com "map is not a function" — mostra vazio e segue.
+        setKeys((Array.isArray(dados.keys) ? dados.keys : []).map((k) => ({
           id: k.id,
           name: k.name,
           key_prefix: k.key_prefix,
@@ -288,7 +291,7 @@ export default function ApiDashboard() {
                             Última usada: {key.last_used ? new Date(key.last_used).toLocaleString('pt-BR') : 'Nunca'}
                           </p>
                           <div className="flex flex-wrap gap-1 mt-2">
-                            {key.scopes.map((scope) => (
+                            {(key.scopes ?? []).map((scope) => (
                               <Badge key={scope} variant="outline" className="text-[10px]">
                                 {scope}
                               </Badge>
