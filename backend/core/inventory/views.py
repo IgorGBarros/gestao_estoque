@@ -520,6 +520,33 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
     # são pequenos (dezenas de itens), então resposta sem paginação é ok.
     pagination_class = None
 
+    def get_queryset(self):
+        """
+        ⚠️ RESTAURADO a partir da v1.0.0 (comparação pedida pelo Igor): esta
+        view usava seu PRÓPRIO get_queryset, com Prefetch ordenando os lotes
+        por validade — comentário original já dizia "✅ CORREÇÃO: Ordenar
+        lotes por validade (FIFO)". Em algum refactor (provavelmente quando
+        TenantModelMixin foi introduzido/simplificado), esse Prefetch se
+        perdeu, e a view passou a usar o get_queryset genérico do mixin, sem
+        nenhuma ordenação. Era a causa raiz da validade errada em "Meu
+        Estoque" — o InventoryItemSerializer.get_batches (correção anterior,
+        já testada) cobre o caso mesmo sem isto, mas o Prefetch aqui evita
+        uma query por item (N+1) e é a fonte de verdade original.
+        """
+        try:
+            store = self.get_store()
+            return InventoryItem.objects.filter(store=store).select_related('product').prefetch_related(
+                Prefetch(
+                    'batches',
+                    queryset=InventoryBatch.objects.filter(quantity__gt=0).order_by(
+                        F('expiration_date').asc(nulls_last=True), 'id'
+                    )
+                )
+            ).order_by('-updated_at')
+        except Exception as e:
+            print(f"❌ Erro no get_queryset Inventory: {e}")
+            return InventoryItem.objects.none()
+
     # ✅ GET /api/inventory/by-barcode/<code>/ — o frontend (lib/api.ts) já
     # chamava esta rota, mas ela nunca existiu no backend (Auditoria P0.1).
     @action(detail=False, methods=['get'], url_path='by-barcode/(?P<barcode>[^/]+)')
@@ -561,8 +588,11 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
         
         # Agrupar lotes por data de validade
         batches_by_date = defaultdict(list)
-        
-        for batch in inventory_item.batches.filter(quantity__gt=0):
+
+        # ⚠️ .order_by() explícito aqui, mesmo com o Meta.ordering do
+        # InventoryBatch já corrigido — não deixa o "lote mantido" na
+        # consolidação abaixo (batches[0]) depender implicitamente de nada.
+        for batch in inventory_item.batches.filter(quantity__gt=0).order_by('id'):
             date_key = batch.expiration_date.isoformat() if batch.expiration_date else 'no_date'
             batches_by_date[date_key].append(batch)
         
@@ -2672,7 +2702,61 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             else:
                 # ✅ ENTRADA NORMAL (sem FIFO) - para ENTRADA ou outros tipos
                 print(f"🔄 ENTRADA DETECTADA ({transaction_type}) - Sem FIFO")
-                
+
+                # ⚠️ CORREÇÃO GRAVE: até aqui, uma ENTRADA só criava o registro
+                # de StockTransaction (o "log" do movimento) — nunca
+                # atualizava InventoryItem.total_quantity nem criava/somava
+                # em nenhum InventoryBatch. "Ajustar Saldo" pra AUMENTAR
+                # quantidade (que manda ENTRADA, ver StockAdjustmentModal.tsx)
+                # respondia 201 (sucesso) mas o estoque exibido em "Meu
+                # Estoque" nunca mudava — confirmado com teste real.
+                #
+                # A correção soma em InventoryBatch (não só em total_quantity
+                # direto) porque apply_fifo_withdrawal SEMPRE recalcula
+                # total_quantity como Sum(batches) — se só o total fosse
+                # atualizado aqui, a próxima venda/saída sobrescreveria o
+                # ajuste silenciosamente, porque os lotes não bateriam com o
+                # total.
+                from django.db import transaction as db_transaction
+                with db_transaction.atomic():
+                    data_validade = data.get('expiration_date') or None
+                    lote_codigo = data.get('batch_code') or ''
+
+                    if data_validade:
+                        # Veio de um fluxo que informa validade (ex.: nova
+                        # entrada de estoque de verdade) — soma num lote
+                        # EXISTENTE com a mesma validade, se houver, em vez
+                        # de criar lotes fragmentados pra mesma data.
+                        lote = inventory_item.batches.filter(expiration_date=data_validade).first()
+                        if lote:
+                            lote.quantity += quantity
+                            lote.save(update_fields=['quantity'])
+                        else:
+                            InventoryBatch.objects.create(
+                                item=inventory_item, quantity=quantity,
+                                expiration_date=data_validade, batch_code=lote_codigo,
+                            )
+                    else:
+                        # Ajuste manual sem validade informada (o modal de
+                        # "Ajustar Saldo" não pede validade) — soma num lote
+                        # "sem validade" já existente, ou cria um novo.
+                        lote = inventory_item.batches.filter(expiration_date__isnull=True).first()
+                        if lote:
+                            lote.quantity += quantity
+                            lote.save(update_fields=['quantity'])
+                        else:
+                            InventoryBatch.objects.create(
+                                item=inventory_item, quantity=quantity,
+                                expiration_date=None, batch_code=lote_codigo or 'Ajuste manual',
+                            )
+
+                    inventory_item.total_quantity = inventory_item.batches.aggregate(
+                        total=Sum('quantity')
+                    )['total'] or 0
+                    inventory_item.save(update_fields=['total_quantity'])
+
+                    print(f"📊 Total atualizado (ENTRADA): {product.name} - {inventory_item.total_quantity}")
+
                 # ✅ Validar serializer
                 serializer = self.get_serializer(data=data)
                 serializer.is_valid(raise_exception=True)
@@ -3458,12 +3542,18 @@ def dashboard_stats(request):
         created_at__month=now.month,
         transaction_type='VENDA'
     )
-    month_sales = month_txs.aggregate(total=Sum(F('unit_price') * F('quantity')))['total'] or 0
-    # ⚠️ CORREÇÃO: StockTransaction não tem campo 'profit' (nunca teve) — o
-    # aggregate anterior (Sum(F('profit'))) sempre lançava FieldError e
-    # derrubava esse endpoint com 500. Lucro = (preço de venda - custo) * quantidade.
+    # ⚠️ CORREÇÃO: StockTransaction.quantity é NEGATIVO pra saída/venda (ver
+    # StockTransactionViewSet.create — "CRIAR TRANSAÇÃO COM QUANTIDADE
+    # NEGATIVA (saída)"). Sum(unit_price * quantity) sem Abs() multiplicava
+    # um valor positivo por uma quantidade negativa e dava "Vendas deste
+    # Mês" e "Lucro Real do Mês" negativos no Index — mesmo problema de
+    # sinal já corrigido antes em ai/services.py (_vendas_periodo/
+    # _lucro_periodo da Amorinha), só que este endpoint nunca tinha
+    # recebido a mesma correção.
+    from django.db.models.functions import Abs
+    month_sales = month_txs.aggregate(total=Sum(F('unit_price') * Abs(F('quantity'))))['total'] or 0
     month_profit = month_txs.aggregate(
-        total=Sum((F('unit_price') - F('unit_cost')) * F('quantity'))
+        total=Sum((F('unit_price') - F('unit_cost')) * Abs(F('quantity')))
     )['total'] or 0
     
     return Response({

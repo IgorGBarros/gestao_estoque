@@ -416,6 +416,25 @@ class InventoryBatch(models.Model):
     class Meta:
         verbose_name = 'Lote'
         verbose_name_plural = 'Lotes'
+        # ⚠️ CORREÇÃO: não existia ordenação nenhuma aqui. O serializer
+        # (batches = InventoryBatchSerializer(many=True)) e vários pontos do
+        # código que iteram inventory_item.batches SEM .order_by() explícito
+        # dependiam da ordem "natural" das linhas no banco — que não é FIFO
+        # garantido, e pode mudar depois de qualquer delete/insert (como a
+        # consolidação de lotes duplicados faz). O frontend, por sua vez,
+        # confia cegamente que o primeiro item da lista É o próximo a
+        # vencer (`isFirstBatch = index === 0`, sem ordenar de novo). Sem
+        # ordenação aqui, a validade marcada como "PRÓXIMO" podia ser
+        # qualquer lote, não necessariamente o de vencimento mais próximo.
+        #
+        # nulls_last=True é explícito de propósito: SQLite (usado nos
+        # testes) ordena NULL primeiro por padrão; PostgreSQL (produção,
+        # via Supabase) ordena NULL por último por padrão em ASC. Sem
+        # forçar isso, o comportamento seria diferente entre ambiente de
+        # teste e produção — um lote "sem validade" (ex.: de um ajuste
+        # manual de saldo) nunca deve aparecer como se fosse o "próximo a
+        # vencer".
+        ordering = [models.F('expiration_date').asc(nulls_last=True), 'id']
         indexes = [
             models.Index(fields=['expiration_date']),
             models.Index(fields=['item', 'quantity']),
