@@ -220,12 +220,28 @@ class InventoryBatchSerializer(serializers.ModelSerializer):
 
 class InventoryItemSerializer(serializers.ModelSerializer):
     product = ProductSerializer(read_only=True)
-    batches = InventoryBatchSerializer(many=True, read_only=True)
+    # ⚠️ CORREÇÃO: era `batches = InventoryBatchSerializer(many=True, read_only=True)`,
+    # que depende do Meta.ordering do InventoryBatch se propagar por
+    # qualquer caminho que a requisição percorra até aqui — e em testes
+    # ponta a ponta (visão real da API), isso nem sempre acontecia de forma
+    # confiável, mesmo com o Meta.ordering correto e confirmado no nível de
+    # SQL. O frontend confia cegamente que o primeiro item da lista é o de
+    # validade mais próxima (`isFirstBatch = index === 0`, sem reordenar) —
+    # então esta ordenação precisa ser garantida aqui, de forma explícita,
+    # não herdada implicitamente.
+    batches = serializers.SerializerMethodField()
     display_price = serializers.SerializerMethodField()
     
     # ✅ NOVO: Campos calculados
     total_cost = serializers.SerializerMethodField()
     potential_profit = serializers.SerializerMethodField()
+
+    def get_batches(self, obj):
+        from django.db.models import F
+        lotes = obj.batches.filter(quantity__gt=0).order_by(
+            F('expiration_date').asc(nulls_last=True), 'id'
+        )
+        return InventoryBatchSerializer(lotes, many=True).data
     
     class Meta:
         model = InventoryItem
