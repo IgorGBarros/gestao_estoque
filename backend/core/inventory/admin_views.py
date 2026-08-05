@@ -777,11 +777,18 @@ def update_plan(request, user_id):
     store.plan = new_plan
     if new_plan == 'pro':
         store.subscription_started_at = timezone.now()
+        # ⚠️ CORREÇÃO: só definia subscription_started_at, nunca
+        # subscription_expires_at — "Virar PRO" no admin-panel concedia
+        # acesso sem nenhuma data de vencimento registrada. 30 dias é o
+        # mesmo ciclo do plano mensal pago (R$ 39,90/mês) — se o admin
+        # quiser uma duração diferente, o endpoint mais completo
+        # (update_subscription, abaixo) já aceita `expires_at` explícito.
+        store.subscription_expires_at = timezone.now() + timedelta(days=30)
     else:
         store.subscription_expires_at = None
     store.save()
     
-    return Response({'success': True, 'plan': new_plan})
+    return Response({'success': True, 'plan': new_plan, 'expires_at': store.subscription_expires_at})
 
 
 @api_view(['PATCH'])
