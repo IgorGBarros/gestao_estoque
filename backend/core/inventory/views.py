@@ -2637,6 +2637,20 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             
             quantity = abs(int(data.get('quantity', 0)))
             transaction_type = data.get('transaction_type', '').upper()
+
+            # ⚠️ REGRA DE NEGÓCIO (Igor): ajuste de saldo exige justificativa
+            # — sem isso, vira uma porta aberta pra qualquer mudança de saldo
+            # sem motivo registrado. O frontend (StockAdjustmentModal) já
+            # valida isso, mas validação só no frontend não impede chamar a
+            # API direto — a garantia de verdade precisa estar aqui.
+            if transaction_type == 'AJUSTE':
+                justificativa = (data.get('description') or data.get('notes') or '').strip()
+                if not justificativa:
+                    return Response(
+                        {'error': 'Ajuste de saldo exige uma justificativa.'},
+                        status=400
+                    )
+
             # ⚠️ CORREÇÃO: era `float(...)`. O campo do modelo é DecimalField, e
             # o objeto é serializado logo abaixo SEM recarregar do banco — o
             # atributo em memória ficava como float puro. O serializer soma
