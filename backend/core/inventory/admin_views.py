@@ -1216,3 +1216,132 @@ def update_api_plan_config(request, plan_type):
 
     config.save()
     return Response(_serialize_api_plan_config(config))
+
+# ─────────────────────────────────────────────────────────────
+# 💬 SUPORTE — conversas escaladas e vídeos tutoriais
+# ─────────────────────────────────────────────────────────────
+
+def _serialize_support_conversation(conv, com_mensagens=False):
+    dados = {
+        'id': str(conv.id),
+        'store_id': conv.store_id,
+        'store_name': conv.store.name,
+        'store_owner_email': conv.store.owner.email if conv.store.owner_id else None,
+        'category': conv.category,
+        'status': conv.status,
+        'subject': conv.subject,
+        'created_at': conv.created_at.isoformat(),
+        'updated_at': conv.updated_at.isoformat(),
+    }
+    if com_mensagens:
+        dados['messages'] = [
+            {'id': m.id, 'sender': m.sender, 'content': m.content, 'created_at': m.created_at.isoformat()}
+            for m in conv.messages.all()
+        ]
+    return dados
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_support_conversations(request):
+    """
+    GET /api/admin/support/conversations/?status=escalated
+
+    Sem filtro, devolve tudo — o frontend do admin decide o que mostrar
+    por padrão (normalmente "escalated" primeiro).
+    """
+    from ai.models import SupportConversation
+    conversas = SupportConversation.objects.select_related('store', 'store__owner').all()
+    filtro_status = request.GET.get('status')
+    if filtro_status:
+        conversas = conversas.filter(status=filtro_status)
+    return Response([_serialize_support_conversation(c) for c in conversas])
+
+
+@api_view(['GET', 'POST', 'PATCH'])
+@permission_classes([IsAdminUser])
+def admin_support_conversation_detail(request, conversation_id):
+    from ai.models import SupportConversation, SupportMessage
+    conv = SupportConversation.objects.select_related('store', 'store__owner').filter(id=conversation_id).first()
+    if not conv:
+        return Response({'error': 'Conversa não encontrada.'}, status=404)
+
+    if request.method == 'GET':
+        return Response(_serialize_support_conversation(conv, com_mensagens=True))
+
+    if request.method == 'POST':
+        # Responder — a equipe assumiu a conversa.
+        mensagem = (request.data.get('message') or '').strip()
+        if not mensagem:
+            return Response({'error': 'Mensagem não pode ser vazia.'}, status=400)
+        SupportMessage.objects.create(conversation=conv, sender='admin', content=mensagem)
+        # Continua "escalated" até alguém marcar como resolvida — responder
+        # não fecha a conversa sozinho, a consultora pode responder de volta.
+        conv.save(update_fields=['updated_at'])
+        conv.refresh_from_db()
+        return Response(_serialize_support_conversation(conv, com_mensagens=True))
+
+    # PATCH — mudar status (resolver/encerrar)
+    novo_status = request.data.get('status')
+    if novo_status not in dict(SupportConversation.STATUS_CHOICES):
+        return Response({'error': 'status inválido.'}, status=400)
+    conv.status = novo_status
+    conv.save(update_fields=['status', 'updated_at'])
+    return Response(_serialize_support_conversation(conv))
+
+
+# ─────────────────────────────────────────────────────────────
+# 🎬 VÍDEOS TUTORIAIS
+# ─────────────────────────────────────────────────────────────
+
+def _serialize_video(v):
+    return {
+        'id': v.id, 'title': v.title, 'description': v.description,
+        'video_url': v.video_url, 'category': v.category,
+        'sort_order': v.sort_order, 'is_visible': v.is_visible,
+        'created_at': v.created_at.isoformat(),
+    }
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAdminUser])
+def admin_tutorial_videos(request):
+    from ai.models import TutorialVideo
+    if request.method == 'GET':
+        videos = TutorialVideo.objects.all()
+        return Response([_serialize_video(v) for v in videos])
+
+    title = (request.data.get('title') or '').strip()
+    video_url = (request.data.get('video_url') or '').strip()
+    if not title or not video_url:
+        return Response({'error': 'title e video_url são obrigatórios.'}, status=400)
+
+    video = TutorialVideo.objects.create(
+        title=title[:150],
+        description=(request.data.get('description') or '')[:2000],
+        video_url=video_url,
+        category=(request.data.get('category') or '')[:50],
+        sort_order=int(request.data.get('sort_order') or 0),
+        is_visible=bool(request.data.get('is_visible', True)),
+    )
+    return Response(_serialize_video(video), status=201)
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAdminUser])
+def admin_tutorial_video_detail(request, video_id):
+    from ai.models import TutorialVideo
+    video = TutorialVideo.objects.filter(id=video_id).first()
+    if not video:
+        return Response({'error': 'Vídeo não encontrado.'}, status=404)
+
+    if request.method == 'DELETE':
+        video.delete()
+        return Response(status=204)
+
+    campos = ['title', 'description', 'video_url', 'category', 'sort_order', 'is_visible']
+    for campo in campos:
+        if campo in request.data:
+            setattr(video, campo, request.data[campo])
+    video.save()
+    return Response(_serialize_video(video))

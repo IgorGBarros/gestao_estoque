@@ -45,6 +45,7 @@ import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import MovementHistory from "./pages/MovementHistory";
 import CRM from "./pages/CRM";
+import Support from "./pages/Support";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
@@ -256,6 +257,14 @@ const App = () => {
                         <ProtectedRoute>
                           <ProtectedLayout>
                             <CRM />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+
+                      <Route path="/support" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <Support />
                           </ProtectedLayout>
                         </ProtectedRoute>
                       } />

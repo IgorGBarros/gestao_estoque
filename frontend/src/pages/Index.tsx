@@ -5,6 +5,7 @@ import {
   Package, TrendingDown, DollarSign, BarChart3, ScanBarcode, List,
   ArrowDownCircle, Settings, PieChart, Store, History, User, Bell, CheckCircle2,
   Users,
+  HelpCircle,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { statsApi } from "../lib/api";
@@ -174,6 +175,7 @@ export default function Index() {
           <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" />
           <ActionBtn onClick={() => navigate("/history")} icon={History} label="Extrato" desc="Movimentações" />
           <ActionBtn onClick={() => navigate("/crm")} icon={Users} label="Meus Clientes" desc="Quem comprou na vitrine" />
+          <ActionBtn onClick={() => navigate("/support")} icon={HelpCircle} label="Ajuda" desc="Suporte e vídeos" />
           <ActionBtn
             onClick={() => {
               // Bloqueado: oferece o upgrade em vez de levar a uma tela que
