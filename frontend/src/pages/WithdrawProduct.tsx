@@ -8,6 +8,7 @@ import {
   Megaphone, AlertTriangle as AlertIcon, Layers, Lock,
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
+import { parseDateLocal, formatDateLocal, compareDateLocal } from "../lib/dateUtils";
 import BatchSelectModal from "../components/BatchSelectModal";
 import InventorySearchModal from "../components/InventorySearchModal";
 import UpgradeModal from "../components/UpgradeModal";
@@ -112,11 +113,7 @@ export default function WithdrawProduct() {
         batches = [];
       }
 
-      const sortedBatches = batches.sort((a, b) => {
-        if (!a.expiration_date) return 1;
-        if (!b.expiration_date) return -1;
-        return new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime();
-      });
+      const sortedBatches = batches.sort((a, b) => compareDateLocal(a.expiration_date, b.expiration_date));
 
       const batchCost = sortedBatches.length > 0 ? sortedBatches[0].cost_price : item.cost_price;
       const productId = String(item.product?.id || item.id || "");
@@ -189,7 +186,7 @@ export default function WithdrawProduct() {
 
   const isExpired =
     data.selected_batch?.expiration_date &&
-    new Date(data.selected_batch.expiration_date) < new Date();
+    parseDateLocal(data.selected_batch.expiration_date)! < new Date();
 
   const handleSave = async () => {
     if (!user) return;
@@ -386,7 +383,7 @@ export default function WithdrawProduct() {
                         <Layers className="h-3 w-3" />
                         Lote: val.{" "}
                         {data.selected_batch.expiration_date
-                          ? new Date(data.selected_batch.expiration_date).toLocaleDateString("pt-BR")
+                          ? formatDateLocal(data.selected_batch.expiration_date)
                           : "N/A"}{" "}
                         ({data.selected_batch.quantity} un.)
                       </span>
@@ -405,7 +402,7 @@ export default function WithdrawProduct() {
                       <AlertIcon className="h-4 w-4 shrink-0 mt-0.5" />
                       <p className="text-xs">
                         <span className="font-bold">💡 Sugestão FIFO:</span> Existe um lote mais antigo vencendo em{" "}
-                        <b>{new Date(oldestBatch!.expiration_date!).toLocaleDateString("pt-BR")}</b>. É recomendado dar saída nele primeiro.
+                        <b>{formatDateLocal(oldestBatch!.expiration_date!)}</b>. É recomendado dar saída nele primeiro.
                       </p>
                     </div>
                   )}
