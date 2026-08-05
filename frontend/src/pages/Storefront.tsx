@@ -1,7 +1,7 @@
 // pages/Storefront.tsx — VERSÃO COM CRM INVISIBLE + LGPD
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useParams } from "react-router-dom";
-import { Package, Search, ShoppingBag, Plus, Minus, Trash2, Send, Sparkles, CreditCard, QrCode, AlertTriangle } from "lucide-react";
+import { Package, Search, ShoppingBag, Plus, Minus, Trash2, Send, Sparkles, CreditCard, QrCode, AlertTriangle, UserX } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { storefrontApi, StorefrontItem, formatMoney } from "../lib/api";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../components/ui/sheet";
@@ -24,6 +24,35 @@ interface BagItem extends StorefrontItem {
 const getCartStorageKey = (storeSlug: string) => `storefront_cart_${storeSlug}`;
 const getPaymentStorageKey = (storeSlug: string) => `storefront_payment_${storeSlug}`;
 const getLeadCapturedKey = (tenantId: string) => `storefront_lead_captured_${tenantId}`; // 🔹 CRM: Marca lead já capturado na sessão
+
+// ⚠️ CORREÇÃO: antes só guardava o lead.id cru. Quando a MESMA consultora
+// mostra a vitrine no próprio aparelho pra clientes diferentes (uso comum
+// e legítimo — não é "um cliente comprando de novo"), o checkout pulava
+// direto pro pedido sem perguntar nada, e o pedido do segundo cliente
+// virava histórico do primeiro. Agora guarda {id, name} junto — dá pra
+// mostrar "Comprando como Fulana" e oferecer "Não é você? Trocar" antes de
+// assumir que é a mesma pessoa.
+interface LeadCapturado { id: string; name: string; }
+
+function lerLeadCapturado(tenantId: string): LeadCapturado | null {
+  try {
+    const raw = localStorage.getItem(getLeadCapturedKey(tenantId));
+    if (!raw) return null;
+    // Compatibilidade com o formato antigo (só o id, como string crua)
+    if (!raw.startsWith("{")) return { id: raw, name: "" };
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function salvarLeadCapturado(tenantId: string, lead: LeadCapturado) {
+  localStorage.setItem(getLeadCapturedKey(tenantId), JSON.stringify(lead));
+}
+
+function limparLeadCapturado(tenantId: string) {
+  localStorage.removeItem(getLeadCapturedKey(tenantId));
+}
 
 function loadCart(storeSlug: string): BagItem[] {
   try {
@@ -83,6 +112,7 @@ export default function Storefront() {
   const [tenantId, setTenantId] = useState<string>("");
   const [sessionId, setSessionId] = useState<string>("");
   const [leadCaptured, setLeadCaptured] = useState<boolean>(false);
+  const [leadName, setLeadName] = useState<string>("");
 
   // 🔹 CRM: Inicializa carrinho e pagamento por tenant
   useEffect(() => {
@@ -104,7 +134,7 @@ export default function Storefront() {
   useEffect(() => {
     if (!tenantId || bag.length === 0) return;
     const timer = setTimeout(() => {
-      const leadIdSalvo = localStorage.getItem(getLeadCapturedKey(tenantId));
+      const leadSalvo = lerLeadCapturado(tenantId);
       const cartItems: CartItemInput[] = bag.map((b) => ({
         inventory_id: b.id,
         product_name: getDisplayName(b),
@@ -114,7 +144,7 @@ export default function Storefront() {
       persistCart({
         tenant_id: tenantId,
         session_id: sessionId,
-        lead_id: leadIdSalvo || undefined,
+        lead_id: leadSalvo?.id || undefined,
         checked_out: false,
         items: cartItems,
       }).catch(() => { /* silencioso: não é ação da cliente, não pode gerar erro visível */ });
@@ -133,8 +163,9 @@ export default function Storefront() {
   // 🔹 CRM: Carrega estado de lead capturado quando tenantId estiver disponível
   useEffect(() => {
     if (tenantId) {
-      const captured = localStorage.getItem(getLeadCapturedKey(tenantId));
-      setLeadCaptured(!!captured);
+      const salvo = lerLeadCapturado(tenantId);
+      setLeadCaptured(!!salvo);
+      setLeadName(salvo?.name || "");
     }
   }, [tenantId]);
 
@@ -287,9 +318,9 @@ export default function Storefront() {
     // "aberto" (por causa da sincronização automática da sacola) até virar
     // um falso positivo de carrinho abandonado 2h depois.
     if (leadCaptured || !tenantId) {
-      const leadIdSalvo = tenantId ? localStorage.getItem(getLeadCapturedKey(tenantId)) : null;
-      if (leadIdSalvo) {
-        registrarPedidoFechado(leadIdSalvo); // não precisa esperar — abre o WhatsApp já
+      const leadSalvo = tenantId ? lerLeadCapturado(tenantId) : null;
+      if (leadSalvo?.id) {
+        registrarPedidoFechado(leadSalvo.id); // não precisa esperar — abre o WhatsApp já
       }
       const link = buildWhatsappLink(bag);
       window.open(link, "_blank", "noopener,noreferrer");
@@ -330,8 +361,9 @@ export default function Storefront() {
       const lead = await upsertLead(leadInput);
 
       // 2. Marca lead como capturado nesta sessão (localStorage por tenant)
-      localStorage.setItem(getLeadCapturedKey(tenantId), lead.id);
+      salvarLeadCapturado(tenantId, { id: lead.id, name: data.name.trim() });
       setLeadCaptured(true);
+      setLeadName(data.name.trim());
 
       // 3. Persiste carrinho vinculado ao lead (para analytics/CRM da consultora)
       const cartItems: CartItemInput[] = bag.map((b) => ({
@@ -405,6 +437,29 @@ export default function Storefront() {
             {search && <button onClick={() => setSearch("")} className="rounded-lg bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted/80 transition-colors">Limpar</button>}
           </div>
         </motion.div>
+
+        {/* 🔹 CRM: indicador de quem está "logada" neste aparelho — evita que o
+            pedido de uma pessoa diferente seja silenciosamente atribuído a
+            quem usou a vitrine por último no mesmo celular/tablet. */}
+        {leadCaptured && leadName && (
+          <div className="-mt-2 mb-4 flex items-center justify-between gap-2 rounded-xl border border-brand/15 bg-brand/5 px-3.5 py-2 text-xs">
+            <span className="text-muted-foreground">
+              Comprando como <strong className="text-foreground">{leadName}</strong>
+            </span>
+            <button
+              onClick={() => {
+                if (!tenantId) return;
+                limparLeadCapturado(tenantId);
+                setLeadCaptured(false);
+                setLeadName("");
+                toast({ title: "Tudo pronto pra outra pessoa comprar" });
+              }}
+              className="flex items-center gap-1 font-semibold text-brand hover:underline shrink-0"
+            >
+              <UserX className="h-3.5 w-3.5" /> Não é você? Trocar
+            </button>
+          </div>
+        )}
 
         {/* Abas de marca — mesma lógica de filtro de antes (client-side,
             state selectedBrand/availableBrands), agora com o mesmo padrão
