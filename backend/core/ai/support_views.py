@@ -27,6 +27,23 @@ def _serialize_conversation(conv, com_mensagens=False):
             {'id': m.id, 'sender': m.sender, 'content': m.content, 'created_at': m.created_at.isoformat()}
             for m in conv.messages.all()
         ]
+    else:
+        # ⚠️ Sem isto, a lista (usada pela tela "Minhas Conversas" e pela
+        # notificação no sino) não tinha como saber se a ÚLTIMA mensagem é
+        # da equipe (resposta esperando ser vista) ou da própria
+        # consultora (nada novo pra ela ver) — teria que abrir cada
+        # conversa uma por uma só pra descobrir isso.
+        # ⚠️ list(conv.messages.all()) usa o cache do prefetch_related (a
+        # ordenação padrão do model já é ascendente por created_at) — um
+        # .order_by('-created_at') aqui pareceria mais direto, mas IGNORA
+        # o cache do prefetch por ter ordenação diferente da que foi
+        # carregada, disparando uma query nova por conversa (o N+1 que o
+        # prefetch_related existia pra evitar).
+        mensagens = list(conv.messages.all())
+        ultima = mensagens[-1] if mensagens else None
+        if ultima:
+            dados['last_message_sender'] = ultima.sender
+            dados['last_message_preview'] = ultima.content[:120]
     return dados
 
 
@@ -38,7 +55,11 @@ def conversations_list_create(request):
         return Response({'error': 'Nenhuma loja associada a este usuário.'}, status=status.HTTP_400_BAD_REQUEST)
 
     if request.method == 'GET':
-        conversas = SupportConversation.objects.filter(store=store)
+        # prefetch_related evita 1 query por conversa só pra descobrir a
+        # última mensagem (N+1) — busca todas de uma vez, e o Python
+        # (dentro de _serialize_conversation) escolhe a mais recente sem
+        # bater no banco de novo.
+        conversas = SupportConversation.objects.filter(store=store).prefetch_related('messages')
         return Response([_serialize_conversation(c) for c in conversas])
 
     # POST — abre uma conversa nova

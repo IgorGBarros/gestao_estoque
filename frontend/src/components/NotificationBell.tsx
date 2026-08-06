@@ -1,6 +1,6 @@
 // components/NotificationBell.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
 import { useState, useRef, useEffect } from "react";
-import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package, Crown, Users, Cake, ShoppingBag, Percent, Sparkles } from "lucide-react";
+import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package, Crown, Users, Cake, ShoppingBag, Percent, Sparkles, MessageCircle, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useExpiryAlerts, ExpiryAlert } from "../hooks/useExpiryAlerts";
 import { useSalesNotifications, SalesMilestone, WeeklyInsight } from "../hooks/useSalesNotifications";
@@ -8,6 +8,7 @@ import { useSubscriptionAlert } from "../hooks/useSubscriptionAlert";
 import { useCrmNotifications } from "../hooks/useCrmNotifications";
 import { formatMoney } from "../lib/api";
 import { api } from "../services/api";
+import { temRespostaNaoVista, marcarComoVista } from "../lib/supportSeen";
 import { AnimatePresence, motion } from "framer-motion";
 
 interface Promocao {
@@ -21,6 +22,14 @@ interface Novidade {
   id: number;
   titulo: string;
   corpo: string;
+}
+interface Ticket {
+  id: string;
+  subject: string;
+  status: string;
+  updated_at: string;
+  last_message_sender?: string;
+  last_message_preview?: string;
 }
 
 // Guarda o que já foi visto — mesmo padrão simples que o PromotionBanner
@@ -59,19 +68,22 @@ export default function NotificationBell() {
   const { crmItens } = useCrmNotifications();
 
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"all" | "expiry" | "sales" | "promocoes" | "novidades">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "expiry" | "sales" | "promocoes" | "novidades" | "suporte">("all");
   const ref = useRef<HTMLDivElement>(null);
 
   const [promocoes, setPromocoes] = useState<Promocao[]>([]);
   const [novidades, setNovidades] = useState<Novidade[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
 
   useEffect(() => {
     api.get("promotions/active/").then((r) => setPromocoes(r.data || [])).catch(() => {});
     api.get("ajuda/?tipo=novidade").then((r) => setNovidades(r.data || [])).catch(() => {});
+    api.get("chat/support/conversations/").then((r) => setTickets(r.data || [])).catch(() => {});
   }, []);
 
   const promocoesNaoVistas = promocoes.filter((p) => !jaFoiVisto(`promo-${p.id}`));
   const novidadesNaoVistas = novidades.filter((n) => !jaFoiVisto(`novidade-${n.id}`));
+  const ticketsComRespostaNova = tickets.filter((t) => temRespostaNaoVista(t.id, t.updated_at, t.last_message_sender));
 
   const salesMilestonesEnabled = localStorage.getItem("notif_sales_milestones") !== "false";
   const weeklyInsightsEnabled = localStorage.getItem("notif_weekly_insights") !== "false";
@@ -84,7 +96,7 @@ export default function NotificationBell() {
   const filteredCritical = expiryEnabled ? criticalCount : 0;
   const filteredSalesCount = filteredMilestones.length + (filteredWeekly ? 1 : 0);
   const subCount = subscriptionAlert ? 1 : 0;
-  const totalCount = filteredExpiryCount + filteredSalesCount + subCount + crmItens.length + promocoesNaoVistas.length + novidadesNaoVistas.length;
+  const totalCount = filteredExpiryCount + filteredSalesCount + subCount + crmItens.length + promocoesNaoVistas.length + novidadesNaoVistas.length + ticketsComRespostaNova.length;
 
   // Ao abrir o painel, tudo que está em "Promoções"/"Novidades" nesse
   // momento vira "visto" — mesmo padrão de qualquer central de
@@ -176,6 +188,7 @@ export default function NotificationBell() {
                 { key: "expiry" as const, label: "Validade", count: filteredExpiryCount },
                 { key: "promocoes" as const, label: "Promoções", count: promocoesNaoVistas.length },
                 { key: "novidades" as const, label: "Novidades", count: novidadesNaoVistas.length },
+                { key: "suporte" as const, label: "Suporte", count: ticketsComRespostaNova.length },
               ]).map((tab) => (
                 <button
                   key={tab.key}
@@ -279,6 +292,20 @@ export default function NotificationBell() {
                   />
                 ))}
 
+              {/* Suporte — conversas com resposta da equipe */}
+              {activeTab === "suporte" &&
+                tickets.map((t) => (
+                  <TicketItem
+                    key={t.id}
+                    ticket={t}
+                    onNavigate={() => {
+                      setOpen(false);
+                      marcarComoVista(t.id, t.updated_at);
+                      navigate("/support");
+                    }}
+                  />
+                ))}
+
               {/* Empty states */}
               {activeTab === "sales" && filteredSalesCount === 0 && (
                 <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
@@ -298,6 +325,11 @@ export default function NotificationBell() {
               {activeTab === "novidades" && novidades.length === 0 && (
                 <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
                   Nenhuma novidade por aqui ainda
+                </div>
+              )}
+              {activeTab === "suporte" && tickets.length === 0 && (
+                <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
+                  Nenhuma conversa de suporte ainda
                 </div>
               )}
             </div>
@@ -555,6 +587,32 @@ function NovidadeItem({ novidade, onNavigate }: { novidade: Novidade; onNavigate
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-foreground">{novidade.titulo}</p>
         <p className="mt-0.5 line-clamp-2 text-[11px] text-brand-rose/70">{novidade.corpo}</p>
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-brand-rose/40" />
+    </button>
+  );
+}
+// ── Ticket de Suporte Item ──
+function TicketItem({ ticket, onNavigate }: { ticket: Ticket; onNavigate: () => void }) {
+  const naoVista = temRespostaNaoVista(ticket.id, ticket.updated_at, ticket.last_message_sender);
+
+  return (
+    <button
+      onClick={onNavigate}
+      className={`flex w-full items-start gap-3 border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50 ${naoVista ? "bg-brand/5" : ""}`}
+    >
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10">
+        <ShieldCheck className="h-5 w-5 text-brand" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <p className="truncate text-sm font-semibold text-foreground">{ticket.subject || "Conversa de suporte"}</p>
+          {naoVista && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />}
+        </div>
+        <p className="mt-0.5 line-clamp-2 text-[11px] text-brand-rose/70">
+          {ticket.last_message_sender === "admin" && <span className="font-medium">Equipe: </span>}
+          {ticket.last_message_preview || "—"}
+        </p>
       </div>
       <ChevronRight className="h-4 w-4 shrink-0 text-brand-rose/40" />
     </button>

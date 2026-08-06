@@ -1,13 +1,19 @@
 // components/ChatAssistant.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
 //
-// ⚠️ Chat único, sem menu de escolha — a consultora só digita o que
-// quiser, e o BACKEND decide se é consulta de dados (estoque/vendas) ou
-// dúvida de ajuda (busca na Central de Ajuda; sem achar, escala pra
-// humano). Um único endpoint: POST /api/chat/unified/.
+// ⚠️ Conceito básico de helpdesk: o chat mostra DUAS coisas separadas —
+//   1. O histórico de CONSULTA (pergunta sobre estoque/vendas), que
+//      continua acumulando normalmente, é conversa fluida com a Amorinha.
+//   2. Um TICKET DE SUPORTE ativo (se houver) — só o que está em aberto
+//      AGORA, esperando resposta. Não acumula tickets antigos aqui dentro
+//      — o histórico completo e permanente mora em Central de Ajuda >
+//      Minhas Conversas (pages/Support.tsx). Quando o ticket é resolvido,
+//      some daqui (com um aviso rápido) e vira só histórico lá.
 import React, { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Send, User, PlayCircle, HelpCircle, BookOpen, Newspaper } from "lucide-react";
+import { X, Send, User, PlayCircle, HelpCircle, BookOpen, Newspaper, ShieldCheck, ExternalLink } from "lucide-react";
 import { api } from "../services/api";
+import { temRespostaNaoVista, marcarComoVista } from "../lib/supportSeen";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
 
 interface ResultadoAjuda {
@@ -17,13 +23,25 @@ interface ResultadoAjuda {
   resumo: string;
   video_url: string | null;
 }
-
 interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
   resultados?: ResultadoAjuda[];
+}
+interface TicketMensagem {
+  id: number;
+  sender: "user" | "ai" | "admin";
+  content: string;
+  created_at: string;
+}
+interface Ticket {
+  id: string;
+  status: "ai_handling" | "escalated" | "resolved" | "closed";
+  subject: string;
+  updated_at: string;
+  messages: TicketMensagem[];
 }
 
 const SUGGESTIONS = [
@@ -32,9 +50,7 @@ const SUGGESTIONS = [
   "Como funciona a vitrine?",
   "Quais os mais vendidos?",
 ];
-
 const TIPO_ICON: Record<string, any> = { video: PlayCircle, faq: HelpCircle, guia: BookOpen, novidade: Newspaper };
-
 const MENSAGEM_BOAS_VINDAS: ChatMessage = {
   id: "welcome",
   role: "assistant",
@@ -42,7 +58,13 @@ const MENSAGEM_BOAS_VINDAS: ChatMessage = {
   timestamp: new Date(),
 };
 
+// ⚠️ ID do ticket ativo — persistido só aqui (é o "qual ticket estou
+// acompanhando agora"); o rastreamento de "já vi a resposta" fica no
+// utilitário compartilhado (lib/supportSeen.ts), usado igual pelo sino.
+const TICKET_ID_KEY = "supportConversationId";
+
 export const ChatAssistant: React.FC = () => {
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
@@ -53,18 +75,17 @@ export const ChatAssistant: React.FC = () => {
   });
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  // ⚠️ CORREÇÃO: antes só vivia em memória (useState puro) — se a página
-  // recarregasse, a conversa "esquecia" que já tinha sido escalada, e a
-  // próxima mensagem passava pelo roteamento inteiro de novo (podendo
-  // escalar uma SEGUNDA conversa duplicada). Agora persiste igual o
-  // histórico de mensagens já persistia.
-  const [conversationId, setConversationId] = useState<string | null>(() => localStorage.getItem("supportConversationId"));
-  // Quantas mensagens dessa conversa a consultora já viu — usado só pra
-  // saber se tem resposta nova do atendente que ela ainda não abriu.
+
+  // Ticket de suporte ativo — carregado do backend quando existe, nunca
+  // do localStorage diretamente (localStorage só guarda o ID; o conteúdo
+  // vem sempre fresco, pra nunca mostrar coisa desatualizada).
+  const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [ticketId, setTicketId] = useState<string | null>(() => localStorage.getItem(TICKET_ID_KEY));
   const [hasUnread, setHasUnread] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const isOpenRef = useRef(isOpen);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -76,82 +97,60 @@ export const ChatAssistant: React.FC = () => {
   }, [isOpen]);
 
   useEffect(() => {
-    if (conversationId) localStorage.setItem("supportConversationId", conversationId);
-    else localStorage.removeItem("supportConversationId");
-  }, [conversationId]);
-
-  // Ao abrir o chat, o que estava esperando resposta já foi visto.
-  useEffect(() => {
-    if (isOpen) setHasUnread(false);
-  }, [isOpen]);
-
-  // Ref auxiliar pra saber, DENTRO do polling abaixo, se o chat está
-  // aberto no momento exato em que a resposta chega — sem isso, a closure
-  // do useEffect de polling capturaria o valor de `isOpen` de quando o
-  // efeito rodou (o polling só reinicia quando conversationId muda, não a
-  // cada render), sempre desatualizado.
-  const isOpenRef = useRef(isOpen);
-  useEffect(() => {
     isOpenRef.current = isOpen;
+    if (isOpen) {
+      setHasUnread(false);
+      if (ticket) marcarComoVista(ticket.id, ticket.updated_at);
+    }
   }, [isOpen]);
 
-  // ── Notificação de resposta do atendente ──
-  // Verifica periodicamente (só quando existe uma conversa escalada ativa)
-  // se chegou mensagem nova da equipe desde a última vez que a consultora
-  // olhou. Roda mesmo com o chat fechado — é exatamente aí que a
-  // notificação faz diferença (senão ela só saberia abrindo por acaso).
   useEffect(() => {
-    if (!conversationId) return;
+    if (ticketId) localStorage.setItem(TICKET_ID_KEY, ticketId);
+    else localStorage.removeItem(TICKET_ID_KEY);
+  }, [ticketId]);
 
-    const verificarNovaResposta = async () => {
+  // ── Acompanha o ticket ativo (se houver) — verifica resposta nova
+  // periodicamente, mesmo com o chat fechado, e atualiza o painel do
+  // ticket direto (não mistura com o histórico de consulta). ──
+  useEffect(() => {
+    if (!ticketId) {
+      setTicket(null);
+      return;
+    }
+
+    const verificar = async () => {
       try {
-        const res = await api.get(`chat/support/conversations/${conversationId}/`);
-        const conv = res.data;
+        const res = await api.get(`chat/support/conversations/${ticketId}/`);
+        const dados: Ticket = res.data;
+        setTicket(dados);
 
-        // ⚠️ CORREÇÃO: antes só olhava a ÚLTIMA mensagem
-        // (conv.messages[length-1]). Se o atendente mandasse duas
-        // respostas seguidas antes da próxima verificação, a primeira
-        // era perdida silenciosamente — só a mais recente aparecia. Agora
-        // processa TODAS as mensagens da equipe que ainda não foram
-        // mostradas, na ordem certa.
-        const todasMensagens: Array<{ id: number; sender: string; content: string; created_at: string }> = conv.messages || [];
-        const ultimoVistoId = localStorage.getItem("supportLastSeenMsgId");
-        const indiceUltimoVisto = ultimoVistoId
-          ? todasMensagens.findIndex((m) => String(m.id) === ultimoVistoId)
-          : -1;
-        const novasMensagensAdmin = todasMensagens
-          .slice(indiceUltimoVisto + 1)
-          .filter((m) => m.sender === "admin");
-
-        if (novasMensagensAdmin.length > 0) {
-          setMessages((prev) => {
-            const idsExistentes = new Set(prev.map((m) => m.id));
-            const paraAdicionar = novasMensagensAdmin
-              .filter((m) => !idsExistentes.has(`admin-${m.id}`))
-              .map((m) => ({ id: `admin-${m.id}`, role: "assistant" as const, content: m.content, timestamp: new Date(m.created_at) }));
-            return paraAdicionar.length > 0 ? [...prev, ...paraAdicionar] : prev;
-          });
-          localStorage.setItem("supportLastSeenMsgId", String(todasMensagens[todasMensagens.length - 1].id));
+        const mensagens = dados.messages || [];
+        const ultima = mensagens[mensagens.length - 1];
+        if (ultima && temRespostaNaoVista(dados.id, dados.updated_at, "admin")) {
           if (!isOpenRef.current) setHasUnread(true);
         }
+        // Estar com o chat ABERTO já conta como "vista" — não faz sentido
+        // manter marcado como não-lida uma resposta que está literalmente
+        // visível na tela agora.
+        if (isOpenRef.current) marcarComoVista(dados.id, dados.updated_at);
 
-        if (conv.status === "resolved" || conv.status === "closed") {
-          // Conversa encerrada — a próxima dúvida começa uma conversa nova.
-          // A resposta final (se houver) já foi mostrada acima, então
-          // limpar aqui não perde nada.
-          setConversationId(null);
-          localStorage.removeItem("supportLastSeenMsgId");
+        // Resolvida/encerrada: continua visível no painel por esta
+        // sessão (a consultora vê a resposta final), mas deixa de ser "o
+        // ticket ativo" — a próxima dúvida abre um ticket novo. O
+        // histórico permanente já está garantido em Minhas Conversas.
+        if (dados.status === "resolved" || dados.status === "closed") {
+          setTicketId(null);
         }
       } catch {
-        // Falha de rede numa verificação de fundo não merece incomodar a
-        // consultora com mensagem de erro — só tenta de novo no próximo ciclo.
+        // Falha de rede numa verificação de fundo não interrompe nada —
+        // só tenta de novo no próximo ciclo.
       }
     };
 
-    verificarNovaResposta();
-    const intervalo = setInterval(verificarNovaResposta, 45000);
+    verificar();
+    const intervalo = setInterval(verificar, 45000);
     return () => clearInterval(intervalo);
-  }, [conversationId]);
+  }, [ticketId]);
 
   const handleSend = async (text?: string) => {
     const msg = text || input.trim();
@@ -163,6 +162,16 @@ export const ChatAssistant: React.FC = () => {
     setIsLoading(true);
 
     try {
+      if (ticketId) {
+        // Já tem ticket em aberto — a mensagem vai direto pra ele, não
+        // tenta rotear de novo (a consultora já está falando com gente).
+        const res = await api.post(`chat/support/conversations/${ticketId}/`, { message: msg });
+        setTicket(res.data);
+        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Adicionei sua mensagem na conversa com a equipe — veja a resposta ali embaixo. 👇", timestamp: new Date() }]);
+        setIsLoading(false);
+        return;
+      }
+
       const historico: { question: string; answer: string }[] = [];
       for (let i = 0; i < messages.length - 1; i++) {
         if (messages[i].role === "user" && messages[i + 1].role === "assistant") {
@@ -170,23 +179,16 @@ export const ChatAssistant: React.FC = () => {
         }
       }
 
-      const res = await api.post("chat/unified/", {
-        message: msg,
-        history: historico.slice(-3),
-        conversation_id: conversationId,
-      });
-
+      const res = await api.post("chat/unified/", { message: msg, history: historico.slice(-3), conversation_id: null });
       const dados = res.data;
+
       if (dados.tipo === "consulta") {
         setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: dados.resposta, timestamp: new Date() }]);
       } else if (dados.tipo === "ajuda_encontrada") {
-        setMessages((prev) => [
-          ...prev,
-          { id: crypto.randomUUID(), role: "assistant", content: "Encontrei isso que pode ajudar:", timestamp: new Date(), resultados: dados.resultados },
-        ]);
+        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Encontrei isso que pode ajudar:", timestamp: new Date(), resultados: dados.resultados }]);
       } else if (dados.tipo === "escalado") {
-        if (dados.conversation_id) setConversationId(dados.conversation_id);
-        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: dados.resposta, timestamp: new Date() }]);
+        setTicketId(dados.conversation_id);
+        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Encaminhei sua pergunta pra equipe — acompanhe a resposta no painel abaixo. 👇", timestamp: new Date() }]);
       }
     } catch (error: any) {
       const semConsentimento = error?.response?.status === 403;
@@ -214,9 +216,6 @@ export const ChatAssistant: React.FC = () => {
 
   return (
     <>
-      {/* ══════════════════════════════════════════
-          BOTÃO FLUTUANTE
-          ══════════════════════════════════════════ */}
       <AnimatePresence>
         {!isOpen && (
           <div className="fixed bottom-6 right-6 z-50">
@@ -241,7 +240,8 @@ export const ChatAssistant: React.FC = () => {
               />
             </motion.button>
             {/* Notificação: resposta do atendente chegou e a consultora
-                ainda não abriu o chat pra ver. */}
+                ainda não abriu o chat pra ver. Mesma marcação (localStorage)
+                que a aba "Suporte" do sino usa — nunca vão discordar. */}
             {hasUnread && (
               <motion.span
                 initial={{ scale: 0 }}
@@ -255,9 +255,6 @@ export const ChatAssistant: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* ══════════════════════════════════════════
-          JANELA DO CHAT
-          ══════════════════════════════════════════ */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
@@ -265,9 +262,8 @@ export const ChatAssistant: React.FC = () => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className="fixed bottom-4 right-4 left-4 z-50 flex h-[70vh] max-h-[520px] flex-col overflow-hidden rounded-2xl border border-brand/20 bg-card shadow-2xl sm:left-auto sm:bottom-6 sm:right-6 sm:h-[520px] sm:w-[380px]"
+            className="fixed bottom-4 right-4 left-4 z-50 flex h-[70vh] max-h-[560px] flex-col overflow-hidden rounded-2xl border border-brand/20 bg-card shadow-2xl sm:left-auto sm:bottom-6 sm:right-6 sm:h-[560px] sm:w-[380px]"
           >
-            {/* ── Cabeçalho ── */}
             <div className="flex items-center justify-between bg-gradient-to-r from-brand to-brand-hover px-4 py-3">
               <div className="flex items-center gap-2">
                 <div className="h-9 w-9 rounded-full overflow-hidden border-2 border-white/30 shrink-0">
@@ -275,9 +271,7 @@ export const ChatAssistant: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-white">Amorinha</p>
-                  <p className="text-xs text-white/70">
-                    {conversationId ? "Encaminhado pra equipe" : "Estoque, vendas e dúvidas 💜"}
-                  </p>
+                  <p className="text-xs text-white/70">Estoque, vendas e dúvidas 💜</p>
                 </div>
               </div>
               <button onClick={() => setIsOpen(false)} className="rounded-full p-1 text-white/70 transition-colors hover:bg-white/20 hover:text-white">
@@ -285,7 +279,6 @@ export const ChatAssistant: React.FC = () => {
               </button>
             </div>
 
-            {/* ── Mensagens ── */}
             <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
               {messages.map((msg) => (
                 <motion.div key={msg.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className={`flex flex-col gap-2 ${msg.role === "user" ? "items-end" : "items-start"}`}>
@@ -311,18 +304,12 @@ export const ChatAssistant: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Cards de sugestão da Central de Ajuda — até 3, cada um
-                      com ícone por tipo, resumo curto e link. */}
                   {msg.resultados && msg.resultados.length > 0 && (
                     <div className="ml-8 w-full max-w-[85%] space-y-1.5">
                       {msg.resultados.map((r) => {
                         const Icon = TIPO_ICON[r.tipo] || HelpCircle;
                         return (
-                          <a
-                            key={r.id}
-                            href="/support"
-                            className="flex items-start gap-2 rounded-xl border border-brand/15 bg-card p-2.5 text-left transition-colors hover:border-brand/30"
-                          >
+                          <a key={r.id} href="/support" className="flex items-start gap-2 rounded-xl border border-brand/15 bg-card p-2.5 text-left transition-colors hover:border-brand/30">
                             <Icon className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
                             <div className="min-w-0">
                               <p className="truncate text-xs font-semibold text-foreground">{r.titulo}</p>
@@ -342,14 +329,14 @@ export const ChatAssistant: React.FC = () => {
                     <img src={amorinhaAvatar} alt="Amorinha" className="h-full w-full object-cover" />
                   </div>
                   <div className="flex gap-1 rounded-2xl bg-brand-soft px-4 py-3">
-                    <span className="h-2 w-2 animate-bounce rounded-full bg-brand-rose/50 animation-delay-[0ms]" />
+                    <span className="h-2 w-2 animate-bounce rounded-full bg-brand-rose/50" />
                     <span className="h-2 w-2 animate-bounce rounded-full bg-brand-rose/50 animation-delay-[150ms]" />
                     <span className="h-2 w-2 animate-bounce rounded-full bg-brand-rose/50 animation-delay-[300ms]" />
                   </div>
                 </motion.div>
               )}
 
-              {messages.length === 1 && (
+              {messages.length === 1 && !ticketId && (
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {SUGGESTIONS.map((s) => (
                     <button key={s} onClick={() => handleSend(s)} className="rounded-full border border-brand-peach bg-brand-soft px-3 py-1 text-xs text-brand-rose transition-colors hover:border-brand/30 hover:bg-brand-peach/30 hover:text-brand">
@@ -361,13 +348,38 @@ export const ChatAssistant: React.FC = () => {
               <div ref={messagesEndRef} />
             </div>
 
-            {/* ── Campo de entrada ── */}
+            {/* ── Painel do ticket ativo — só o que está em aberto AGORA,
+                separado do histórico de consulta acima. Some quando
+                resolve; o registro completo fica em Minhas Conversas. ── */}
+            {ticket && (
+              <div className="max-h-40 overflow-y-auto border-t border-brand-peach/30 bg-brand-soft/40 px-4 py-2.5">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1 text-[11px] font-semibold text-brand">
+                    <ShieldCheck className="h-3 w-3" /> Ticket com a equipe
+                  </span>
+                  <button
+                    onClick={() => { setIsOpen(false); navigate("/support"); }}
+                    className="flex items-center gap-0.5 text-[10px] text-brand-rose/70 hover:text-brand hover:underline"
+                  >
+                    Ver histórico <ExternalLink className="h-2.5 w-2.5" />
+                  </button>
+                </div>
+                {ticket.messages.slice(-3).map((m) => (
+                  <div key={m.id} className={`mb-1 text-xs ${m.sender === "user" ? "text-right" : ""}`}>
+                    <span className={`inline-block max-w-[85%] rounded-lg px-2 py-1 ${m.sender === "admin" ? "bg-emerald-100 text-emerald-800" : m.sender === "user" ? "bg-brand text-white" : "bg-secondary"}`}>
+                      {m.content}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div className="border-t border-brand-peach/30 bg-card p-3">
               <div className="flex items-center gap-2 rounded-xl border border-brand/15 bg-brand-soft/50 px-3 py-2 focus-within:border-brand/30 focus-within:ring-1 focus-within:ring-brand/20">
                 <input
                   ref={inputRef}
                   type="text"
-                  placeholder={conversationId ? "Continue a conversa..." : "Pergunte ou tire uma dúvida..."}
+                  placeholder={ticketId ? "Continue a conversa com a equipe..." : "Pergunte ou tire uma dúvida..."}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
