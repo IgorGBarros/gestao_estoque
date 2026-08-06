@@ -3,14 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   Package, TrendingDown, DollarSign, BarChart3, ScanBarcode, List,
-  ArrowDownCircle, Settings, PieChart, Store, History, User, Bell, CheckCircle2,
+  ArrowDownCircle, Settings, PieChart, Store, History, User,
   Users,
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
 import { statsApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import { ChatAssistant } from "../components/ChatAssistant";
+import NotificationBell from "../components/NotificationBell";
 import ProBadge from "../components/ProBadge";
 import UpgradeModal from "../components/UpgradeModal";
 import ProfileCompletionBanner from "../components/ProfileCompletionBanner";
@@ -42,7 +42,6 @@ export default function Index() {
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeCtx, setUpgradeCtx] = useState({ feature: "", description: "" });
   const [storeSlug, setStoreSlug] = useState<string | null>(null);
-  const [showNotif, setShowNotif] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -111,32 +110,12 @@ export default function Index() {
           </div>
 
           <div className="flex items-center gap-1 relative">
-            <button
-              onClick={() => setShowNotif(!showNotif)}
-              className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
-            >
-              <Bell className="h-5 w-5" />
-            </button>
-            <AnimatePresence>
-              {showNotif && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                  className="absolute right-0 top-12 mt-2 w-72 bg-card border border-border rounded-xl shadow-xl p-4 z-50"
-                >
-                  <div className="flex items-start gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-bold text-foreground">Tudo tranquilo por aqui!</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Você não possui nenhum alerta de estoque baixo ou validade no momento.
-                      </p>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {/* ⚠️ CORREÇÃO: antes era um botão estático que sempre mostrava
+                "Tudo tranquilo por aqui!", sem ligação com dado real
+                nenhum. NotificationBell.tsx já existia pronto (alertas de
+                validade, marcos de venda, assinatura, CRM) mas nunca
+                tinha sido importado em lugar nenhum — só faltava plugar. */}
+            <NotificationBell />
             <button onClick={() => navigate("/profile")} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
               <User className="h-5 w-5" />
             </button>

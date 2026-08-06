@@ -1,13 +1,45 @@
 // components/NotificationBell.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
 import { useState, useRef, useEffect } from "react";
-import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package, Crown, Users, Cake, ShoppingBag } from "lucide-react";
+import { Bell, AlertTriangle, Clock, X, ChevronRight, Trophy, Star, Flame, TrendingUp, Package, Crown, Users, Cake, ShoppingBag, Percent, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useExpiryAlerts, ExpiryAlert } from "../hooks/useExpiryAlerts";
 import { useSalesNotifications, SalesMilestone, WeeklyInsight } from "../hooks/useSalesNotifications";
 import { useSubscriptionAlert } from "../hooks/useSubscriptionAlert";
 import { useCrmNotifications } from "../hooks/useCrmNotifications";
 import { formatMoney } from "../lib/api";
+import { api } from "../services/api";
 import { AnimatePresence, motion } from "framer-motion";
+
+interface Promocao {
+  id: string;
+  title: string;
+  message: string;
+  discount_percent: number;
+  discount_amount: number;
+}
+interface Novidade {
+  id: number;
+  titulo: string;
+  corpo: string;
+}
+
+// Guarda o que já foi visto — mesmo padrão simples que o PromotionBanner
+// já usa (localStorage, sem precisar de tabela nova de "lido/não lido" no
+// backend só pra isto).
+const VISTOS_KEY = "novidades_promocoes_vistos";
+function jaFoiVisto(id: string): boolean {
+  try {
+    return (JSON.parse(localStorage.getItem(VISTOS_KEY) || "[]") as string[]).includes(id);
+  } catch {
+    return false;
+  }
+}
+function marcarComoVisto(ids: string[]) {
+  try {
+    const vistos: string[] = JSON.parse(localStorage.getItem(VISTOS_KEY) || "[]");
+    localStorage.setItem(VISTOS_KEY, JSON.stringify([...new Set([...vistos, ...ids])].slice(-100)));
+  } catch { /* localStorage indisponível não é motivo pra quebrar a tela */ }
+}
 
 function formatDaysLeft(days: number): string {
   if (days <= 0) return "Vencido!";
@@ -27,8 +59,19 @@ export default function NotificationBell() {
   const { crmItens } = useCrmNotifications();
 
   const [open, setOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"all" | "expiry" | "sales">("all");
+  const [activeTab, setActiveTab] = useState<"all" | "expiry" | "sales" | "promocoes" | "novidades">("all");
   const ref = useRef<HTMLDivElement>(null);
+
+  const [promocoes, setPromocoes] = useState<Promocao[]>([]);
+  const [novidades, setNovidades] = useState<Novidade[]>([]);
+
+  useEffect(() => {
+    api.get("promotions/active/").then((r) => setPromocoes(r.data || [])).catch(() => {});
+    api.get("ajuda/?tipo=novidade").then((r) => setNovidades(r.data || [])).catch(() => {});
+  }, []);
+
+  const promocoesNaoVistas = promocoes.filter((p) => !jaFoiVisto(`promo-${p.id}`));
+  const novidadesNaoVistas = novidades.filter((n) => !jaFoiVisto(`novidade-${n.id}`));
 
   const salesMilestonesEnabled = localStorage.getItem("notif_sales_milestones") !== "false";
   const weeklyInsightsEnabled = localStorage.getItem("notif_weekly_insights") !== "false";
@@ -41,7 +84,16 @@ export default function NotificationBell() {
   const filteredCritical = expiryEnabled ? criticalCount : 0;
   const filteredSalesCount = filteredMilestones.length + (filteredWeekly ? 1 : 0);
   const subCount = subscriptionAlert ? 1 : 0;
-  const totalCount = filteredExpiryCount + filteredSalesCount + subCount + crmItens.length;
+  const totalCount = filteredExpiryCount + filteredSalesCount + subCount + crmItens.length + promocoesNaoVistas.length + novidadesNaoVistas.length;
+
+  // Ao abrir o painel, tudo que está em "Promoções"/"Novidades" nesse
+  // momento vira "visto" — mesmo padrão de qualquer central de
+  // notificação (não fica marcado como novo pra sempre só por ter existido).
+  useEffect(() => {
+    if (open && (promocoes.length > 0 || novidades.length > 0)) {
+      marcarComoVisto([...promocoes.map((p) => `promo-${p.id}`), ...novidades.map((n) => `novidade-${n.id}`)]);
+    }
+  }, [open, promocoes, novidades]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -114,17 +166,21 @@ export default function NotificationBell() {
               </button>
             </div>
 
-            {/* Tabs */}
-            <div className="flex border-b border-brand-peach/30">
+            {/* Tabs — rolagem horizontal porque com Promoções/Novidades
+                juntas já são 5 abas, apertado demais pra dividir em partes
+                iguais (flex-1) num painel de 340px. */}
+            <div className="flex overflow-x-auto border-b border-brand-peach/30">
               {([
                 { key: "all" as const, label: "Tudo", count: totalCount },
                 { key: "sales" as const, label: "Vendas", count: filteredSalesCount },
                 { key: "expiry" as const, label: "Validade", count: filteredExpiryCount },
+                { key: "promocoes" as const, label: "Promoções", count: promocoesNaoVistas.length },
+                { key: "novidades" as const, label: "Novidades", count: novidadesNaoVistas.length },
               ]).map((tab) => (
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`flex-1 px-3 py-2 text-xs font-medium transition-colors ${
+                  className={`shrink-0 px-3 py-2 text-xs font-medium transition-colors ${
                     activeTab === tab.key
                       ? "border-b-2 border-brand text-brand"
                       : "text-brand-rose/70 hover:text-foreground"
@@ -204,6 +260,25 @@ export default function NotificationBell() {
                     />
                   ))}
 
+              {/* Promoções — só na aba própria, "Tudo" não mistura (já
+                  existe o PromotionBanner pra dar destaque na tela
+                  principal; aqui é o histórico completo). */}
+              {activeTab === "promocoes" &&
+                promocoes.map((p) => <PromocaoItem key={p.id} promocao={p} />)}
+
+              {/* Novidades */}
+              {activeTab === "novidades" &&
+                novidades.map((n) => (
+                  <NovidadeItem
+                    key={n.id}
+                    novidade={n}
+                    onNavigate={() => {
+                      setOpen(false);
+                      navigate("/support");
+                    }}
+                  />
+                ))}
+
               {/* Empty states */}
               {activeTab === "sales" && filteredSalesCount === 0 && (
                 <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
@@ -213,6 +288,16 @@ export default function NotificationBell() {
               {activeTab === "expiry" && filteredExpiryCount === 0 && (
                 <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
                   Nenhum alerta de validade
+                </div>
+              )}
+              {activeTab === "promocoes" && promocoes.length === 0 && (
+                <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
+                  Nenhuma promoção ativa no momento
+                </div>
+              )}
+              {activeTab === "novidades" && novidades.length === 0 && (
+                <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
+                  Nenhuma novidade por aqui ainda
                 </div>
               )}
             </div>
@@ -428,6 +513,48 @@ function ExpiryAlertItem({
             {formatDate(alert.expiry_date)}
           </span>
         </div>
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-brand-rose/40" />
+    </button>
+  );
+}
+// ── Promoção Item ──
+function PromocaoItem({ promocao }: { promocao: Promocao }) {
+  const desconto =
+    promocao.discount_percent > 0
+      ? `${promocao.discount_percent}% OFF`
+      : promocao.discount_amount > 0
+      ? `${formatMoney(Number(promocao.discount_amount))} OFF`
+      : null;
+
+  return (
+    <div className="flex items-start gap-3 border-b border-brand-peach/30 bg-brand-peach/10 px-4 py-3">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10">
+        <Percent className="h-5 w-5 text-brand" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-semibold text-foreground">{promocao.title}</p>
+          {desconto && (
+            <span className="shrink-0 rounded-full bg-brand px-1.5 py-0.5 text-[10px] font-bold text-white">{desconto}</span>
+          )}
+        </div>
+        <p className="mt-0.5 line-clamp-2 text-[11px] text-brand-rose/70">{promocao.message}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Novidade Item ──
+function NovidadeItem({ novidade, onNavigate }: { novidade: Novidade; onNavigate: () => void }) {
+  return (
+    <button onClick={onNavigate} className="flex w-full items-start gap-3 border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10">
+        <Sparkles className="h-5 w-5 text-brand" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold text-foreground">{novidade.titulo}</p>
+        <p className="mt-0.5 line-clamp-2 text-[11px] text-brand-rose/70">{novidade.corpo}</p>
       </div>
       <ChevronRight className="h-4 w-4 shrink-0 text-brand-rose/40" />
     </button>
