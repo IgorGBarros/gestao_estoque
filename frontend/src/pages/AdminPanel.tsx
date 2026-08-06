@@ -2575,6 +2575,7 @@ export default function AdminPanel() {
                     onChange={(e) => setSubForm({ ...subForm, external_id: e.target.value })}
                     className="w-full border border-input rounded-lg px-3 py-2 text-sm"
                     placeholder="ID da transação/cliente"
+                  
                   />
                 </div>
                 <div>
