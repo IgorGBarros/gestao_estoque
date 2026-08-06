@@ -470,6 +470,24 @@ export const adminApi = {
       body: JSON.stringify(data),
     }),
   listPromotions: () => apiRequest<any[]>("/admin/promotions/"),
+
+  // 💬 Suporte
+  listSupportConversations: (statusFiltro?: string) =>
+    apiRequest<any[]>(`/admin/support/conversations/${statusFiltro ? `?status=${statusFiltro}` : ""}`),
+  getSupportConversation: (id: string) => apiRequest<any>(`/admin/support/conversations/${id}/`),
+  replySupportConversation: (id: string, message: string) =>
+    apiRequest<any>(`/admin/support/conversations/${id}/`, { method: "POST", body: JSON.stringify({ message }) }),
+  updateSupportConversationStatus: (id: string, status: string) =>
+    apiRequest<any>(`/admin/support/conversations/${id}/`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  // 🎬 Vídeos tutoriais
+  listTutorialVideos: () => apiRequest<any[]>("/admin/tutorial-videos/"),
+  createTutorialVideo: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/tutorial-videos/", { method: "POST", body: JSON.stringify(data) }),
+  updateTutorialVideo: (id: number, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/tutorial-videos/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteTutorialVideo: (id: number) =>
+    apiRequest<void>(`/admin/tutorial-videos/${id}/`, { method: "DELETE" }),
   createPromotion: (data: Record<string, unknown>) =>
     apiRequest<any>("/admin/promotions/create/", {
       method: "POST",

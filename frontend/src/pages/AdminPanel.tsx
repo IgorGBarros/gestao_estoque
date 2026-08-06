@@ -7,7 +7,7 @@ import {
   Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
   Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
   FileText, Download, Upload, Eye, EyeOff, Palette, Zap, Bell, Gift, Percent,
-  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy
+  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy, MessageCircle
 } from "lucide-react";
 
 import { profileApi, adminApi, adminHealthApi, systemConfigApi, SystemConfigStatus } from "../lib/api";
@@ -21,6 +21,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs"
 import React from "react";
 import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
 import ApiManagementTab from "../components/admin/ApiManagementTab";
+import AdminSupportTab from "../components/admin/AdminSupportTab";
 
 // Acesso ao painel é por email autorizado (is_staff, definido pelo backend
 // via ADMIN_EMAILS). Não há mais senha no frontend.
@@ -1283,6 +1284,10 @@ export default function AdminPanel() {
               <BarChart3 className="h-4 w-4" />
               Analytics
             </TabsTrigger>
+            <TabsTrigger value="support" className="flex items-center gap-2">
+              <MessageCircle className="h-4 w-4" />
+              Suporte
+            </TabsTrigger>
             <TabsTrigger value="system" className="flex items-center gap-2">
               <Server className="h-4 w-4" />
               Sistema
@@ -2333,6 +2338,13 @@ export default function AdminPanel() {
                 <p className="text-muted-foreground">Coletando dados do catálogo e padrões de uso</p>
               </div>
             )}
+          </TabsContent>
+
+          {/* ==========================================
+              TAB: SUPORTE
+              ========================================== */}
+          <TabsContent value="support" className="space-y-6">
+            <AdminSupportTab toast={toast} />
           </TabsContent>
 
           {/* ==========================================
