@@ -178,3 +178,63 @@ def ajuda_list(request):
         }
         for c in itens
     ])
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def help_search(request):
+    """
+    POST /api/chat/help-search/
+    Body: {"query": "..."}
+
+    Modo "🆘 Preciso de ajuda" do chat unificado — busca em HelpContent
+    (título+corpo, ILIKE), até 3 resultados. Sem resultado nenhum, escala
+    automaticamente pra humano (reaproveita o MESMO fluxo de escalada de
+    SupportConversation que já existe, não inventa um novo caminho). Toda
+    busca é logada em HelpSearchLog — vira backlog de conteúdo pro admin
+    (pergunta que ninguém respondeu = candidato a FAQ nova).
+    """
+    from django.db.models import Q
+    from .models import HelpContent, HelpSearchLog
+
+    store = get_current_store(request.user)
+    if not store:
+        return Response({'error': 'Nenhuma loja associada a este usuário.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    query = (request.data.get('query') or '').strip()
+    if not query:
+        return Response({'error': 'query não pode ser vazia.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    resultados = list(
+        HelpContent.objects.filter(status='visivel')
+        .filter(Q(titulo__icontains=query) | Q(corpo__icontains=query))[:3]
+    )
+
+    if resultados:
+        HelpSearchLog.objects.create(query=query[:300], matched_content=resultados[0], store=store)
+        return Response({
+            'encontrou': True,
+            'resultados': [
+                {
+                    'id': r.id, 'tipo': r.tipo, 'titulo': r.titulo,
+                    'resumo': (r.corpo[:140] + '…') if len(r.corpo) > 140 else r.corpo,
+                    'video_url': r.video_url,
+                }
+                for r in resultados
+            ],
+        })
+
+    # Nenhum resultado — loga sem match (isso É o backlog: pergunta real
+    # sem conteúdo pra responder) e escala pra humano automaticamente,
+    # reaproveitando o mesmo model/fluxo que a escalada manual já usa.
+    HelpSearchLog.objects.create(query=query[:300], matched_content=None, store=store)
+
+    conv = SupportConversation.objects.create(
+        store=store, category='question', subject=query[:200], status='escalated',
+    )
+    SupportMessage.objects.create(conversation=conv, sender='user', content=query)
+    SupportMessage.objects.create(
+        conversation=conv, sender='ai',
+        content='Não encontrei nada sobre isso na Central de Ajuda — já encaminhei pra nossa equipe, elas te respondem por aqui 💜',
+    )
+
+    return Response({'encontrou': False, 'resultados': [], 'conversation_id': str(conv.id)})

@@ -131,3 +131,25 @@ class HelpContent(models.Model):
 
     def __str__(self):
         return f"[{self.get_tipo_display()}] {self.titulo}"
+
+
+class HelpSearchLog(models.Model):
+    """
+    Toda busca feita no modo "🆘 Preciso de ajuda" do chat — vira backlog
+    de conteúdo pro admin (pergunta que ninguém respondeu = candidato a
+    FAQ nova). matched_content nulo = a busca não encontrou nada, e a
+    conversa foi escalada pra humano automaticamente.
+    """
+    query = models.CharField(max_length=300)
+    matched_content = models.ForeignKey(
+        HelpContent, on_delete=models.SET_NULL, null=True, blank=True, related_name='search_hits'
+    )
+    store = models.ForeignKey('inventory.Store', on_delete=models.CASCADE, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        alvo = self.matched_content.titulo if self.matched_content else "(sem resultado)"
+        return f"{self.query!r} → {alvo}"
