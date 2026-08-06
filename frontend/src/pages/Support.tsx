@@ -14,7 +14,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Send, User, PlayCircle, HelpCircle, BookOpen, Newspaper, ShieldCheck, ExternalLink } from "lucide-react";
 import { api } from "../services/api";
 import { temRespostaNaoVista, marcarComoVista } from "../lib/supportSeen";
-import amorinhaAvatar from "../assets/amorinha-avatar.png";
+import amorinhaAvatar from "../assets/amorinha-avatar.png"; 
 
 interface ResultadoAjuda {
   id: number;

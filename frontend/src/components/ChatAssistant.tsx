@@ -19,7 +19,7 @@ import amorinhaAvatar from "../assets/amorinha-avatar.png";
 interface ResultadoAjuda {
   id: number;
   tipo: "video" | "faq" | "guia" | "novidade";
-  titulo: string;
+  titulo: string; 
   resumo: string;
   video_url: string | null;
 }
