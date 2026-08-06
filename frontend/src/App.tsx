@@ -54,6 +54,8 @@ import { useEffect, useState } from "react";
 import PrivacyPage from "./pages/PrivacyPage";
 import TermsPage from "./pages/TermsPage";
 
+// Remove unused Support import - component exports a named function, not default
+
 // ✅ QueryClient FORA do componente (evita recriação a cada render)
 const queryClient = new QueryClient({
   defaultOptions: {
