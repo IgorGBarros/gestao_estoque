@@ -108,27 +108,40 @@ export const ChatAssistant: React.FC = () => {
         const res = await api.get(`chat/support/conversations/${conversationId}/`);
         const conv = res.data;
 
-        if (conv.status === "resolved" || conv.status === "closed") {
-          // Conversa encerrada — a próxima dúvida começa uma conversa nova.
-          setConversationId(null);
-          localStorage.removeItem("supportLastSeenMsgId");
-          return;
+        // ⚠️ CORREÇÃO: antes só olhava a ÚLTIMA mensagem
+        // (conv.messages[length-1]). Se o atendente mandasse duas
+        // respostas seguidas antes da próxima verificação, a primeira
+        // era perdida silenciosamente — só a mais recente aparecia. Agora
+        // processa TODAS as mensagens da equipe que ainda não foram
+        // mostradas, na ordem certa.
+        const todasMensagens: Array<{ id: number; sender: string; content: string; created_at: string }> = conv.messages || [];
+        const ultimoVistoId = localStorage.getItem("supportLastSeenMsgId");
+        const indiceUltimoVisto = ultimoVistoId
+          ? todasMensagens.findIndex((m) => String(m.id) === ultimoVistoId)
+          : -1;
+        const novasMensagensAdmin = todasMensagens
+          .slice(indiceUltimoVisto + 1)
+          .filter((m) => m.sender === "admin");
+
+        if (novasMensagensAdmin.length > 0) {
+          setMessages((prev) => {
+            const idsExistentes = new Set(prev.map((m) => m.id));
+            const paraAdicionar = novasMensagensAdmin
+              .filter((m) => !idsExistentes.has(`admin-${m.id}`))
+              .map((m) => ({ id: `admin-${m.id}`, role: "assistant" as const, content: m.content, timestamp: new Date(m.created_at) }));
+            return paraAdicionar.length > 0 ? [...prev, ...paraAdicionar] : prev;
+          });
+          localStorage.setItem("supportLastSeenMsgId", String(todasMensagens[todasMensagens.length - 1].id));
+          if (!isOpenRef.current) setHasUnread(true);
         }
 
-        const ultimaMsg = conv.messages?.[conv.messages.length - 1];
-        if (!ultimaMsg || ultimaMsg.sender !== "admin") return;
-
-        const jaViuEssaResposta = localStorage.getItem("supportLastSeenMsgId") === String(ultimaMsg.id);
-        if (jaViuEssaResposta) return;
-
-        // Mensagem nova da equipe: adiciona ao histórico visível (se ainda
-        // não estiver lá) e marca como não-lida se o chat estiver fechado.
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === `admin-${ultimaMsg.id}`)) return prev;
-          return [...prev, { id: `admin-${ultimaMsg.id}`, role: "assistant", content: ultimaMsg.content, timestamp: new Date(ultimaMsg.created_at) }];
-        });
-        localStorage.setItem("supportLastSeenMsgId", String(ultimaMsg.id));
-        if (!isOpenRef.current) setHasUnread(true);
+        if (conv.status === "resolved" || conv.status === "closed") {
+          // Conversa encerrada — a próxima dúvida começa uma conversa nova.
+          // A resposta final (se houver) já foi mostrada acima, então
+          // limpar aqui não perde nada.
+          setConversationId(null);
+          localStorage.removeItem("supportLastSeenMsgId");
+        }
       } catch {
         // Falha de rede numa verificação de fundo não merece incomodar a
         // consultora com mensagem de erro — só tenta de novo no próximo ciclo.
