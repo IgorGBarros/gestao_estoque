@@ -59,6 +59,12 @@ class SupportMessage(models.Model):
 
 class TutorialVideo(models.Model):
     """
+    ⚠️ MANTIDO por segurança (rollback), mas em desuso a partir da Central
+    de Ajuda (HelpContent, abaixo). O admin-panel e a consultora agora
+    usam HelpContent com tipo='video' — os registros existentes aqui foram
+    copiados pra lá numa migração de dados, não movidos. Não é mais
+    escrito por nenhuma tela nova.
+
     Vídeo tutorial gerenciado pelo admin — o vídeo em si fica hospedado
     fora (YouTube, provavelmente), aqui só guarda o link e os metadados de
     exibição pra consultora.
@@ -78,3 +84,50 @@ class TutorialVideo(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class HelpContent(models.Model):
+    """
+    Central de Ajuda — evolução do TutorialVideo pra cobrir mais tipos de
+    conteúdo além de vídeo (FAQ, guia passo-a-passo, novidade da
+    plataforma). Um único model, um único endpoint de consumo
+    (GET /api/ajuda/), consumido tanto pela página de suporte quanto pela
+    seção "Aprenda a usar" do profile — e pelas sugestões da Amorinha no
+    chat (busca textual em titulo+corpo).
+    """
+    TIPO_CHOICES = [
+        ('video', 'Vídeo'),
+        ('faq', 'Pergunta frequente'),
+        ('guia', 'Guia'),
+        ('novidade', 'Novidade'),
+    ]
+    STATUS_CHOICES = [
+        ('rascunho', 'Rascunho'),
+        ('visivel', 'Visível'),
+    ]
+
+    tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
+    titulo = models.CharField(max_length=150)
+    # Texto do conteúdo em si — obrigatório em faq/guia/novidade (validado
+    # na view, não aqui, pra manter a regra num lugar só). Vídeo pode
+    # deixar em branco, ou usar como resumo/descrição do vídeo.
+    corpo = models.TextField(blank=True)
+    # Só faz sentido pra tipo='video' — nullable pros outros tipos.
+    video_url = models.URLField(blank=True, null=True)
+    categoria = models.CharField(max_length=50, blank=True)
+    # ⚠️ default='rascunho' de propósito — um conteúdo novo não fica
+    # visível pra consultora até o admin revisar e publicar deliberadamente.
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='rascunho')
+    ordem = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['ordem', '-created_at']
+        indexes = [
+            models.Index(fields=['status', 'tipo']),
+            models.Index(fields=['status', 'categoria']),
+        ]
+
+    def __str__(self):
+        return f"[{self.get_tipo_display()}] {self.titulo}"

@@ -1345,3 +1345,111 @@ def admin_tutorial_video_detail(request, video_id):
             setattr(video, campo, request.data[campo])
     video.save()
     return Response(_serialize_video(video))
+
+# ─────────────────────────────────────────────────────────────
+# 📚 CENTRAL DE AJUDA (HelpContent) — evolução do CRUD de vídeos.
+# Etapa 1: só a camada de conteúdo/admin. O endpoint de consumo
+# (GET /api/ajuda/) e as telas da consultora vêm na Etapa 2.
+# ─────────────────────────────────────────────────────────────
+
+def _serialize_help_content(c):
+    return {
+        'id': c.id,
+        'tipo': c.tipo,
+        'titulo': c.titulo,
+        'corpo': c.corpo,
+        'video_url': c.video_url,
+        'categoria': c.categoria,
+        'status': c.status,
+        'ordem': c.ordem,
+        'created_at': c.created_at.isoformat(),
+        'updated_at': c.updated_at.isoformat(),
+    }
+
+
+def _validar_help_content(dados, tipo):
+    """
+    Regra de obrigatoriedade por tipo, centralizada aqui — o model não
+    força isso (blank=True em ambos) porque o Django não valida
+    condicionalmente por outro campo sem custom clean(), e a view é o
+    lugar mais direto pra essa regra específica.
+    """
+    from ai.models import HelpContent
+    if tipo not in dict(HelpContent.TIPO_CHOICES):
+        return f"tipo precisa ser um de: {', '.join(dict(HelpContent.TIPO_CHOICES))}."
+    if tipo == 'video' and not (dados.get('video_url') or '').strip():
+        return "video_url é obrigatório pra tipo='video'."
+    if tipo in ('faq', 'guia', 'novidade') and not (dados.get('corpo') or '').strip():
+        return f"corpo é obrigatório pra tipo='{tipo}'."
+    return None
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAdminUser])
+def admin_help_content_list_create(request):
+    from ai.models import HelpContent
+
+    if request.method == 'GET':
+        itens = HelpContent.objects.all()
+        # Mesmos três filtros do endpoint de consumo (Etapa 2) — já deixo
+        # aqui porque a lista do admin também precisa filtrar por tipo/
+        # categoria/status, só que sem o default status=visivel (o admin
+        # PRECISA ver rascunho, é o ponto de gerenciar isso).
+        tipo = request.GET.get('tipo')
+        categoria = request.GET.get('categoria')
+        status_filtro = request.GET.get('status')
+        if tipo:
+            itens = itens.filter(tipo=tipo)
+        if categoria:
+            itens = itens.filter(categoria=categoria)
+        if status_filtro:
+            itens = itens.filter(status=status_filtro)
+        return Response([_serialize_help_content(c) for c in itens])
+
+    titulo = (request.data.get('titulo') or '').strip()
+    tipo = request.data.get('tipo')
+    if not titulo:
+        return Response({'error': 'titulo é obrigatório.'}, status=400)
+
+    erro = _validar_help_content(request.data, tipo)
+    if erro:
+        return Response({'error': erro}, status=400)
+
+    item = HelpContent.objects.create(
+        tipo=tipo,
+        titulo=titulo[:150],
+        corpo=(request.data.get('corpo') or ''),
+        video_url=(request.data.get('video_url') or None),
+        categoria=(request.data.get('categoria') or '')[:50],
+        status=request.data.get('status') or 'rascunho',
+        ordem=int(request.data.get('ordem') or 0),
+    )
+    return Response(_serialize_help_content(item), status=201)
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAdminUser])
+def admin_help_content_detail(request, content_id):
+    from ai.models import HelpContent
+    item = HelpContent.objects.filter(id=content_id).first()
+    if not item:
+        return Response({'error': 'Conteúdo não encontrado.'}, status=404)
+
+    if request.method == 'DELETE':
+        item.delete()
+        return Response(status=204)
+
+    # PATCH — valida com o tipo FINAL (o que já está salvo, a menos que
+    # esta própria requisição esteja mudando o tipo também).
+    tipo_final = request.data.get('tipo', item.tipo)
+    dados_para_validar = {**_serialize_help_content(item), **request.data}
+    erro = _validar_help_content(dados_para_validar, tipo_final)
+    if erro:
+        return Response({'error': erro}, status=400)
+
+    campos = ['tipo', 'titulo', 'corpo', 'video_url', 'categoria', 'status', 'ordem']
+    for campo in campos:
+        if campo in request.data:
+            setattr(item, campo, request.data[campo])
+    item.save()
+    return Response(_serialize_help_content(item))

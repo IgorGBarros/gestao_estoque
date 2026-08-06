@@ -1,6 +1,6 @@
 // src/components/admin/AdminSupportTab.tsx
 import { useState, useEffect } from "react";
-import { MessageCircle, Video, RefreshCw, Send, Loader2, Plus, Trash2, Pencil, User, ShieldCheck, Sparkles, X } from "lucide-react";
+import { MessageCircle, Video, RefreshCw, Send, Loader2, Plus, Trash2, Pencil, User, ShieldCheck, Sparkles, X, BookOpen, HelpCircle, Newspaper } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
@@ -60,15 +60,15 @@ export default function AdminSupportTab({ toast }: Props) {
       <Tabs value={aba} onValueChange={setAba} className="space-y-4">
         <TabsList>
           <TabsTrigger value="conversations" className="text-xs">Conversas</TabsTrigger>
-          <TabsTrigger value="videos" className="text-xs">Vídeos Tutoriais</TabsTrigger>
+          <TabsTrigger value="help-content" className="text-xs">Central de Ajuda</TabsTrigger>
         </TabsList>
 
         <TabsContent value="conversations">
           <ConversationsPanel toast={toast} />
         </TabsContent>
 
-        <TabsContent value="videos">
-          <VideosPanel toast={toast} />
+        <TabsContent value="help-content">
+          <HelpContentPanel toast={toast} />
         </TabsContent>
       </Tabs>
     </div>
@@ -252,52 +252,107 @@ function ConversationsPanel({ toast }: Props) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Vídeos
+// Central de Ajuda (HelpContent) — vídeo, FAQ, guia, novidade, tudo num
+// só CRUD. Substitui o antigo painel de "Vídeos Tutoriais".
 // ─────────────────────────────────────────────────────────────
-function VideosPanel({ toast }: Props) {
-  const [videos, setVideos] = useState<VideoTutorial[]>([]);
+
+interface HelpContentItem {
+  id: number;
+  tipo: "video" | "faq" | "guia" | "novidade";
+  titulo: string;
+  corpo: string;
+  video_url: string | null;
+  categoria: string;
+  status: "rascunho" | "visivel";
+  ordem: number;
+}
+
+const TIPO_INFO: Record<string, { label: string; icon: any }> = {
+  video: { label: "Vídeo", icon: Video },
+  faq: { label: "FAQ", icon: HelpCircle },
+  guia: { label: "Guia", icon: BookOpen },
+  novidade: { label: "Novidade", icon: Newspaper },
+};
+
+function HelpContentPanel({ toast }: Props) {
+  const [itens, setItens] = useState<HelpContentItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editando, setEditando] = useState<VideoTutorial | null>(null);
+  const [editando, setEditando] = useState<HelpContentItem | null>(null);
   const [mostrarForm, setMostrarForm] = useState(false);
+
+  const [filtroTipo, setFiltroTipo] = useState("");
+  const [filtroCategoria, setFiltroCategoria] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState("");
 
   const carregar = async () => {
     setLoading(true);
     try {
-      setVideos(await adminApi.listTutorialVideos());
+      const dados = await adminApi.listHelpContent({
+        tipo: filtroTipo || undefined,
+        categoria: filtroCategoria || undefined,
+        status: filtroStatus || undefined,
+      });
+      setItens(dados);
     } catch {
-      toast({ title: "Erro", description: "Não deu pra carregar os vídeos", variant: "destructive" });
+      toast({ title: "Erro", description: "Não deu pra carregar o conteúdo", variant: "destructive" });
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => { carregar(); }, [filtroTipo, filtroCategoria, filtroStatus]);
 
   const excluir = async (id: number) => {
-    if (!confirm("Excluir este vídeo? Não tem como desfazer.")) return;
+    if (!confirm("Excluir este conteúdo? Não tem como desfazer.")) return;
     try {
-      await adminApi.deleteTutorialVideo(id);
-      toast({ title: "Vídeo excluído" });
+      await adminApi.deleteHelpContent(id);
+      toast({ title: "Conteúdo excluído" });
       carregar();
     } catch {
       toast({ title: "Erro", description: "Não deu pra excluir", variant: "destructive" });
     }
   };
 
+  // Categorias distintas já usadas, pro filtro — não é uma lista fixa, é o
+  // que o admin já cadastrou até agora.
+  const categoriasExistentes = Array.from(new Set(itens.map((i) => i.categoria).filter(Boolean)));
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base flex items-center gap-2">
-          <Video className="h-4 w-4" /> Vídeos Tutoriais
-        </CardTitle>
+        <div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <BookOpen className="h-4 w-4" /> Central de Ajuda
+          </CardTitle>
+          <CardDescription>Vídeos, FAQs, guias e novidades — a mesma base que alimenta o chat e a página de suporte</CardDescription>
+        </div>
         <Button size="sm" className="gap-1.5" onClick={() => { setEditando(null); setMostrarForm(true); }}>
-          <Plus className="h-3.5 w-3.5" /> Novo vídeo
+          <Plus className="h-3.5 w-3.5" /> Novo conteúdo
         </Button>
       </CardHeader>
       <CardContent>
+        <div className="mb-4 flex flex-wrap gap-2">
+          <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} className="rounded-lg border border-input px-2 py-1.5 text-xs">
+            <option value="">Todos os tipos</option>
+            {Object.entries(TIPO_INFO).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+          <select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)} className="rounded-lg border border-input px-2 py-1.5 text-xs">
+            <option value="">Todas as categorias</option>
+            {categoriasExistentes.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={filtroStatus} onChange={(e) => setFiltroStatus(e.target.value)} className="rounded-lg border border-input px-2 py-1.5 text-xs">
+            <option value="">Todos os status</option>
+            <option value="rascunho">Rascunho</option>
+            <option value="visivel">Visível</option>
+          </select>
+          <button onClick={carregar} className="rounded-lg border border-border p-1.5 hover:bg-secondary">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+
         {mostrarForm && (
-          <VideoForm
-            video={editando}
+          <HelpContentForm
+            item={editando}
             toast={toast}
             onSalvo={() => { setMostrarForm(false); carregar(); }}
             onCancelar={() => setMostrarForm(false)}
@@ -306,32 +361,40 @@ function VideosPanel({ toast }: Props) {
 
         {loading ? (
           <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
-        ) : videos.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Nenhum vídeo cadastrado ainda.</p>
+        ) : itens.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Nenhum conteúdo aqui ainda.</p>
         ) : (
           <div className="space-y-2">
-            {videos.map((v) => (
-              <div key={v.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{v.title}</p>
-                  <p className="truncate text-xs text-muted-foreground">{v.category || "Sem categoria"} · {v.is_visible ? "Visível" : "Oculto"}</p>
+            {itens.map((item) => {
+              const info = TIPO_INFO[item.tipo];
+              const Icon = info.icon;
+              return (
+                <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                      <Icon className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-sm font-medium">{item.titulo}</p>
+                        <Badge variant="outline" className="shrink-0 text-[10px]">{info.label}</Badge>
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {item.categoria || "Sem categoria"} · {item.status === "visivel" ? "Visível" : "Rascunho"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <button onClick={() => { setEditando(item); setMostrarForm(true); }} className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary">
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => excluir(item.id)} className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 gap-1">
-                  <button
-                    onClick={() => { setEditando(v); setMostrarForm(true); }}
-                    className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => excluir(v.id)}
-                    className="rounded-lg p-1.5 text-destructive hover:bg-destructive/10"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>
@@ -339,33 +402,50 @@ function VideosPanel({ toast }: Props) {
   );
 }
 
-function VideoForm({ video, toast, onSalvo, onCancelar }: {
-  video: VideoTutorial | null;
+function HelpContentForm({ item, toast, onSalvo, onCancelar }: {
+  item: HelpContentItem | null;
   toast: Props["toast"];
   onSalvo: () => void;
   onCancelar: () => void;
 }) {
-  const [title, setTitle] = useState(video?.title || "");
-  const [description, setDescription] = useState(video?.description || "");
-  const [videoUrl, setVideoUrl] = useState(video?.video_url || "");
-  const [category, setCategory] = useState(video?.category || "");
-  const [isVisible, setIsVisible] = useState(video?.is_visible ?? true);
+  const [tipo, setTipo] = useState<HelpContentItem["tipo"]>(item?.tipo || "video");
+  const [titulo, setTitulo] = useState(item?.titulo || "");
+  const [corpo, setCorpo] = useState(item?.corpo || "");
+  const [videoUrl, setVideoUrl] = useState(item?.video_url || "");
+  const [categoria, setCategoria] = useState(item?.categoria || "");
+  const [status, setStatus] = useState<HelpContentItem["status"]>(item?.status || "rascunho");
   const [salvando, setSalvando] = useState(false);
 
+  // ⚠️ Mesma regra do backend, espelhada aqui só pra dar feedback antes de
+  // enviar — a validação de verdade continua no servidor.
+  const precisaVideoUrl = tipo === "video";
+  const precisaCorpo = tipo === "faq" || tipo === "guia" || tipo === "novidade";
+
   const salvar = async () => {
-    if (!title.trim() || !videoUrl.trim()) {
-      toast({ title: "Preencha título e link do vídeo", variant: "destructive" });
+    if (!titulo.trim()) {
+      toast({ title: "Preencha o título", variant: "destructive" });
+      return;
+    }
+    if (precisaVideoUrl && !videoUrl.trim()) {
+      toast({ title: "Vídeo precisa de um link", variant: "destructive" });
+      return;
+    }
+    if (precisaCorpo && !corpo.trim()) {
+      toast({ title: `${TIPO_INFO[tipo].label} precisa de um texto`, variant: "destructive" });
       return;
     }
     setSalvando(true);
     try {
-      const dados = { title: title.trim(), description: description.trim(), video_url: videoUrl.trim(), category: category.trim(), is_visible: isVisible };
-      if (video) {
-        await adminApi.updateTutorialVideo(video.id, dados);
+      const dados = {
+        tipo, titulo: titulo.trim(), corpo: corpo.trim(),
+        video_url: videoUrl.trim() || null, categoria: categoria.trim(), status,
+      };
+      if (item) {
+        await adminApi.updateHelpContent(item.id, dados);
       } else {
-        await adminApi.createTutorialVideo(dados);
+        await adminApi.createHelpContent(dados);
       }
-      toast({ title: video ? "Vídeo atualizado" : "Vídeo criado" });
+      toast({ title: item ? "Conteúdo atualizado" : "Conteúdo criado" });
       onSalvo();
     } catch {
       toast({ title: "Erro", description: "Não deu pra salvar", variant: "destructive" });
@@ -377,38 +457,68 @@ function VideoForm({ video, toast, onSalvo, onCancelar }: {
   return (
     <div className="mb-4 space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold">{video ? "Editar vídeo" : "Novo vídeo"}</p>
+        <p className="text-sm font-semibold">{item ? "Editar conteúdo" : "Novo conteúdo"}</p>
         <button onClick={onCancelar} className="rounded-lg p-1 hover:bg-secondary"><X className="h-4 w-4" /></button>
       </div>
+
+      {/* Seletor de tipo — só disponível na criação; mudar o tipo de algo
+          já publicado é raro e arriscado (perderia corpo/video_url sem
+          querer), então mantém fixo na edição. */}
+      {!item ? (
+        <div className="flex gap-1.5">
+          {Object.entries(TIPO_INFO).map(([k, v]) => (
+            <button
+              key={k}
+              onClick={() => setTipo(k as HelpContentItem["tipo"])}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-medium ${
+                tipo === k ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"
+              }`}
+            >
+              <v.icon className="h-3.5 w-3.5" /> {v.label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <Badge variant="outline" className="w-fit">{TIPO_INFO[tipo].label}</Badge>
+      )}
+
       <input
-        type="text" value={title} onChange={(e) => setTitle(e.target.value)}
-        placeholder="Título (ex: Como cadastrar um produto)"
+        type="text" value={titulo} onChange={(e) => setTitulo(e.target.value)}
+        placeholder="Título"
         className="w-full rounded-lg border border-input px-3 py-2 text-sm"
       />
-      <input
-        type="text" value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)}
-        placeholder="Link do vídeo (YouTube)"
-        className="w-full rounded-lg border border-input px-3 py-2 text-sm"
-      />
+
+      {precisaVideoUrl && (
+        <input
+          type="text" value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)}
+          placeholder="Link do vídeo (YouTube)"
+          className="w-full rounded-lg border border-input px-3 py-2 text-sm"
+        />
+      )}
+
+      {(precisaCorpo || tipo === "video") && (
+        <textarea
+          value={corpo} onChange={(e) => setCorpo(e.target.value)}
+          placeholder={tipo === "video" ? "Descrição (opcional)" : "Texto do conteúdo"}
+          rows={precisaCorpo ? 4 : 2}
+          className="w-full rounded-lg border border-input px-3 py-2 text-sm"
+        />
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <input
-          type="text" value={category} onChange={(e) => setCategory(e.target.value)}
+          type="text" value={categoria} onChange={(e) => setCategoria(e.target.value)}
           placeholder="Categoria (ex: Estoque)"
           className="rounded-lg border border-input px-3 py-2 text-sm"
         />
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={isVisible} onChange={(e) => setIsVisible(e.target.checked)} />
-          Visível pras consultoras
-        </label>
+        <select value={status} onChange={(e) => setStatus(e.target.value as HelpContentItem["status"])} className="rounded-lg border border-input px-3 py-2 text-sm">
+          <option value="rascunho">Rascunho</option>
+          <option value="visivel">Visível</option>
+        </select>
       </div>
-      <textarea
-        value={description} onChange={(e) => setDescription(e.target.value)}
-        placeholder="Descrição (opcional)"
-        rows={2}
-        className="w-full rounded-lg border border-input px-3 py-2 text-sm"
-      />
+
       <Button onClick={salvar} disabled={salvando} size="sm" className="w-full">
-        {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : (video ? "Salvar alterações" : "Criar vídeo")}
+        {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : (item ? "Salvar alterações" : "Criar conteúdo")}
       </Button>
     </div>
   );
