@@ -11,7 +11,7 @@ import { toast } from '../components/ui/use-toast';
 
 // 🔹 CRM: Importar utilitários de captura de lead e persistência de carrinho
 import { upsertLead, type LeadInput } from "../lib/leads";
-import { getOrCreateSessionId, persistCart, type CartItemInput } from "../lib/cart";
+import { getOrCreateSessionId, resetSessionId, persistCart, type CartItemInput } from "../lib/cart";
 import CheckoutModal from "../components/CheckoutModal"; // 🔹 CRM: Modal de captura suave
 
 type PaymentMethod = "pix" | "cartao";
@@ -452,6 +452,18 @@ export default function Storefront() {
                 limparLeadCapturado(tenantId);
                 setLeadCaptured(false);
                 setLeadName("");
+                // ⚠️ CORREÇÃO: só limpar o lead não bastava — o session_id
+                // continuava o mesmo, e o backend reaproveita o carrinho
+                // ABERTO daquela sessão (evita duplicar linha a cada
+                // clique de +/-). Se a pessoa anterior tivesse deixado
+                // itens na sacola sem fechar pedido, a próxima pessoa
+                // herdaria esse carrinho — e, pior, se ele já tivesse lead
+                // vinculado, o pedido novo seria atribuído à pessoa errada.
+                // Trocar de cliente agora começa uma sessão nova de
+                // verdade, não só troca o nome mostrado na tela.
+                const novaSessao = resetSessionId(tenantId);
+                setSessionId(novaSessao);
+                setBag([]);
                 toast({ title: "Tudo pronto pra outra pessoa comprar" });
               }}
               className="flex items-center gap-1 font-semibold text-brand hover:underline shrink-0"
