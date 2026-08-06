@@ -28,9 +28,13 @@ const TIPO_INFO: Record<string, { label: string; icon: any }> = {
 };
 const ORDEM_BLOCOS: HelpContentItem["tipo"][] = ["video", "faq", "guia", "novidade"];
 
-/** Extrai só o ID do vídeo, de qualquer formato de link comum do YouTube. */
+/** Extrai só o ID do vídeo, de qualquer formato de link comum do YouTube
+ *  (watch, youtu.be, embed, shorts, live, com ou sem www/m., com parâmetros
+ *  extras como &t=10s). */
 function youtubeId(url: string): string | null {
-  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([a-zA-Z0-9_-]{6,})/);
+  const m = url.match(
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/))([a-zA-Z0-9_-]{6,})/
+  );
   return m ? m[1] : null;
 }
 
@@ -38,9 +42,20 @@ export default function Support() {
   const navigate = useNavigate();
   const [conteudos, setConteudos] = useState<HelpContentItem[]>([]);
   const [itemAtivo, setItemAtivo] = useState<HelpContentItem | null>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState(false);
 
   useEffect(() => {
-    api.get("ajuda/").then((r) => setConteudos(r.data)).catch(() => {});
+    api.get("ajuda/")
+      .then((r) => setConteudos(r.data))
+      // ⚠️ CORREÇÃO: antes o catch não fazia nada — se a requisição
+      // falhasse por qualquer motivo (rede, permissão, servidor fora), a
+      // tela simplesmente mostrava "nenhum conteúdo disponível" igual a
+      // quando realmente não tinha nada cadastrado. Impossível diferenciar
+      // "sem conteúdo" de "deu erro carregando" — agora mostra os dois
+      // estados de forma distinta, com um jeito de tentar de novo.
+      .catch(() => setErro(true))
+      .finally(() => setCarregando(false));
   }, []);
 
   const blocos = ORDEM_BLOCOS.map((tipo) => ({
@@ -61,7 +76,19 @@ export default function Support() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-5 space-y-8">
-        {blocos.length === 0 ? (
+        {carregando ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">Carregando...</p>
+        ) : erro ? (
+          <div className="py-10 text-center">
+            <p className="text-sm text-destructive">Não deu pra carregar a Central de Ajuda agora.</p>
+            <button
+              onClick={() => { setErro(false); setCarregando(true); api.get("ajuda/").then((r) => setConteudos(r.data)).catch(() => setErro(true)).finally(() => setCarregando(false)); }}
+              className="mt-2 text-sm font-medium text-brand hover:underline"
+            >
+              Tentar de novo
+            </button>
+          </div>
+        ) : blocos.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">Nenhum conteúdo disponível ainda.</p>
         ) : (
           blocos.map(({ tipo, info, itens }) => (
@@ -86,6 +113,12 @@ export default function Support() {
                               src={`https://img.youtube.com/vi/${vid}/hqdefault.jpg`}
                               alt={item.titulo}
                               className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                              onError={(e) => {
+                                // ⚠️ hqdefault às vezes não existe pra vídeos
+                                // muito novos/curtos — cai pro placeholder em
+                                // vez de mostrar um ícone de imagem quebrada.
+                                (e.target as HTMLImageElement).style.display = "none";
+                              }}
                             />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center">

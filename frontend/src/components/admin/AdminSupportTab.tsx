@@ -1,6 +1,6 @@
 // src/components/admin/AdminSupportTab.tsx
 import { useState, useEffect } from "react";
-import { MessageCircle, Video, RefreshCw, Send, Loader2, Plus, Trash2, Pencil, User, ShieldCheck, Sparkles, X, BookOpen, HelpCircle, Newspaper } from "lucide-react";
+import { MessageCircle, Video, RefreshCw, Send, Loader2, Plus, Trash2, Pencil, User, ShieldCheck, Sparkles, X, BookOpen, HelpCircle, Newspaper, Search, AlertTriangle, Bot, CheckCircle2, Archive } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
@@ -78,11 +78,41 @@ export default function AdminSupportTab({ toast }: Props) {
 // ─────────────────────────────────────────────────────────────
 // Conversas
 // ─────────────────────────────────────────────────────────────
+const STATUS_COR: Record<string, string> = {
+  escalated: "bg-amber-50 text-amber-700 border-amber-200",
+  ai_handling: "bg-blue-50 text-blue-700 border-blue-200",
+  resolved: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  closed: "bg-secondary text-muted-foreground border-border",
+};
+const STATUS_ICON: Record<string, any> = {
+  escalated: AlertTriangle,
+  ai_handling: Bot,
+  resolved: CheckCircle2,
+  closed: Archive,
+};
+
+/** Horário relativo, estilo helpdesk ("há 2 min", "ontem", "há 5 dias"). */
+function tempoRelativo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `há ${h}h`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return "ontem";
+  if (d < 7) return `há ${d} dias`;
+  return new Date(iso).toLocaleDateString("pt-BR");
+}
+
 function ConversationsPanel({ toast }: Props) {
   const [conversas, setConversas] = useState<Conversa[]>([]);
   const [loading, setLoading] = useState(true);
   const [filtro, setFiltro] = useState<string>("escalated");
+  const [busca, setBusca] = useState("");
+  const [ativaId, setAtivaId] = useState<string | null>(null);
   const [ativa, setAtiva] = useState<Conversa | null>(null);
+  const [carregandoDetalhe, setCarregandoDetalhe] = useState(false);
   const [resposta, setResposta] = useState("");
   const [enviando, setEnviando] = useState(false);
 
@@ -101,11 +131,15 @@ function ConversationsPanel({ toast }: Props) {
   useEffect(() => { carregar(); }, [filtro]);
 
   const abrir = async (id: string) => {
+    setAtivaId(id);
+    setCarregandoDetalhe(true);
     try {
       const dados = await adminApi.getSupportConversation(id);
       setAtiva(dados);
     } catch {
       toast({ title: "Erro", description: "Não deu pra abrir essa conversa", variant: "destructive" });
+    } finally {
+      setCarregandoDetalhe(false);
     }
   };
 
@@ -136,117 +170,177 @@ function ConversationsPanel({ toast }: Props) {
     }
   };
 
-  if (ativa) {
-    return (
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <button onClick={() => setAtiva(null)} className="text-xs text-muted-foreground hover:text-foreground mb-1">
-              ← Voltar pra lista
-            </button>
-            <CardTitle className="text-base">{ativa.subject || "(sem assunto)"}</CardTitle>
-            <CardDescription>{ativa.store_name} · {ativa.store_owner_email}</CardDescription>
-          </div>
-          <div className="flex gap-2">
-            <Badge variant={ativa.category === "bug" ? "destructive" : "secondary"}>
-              {ativa.category === "bug" ? "Erro" : "Dúvida"}
-            </Badge>
-            <Badge variant="outline">{STATUS_LABEL[ativa.status]}</Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="max-h-96 space-y-3 overflow-y-auto rounded-lg border border-border p-3">
-            {(ativa.messages || []).map((m) => (
-              <div key={m.id} className={`flex ${m.sender === "admin" ? "justify-end" : "justify-start"}`}>
-                <div className={`flex max-w-[80%] items-start gap-2 ${m.sender === "admin" ? "flex-row-reverse" : ""}`}>
-                  <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
-                    m.sender === "admin" ? "bg-emerald-500 text-white" : m.sender === "ai" ? "bg-primary/15 text-primary" : "bg-secondary"
-                  }`}>
-                    {m.sender === "admin" ? <ShieldCheck className="h-3.5 w-3.5" /> : m.sender === "ai" ? <Sparkles className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
-                  </div>
-                  <div className={`rounded-2xl px-3 py-2 text-sm ${m.sender === "admin" ? "bg-emerald-500 text-white" : "bg-secondary"}`}>
-                    {m.content}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+  const conversasFiltradas = busca.trim()
+    ? conversas.filter((c) =>
+        (c.subject || "").toLowerCase().includes(busca.toLowerCase()) ||
+        c.store_name.toLowerCase().includes(busca.toLowerCase()) ||
+        (c.store_owner_email || "").toLowerCase().includes(busca.toLowerCase())
+      )
+    : conversas;
 
-          {ativa.status !== "resolved" && ativa.status !== "closed" && (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={resposta}
-                onChange={(e) => setResposta(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && responder()}
-                placeholder="Responder à consultora..."
-                className="flex-1 rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-primary"
-              />
-              <Button onClick={responder} disabled={enviando || !resposta.trim()} size="sm">
-                {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </Button>
-            </div>
-          )}
-
-          <div className="flex gap-2 border-t border-border pt-3">
-            <Button size="sm" variant="outline" onClick={() => mudarStatus("resolved")} disabled={ativa.status === "resolved"}>
-              Marcar como resolvida
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => mudarStatus("closed")} disabled={ativa.status === "closed"}>
-              Encerrar
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  // Resumo rápido por status — visão de triagem de helpdesk, sem precisar
+  // trocar o filtro pra saber o volume de cada fila.
+  const resumo = {
+    escalated: conversas.filter((c) => c.status === "escalated").length,
+    ai_handling: conversas.filter((c) => c.status === "ai_handling").length,
+  };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base">Conversas</CardTitle>
-        <div className="flex items-center gap-2">
-          <select
-            value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
-            className="rounded-lg border border-input px-2 py-1.5 text-xs"
-          >
-            <option value="escalated">Aguardando equipe</option>
-            <option value="ai_handling">Amorinha respondendo</option>
-            <option value="resolved">Resolvidas</option>
-            <option value="closed">Encerradas</option>
-            <option value="">Todas</option>
-          </select>
-          <button onClick={carregar} className="rounded-lg border border-border p-1.5 hover:bg-secondary">
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          </button>
+    <Card className="overflow-hidden">
+      <CardHeader className="border-b border-border pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">Conversas</CardTitle>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5 text-amber-500" /> {resumo.escalated} aguardando</span>
+            <span className="flex items-center gap-1"><Bot className="h-3.5 w-3.5 text-blue-500" /> {resumo.ai_handling} com a Amorinha</span>
+            <button onClick={carregar} className="rounded-lg border border-border p-1.5 hover:bg-secondary">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
         </div>
       </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
-        ) : conversas.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Nenhuma conversa aqui.</p>
-        ) : (
-          <div className="space-y-2">
-            {conversas.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => abrir(c.id)}
-                className="flex w-full items-center justify-between gap-3 rounded-lg border border-border p-3 text-left hover:border-primary/30"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{c.subject || "(sem assunto)"}</p>
-                  <p className="text-xs text-muted-foreground">{c.store_name} · {c.store_owner_email}</p>
-                </div>
-                <Badge variant={c.category === "bug" ? "destructive" : "secondary"} className="shrink-0 text-[10px]">
-                  {c.category === "bug" ? "Erro" : "Dúvida"}
-                </Badge>
-              </button>
-            ))}
+
+      {/* Tela dividida — lista à esquerda, conversa aberta à direita, lado
+          a lado (padrão de qualquer helpdesk profissional: Zendesk,
+          Intercom etc.) — não troca de tela, só troca o painel direito. */}
+      <div className="flex h-[600px]">
+        <div className="flex w-[320px] shrink-0 flex-col border-r border-border">
+          <div className="space-y-2 border-b border-border p-3">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar por loja ou assunto..."
+                className="w-full rounded-lg border border-input py-1.5 pl-8 pr-2 text-xs outline-none focus:border-primary"
+              />
+            </div>
+            <select
+              value={filtro}
+              onChange={(e) => setFiltro(e.target.value)}
+              className="w-full rounded-lg border border-input px-2 py-1.5 text-xs"
+            >
+              <option value="escalated">Aguardando equipe</option>
+              <option value="ai_handling">Amorinha respondendo</option>
+              <option value="resolved">Resolvidas</option>
+              <option value="closed">Encerradas</option>
+              <option value="">Todas</option>
+            </select>
           </div>
-        )}
-      </CardContent>
+
+          <div className="flex-1 overflow-y-auto">
+            {loading ? (
+              <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            ) : conversasFiltradas.length === 0 ? (
+              <p className="px-3 py-8 text-center text-sm text-muted-foreground">Nenhuma conversa aqui.</p>
+            ) : (
+              conversasFiltradas.map((c) => {
+                const StatusIcon = STATUS_ICON[c.status];
+                const selecionada = c.id === ativaId;
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => abrir(c.id)}
+                    className={`flex w-full flex-col gap-1 border-b border-border p-3 text-left transition-colors ${
+                      selecionada ? "bg-primary/5" : "hover:bg-secondary/50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-sm font-medium text-foreground">{c.store_name}</p>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">{tempoRelativo(c.updated_at)}</span>
+                    </div>
+                    <p className="truncate text-xs text-muted-foreground">{c.subject || "(sem assunto)"}</p>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${STATUS_COR[c.status]}`}>
+                        <StatusIcon className="h-2.5 w-2.5" /> {STATUS_LABEL[c.status]}
+                      </span>
+                      {c.category === "bug" && (
+                        <Badge variant="destructive" className="text-[10px]">Erro</Badge>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Painel direito — a conversa aberta */}
+        <div className="flex flex-1 flex-col">
+          {!ativaId ? (
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+              Selecione uma conversa pra ver os detalhes
+            </div>
+          ) : carregandoDetalhe || !ativa ? (
+            <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between border-b border-border p-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{ativa.subject || "(sem assunto)"}</p>
+                  <p className="text-xs text-muted-foreground">{ativa.store_name} · {ativa.store_owner_email}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={ativa.category === "bug" ? "destructive" : "secondary"} className="text-[10px]">
+                    {ativa.category === "bug" ? "Erro" : "Dúvida"}
+                  </Badge>
+                  <span className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${STATUS_COR[ativa.status]}`}>
+                    {STATUS_LABEL[ativa.status]}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex-1 space-y-3 overflow-y-auto p-4">
+                {(ativa.messages || []).map((m) => (
+                  <div key={m.id} className={`flex ${m.sender === "admin" ? "justify-end" : "justify-start"}`}>
+                    <div className={`flex max-w-[75%] items-start gap-2 ${m.sender === "admin" ? "flex-row-reverse" : ""}`}>
+                      <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                        m.sender === "admin" ? "bg-emerald-500 text-white" : m.sender === "ai" ? "bg-primary/15 text-primary" : "bg-secondary"
+                      }`}>
+                        {m.sender === "admin" ? <ShieldCheck className="h-3.5 w-3.5" /> : m.sender === "ai" ? <Sparkles className="h-3.5 w-3.5" /> : <User className="h-3.5 w-3.5" />}
+                      </div>
+                      <div>
+                        <div className={`rounded-2xl px-3 py-2 text-sm ${m.sender === "admin" ? "bg-emerald-500 text-white" : "bg-secondary"}`}>
+                          {m.content}
+                        </div>
+                        <p className={`mt-0.5 text-[10px] text-muted-foreground ${m.sender === "admin" ? "text-right" : ""}`}>
+                          {tempoRelativo(m.created_at)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {ativa.status !== "resolved" && ativa.status !== "closed" && (
+                <div className="flex gap-2 border-t border-border p-3">
+                  <input
+                    type="text"
+                    value={resposta}
+                    onChange={(e) => setResposta(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && responder()}
+                    placeholder="Responder à consultora..."
+                    className="flex-1 rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
+                  <Button onClick={responder} disabled={enviando || !resposta.trim()} size="sm">
+                    {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
+              )}
+
+              <div className="flex gap-2 border-t border-border p-3">
+                <Button size="sm" variant="outline" onClick={() => mudarStatus("resolved")} disabled={ativa.status === "resolved"}>
+                  Marcar como resolvida
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => mudarStatus("closed")} disabled={ativa.status === "closed"}>
+                  Encerrar
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </Card>
   );
 }

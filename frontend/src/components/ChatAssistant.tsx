@@ -53,9 +53,15 @@ export const ChatAssistant: React.FC = () => {
   });
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  // Uma vez que uma dúvida de ajuda escala pra humano, TODA mensagem
-  // seguinte vai direto pra essa conversa — não tenta mais nada.
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  // ⚠️ CORREÇÃO: antes só vivia em memória (useState puro) — se a página
+  // recarregasse, a conversa "esquecia" que já tinha sido escalada, e a
+  // próxima mensagem passava pelo roteamento inteiro de novo (podendo
+  // escalar uma SEGUNDA conversa duplicada). Agora persiste igual o
+  // histórico de mensagens já persistia.
+  const [conversationId, setConversationId] = useState<string | null>(() => localStorage.getItem("supportConversationId"));
+  // Quantas mensagens dessa conversa a consultora já viu — usado só pra
+  // saber se tem resposta nova do atendente que ela ainda não abriu.
+  const [hasUnread, setHasUnread] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -68,6 +74,71 @@ export const ChatAssistant: React.FC = () => {
   useEffect(() => {
     if (isOpen) inputRef.current?.focus();
   }, [isOpen]);
+
+  useEffect(() => {
+    if (conversationId) localStorage.setItem("supportConversationId", conversationId);
+    else localStorage.removeItem("supportConversationId");
+  }, [conversationId]);
+
+  // Ao abrir o chat, o que estava esperando resposta já foi visto.
+  useEffect(() => {
+    if (isOpen) setHasUnread(false);
+  }, [isOpen]);
+
+  // Ref auxiliar pra saber, DENTRO do polling abaixo, se o chat está
+  // aberto no momento exato em que a resposta chega — sem isso, a closure
+  // do useEffect de polling capturaria o valor de `isOpen` de quando o
+  // efeito rodou (o polling só reinicia quando conversationId muda, não a
+  // cada render), sempre desatualizado.
+  const isOpenRef = useRef(isOpen);
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  // ── Notificação de resposta do atendente ──
+  // Verifica periodicamente (só quando existe uma conversa escalada ativa)
+  // se chegou mensagem nova da equipe desde a última vez que a consultora
+  // olhou. Roda mesmo com o chat fechado — é exatamente aí que a
+  // notificação faz diferença (senão ela só saberia abrindo por acaso).
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const verificarNovaResposta = async () => {
+      try {
+        const res = await api.get(`chat/support/conversations/${conversationId}/`);
+        const conv = res.data;
+
+        if (conv.status === "resolved" || conv.status === "closed") {
+          // Conversa encerrada — a próxima dúvida começa uma conversa nova.
+          setConversationId(null);
+          localStorage.removeItem("supportLastSeenMsgId");
+          return;
+        }
+
+        const ultimaMsg = conv.messages?.[conv.messages.length - 1];
+        if (!ultimaMsg || ultimaMsg.sender !== "admin") return;
+
+        const jaViuEssaResposta = localStorage.getItem("supportLastSeenMsgId") === String(ultimaMsg.id);
+        if (jaViuEssaResposta) return;
+
+        // Mensagem nova da equipe: adiciona ao histórico visível (se ainda
+        // não estiver lá) e marca como não-lida se o chat estiver fechado.
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === `admin-${ultimaMsg.id}`)) return prev;
+          return [...prev, { id: `admin-${ultimaMsg.id}`, role: "assistant", content: ultimaMsg.content, timestamp: new Date(ultimaMsg.created_at) }];
+        });
+        localStorage.setItem("supportLastSeenMsgId", String(ultimaMsg.id));
+        if (!isOpenRef.current) setHasUnread(true);
+      } catch {
+        // Falha de rede numa verificação de fundo não merece incomodar a
+        // consultora com mensagem de erro — só tenta de novo no próximo ciclo.
+      }
+    };
+
+    verificarNovaResposta();
+    const intervalo = setInterval(verificarNovaResposta, 45000);
+    return () => clearInterval(intervalo);
+  }, [conversationId]);
 
   const handleSend = async (text?: string) => {
     const msg = text || input.trim();
@@ -135,26 +206,39 @@ export const ChatAssistant: React.FC = () => {
           ══════════════════════════════════════════ */}
       <AnimatePresence>
         {!isOpen && (
-          <motion.button
-            initial={{ scale: 0, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0, opacity: 0 }}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => setIsOpen(true)}
-            className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-brand shadow-lg shadow-brand/30 transition-shadow hover:shadow-xl hover:shadow-brand/40 overflow-hidden"
-          >
-            <img
-              src={amorinhaAvatar}
-              alt="Amorinha"
-              className="h-full w-full object-cover"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-                (e.target as HTMLImageElement).parentElement!.innerHTML =
-                  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
-              }}
-            />
-          </motion.button>
+          <div className="fixed bottom-6 right-6 z-50">
+            <motion.button
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0, opacity: 0 }}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setIsOpen(true)}
+              className="relative flex h-14 w-14 items-center justify-center rounded-full bg-brand shadow-lg shadow-brand/30 transition-shadow hover:shadow-xl hover:shadow-brand/40 overflow-hidden"
+            >
+              <img
+                src={amorinhaAvatar}
+                alt="Amorinha"
+                className="h-full w-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).style.display = "none";
+                  (e.target as HTMLImageElement).parentElement!.innerHTML =
+                    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+                }}
+              />
+            </motion.button>
+            {/* Notificação: resposta do atendente chegou e a consultora
+                ainda não abriu o chat pra ver. */}
+            {hasUnread && (
+              <motion.span
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-white ring-2 ring-background"
+              >
+                1
+              </motion.span>
+            )}
+          </div>
         )}
       </AnimatePresence>
 
