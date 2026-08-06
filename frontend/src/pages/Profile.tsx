@@ -4,12 +4,20 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, User, Mail, Phone, Store, Crown, Calendar,
   CreditCard, Save, Loader2, CheckCircle2, AlertTriangle, Copy, Check, ExternalLink,
+  PlayCircle, BookOpen,
 } from "lucide-react";
 import { profileApi, Profile as ProfileType } from "../lib/api";
+import { api } from "../services/api";
 import { useAuth } from "../hooks/useAuth";
 import { usePlan } from "../hooks/usePlan";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { Badge } from "../components/ui/badge";
+
+// Extrai o ID de embed do YouTube de qualquer formato de link comum.
+function youtubeEmbedUrl(url: string): string | null {
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([a-zA-Z0-9_-]{6,})/);
+  return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+}
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -21,6 +29,8 @@ export default function Profile() {
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const [profile, setProfile] = useState<ProfileType | null>(null);
+  const [videosAjuda, setVideosAjuda] = useState<{ id: number; titulo: string; video_url: string | null; corpo: string }[]>([]);
+  const [videoAtivo, setVideoAtivo] = useState<{ titulo: string; video_url: string | null; corpo: string } | null>(null);
 
   const [form, setForm] = useState({
     display_name: "",
@@ -30,6 +40,10 @@ export default function Profile() {
 
   useEffect(() => {
     if (!user) return;
+
+    // "Aprenda a usar" — mesmo endpoint que a Central de Ajuda da página
+    // de suporte usa (GET /api/ajuda/), só filtrado por tipo=video aqui.
+    api.get("ajuda/?tipo=video").then((r) => setVideosAjuda(r.data)).catch(() => {});
 
     profileApi
       .get()
@@ -356,6 +370,34 @@ export default function Profile() {
         </div>
 
         {/* ══════════════════════════════════════════
+            APRENDA A USAR
+            ══════════════════════════════════════════ */}
+        {videosAjuda.length > 0 && (
+          <div className="mb-6 rounded-xl border border-border bg-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                <BookOpen className="h-4 w-4 text-brand" /> Aprenda a usar
+              </h3>
+              <button onClick={() => navigate("/support")} className="text-xs text-brand hover:underline">
+                Ver central de ajuda
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2.5">
+              {videosAjuda.slice(0, 4).map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => setVideoAtivo(v)}
+                  className="flex flex-col items-start gap-2 rounded-lg border border-border p-3 text-left hover:border-brand/30"
+                >
+                  <PlayCircle className="h-5 w-5 text-brand" />
+                  <span className="line-clamp-2 text-xs font-medium text-foreground">{v.titulo}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════
             SAVE BUTTON
             ══════════════════════════════════════════ */}
         <button
@@ -371,6 +413,35 @@ export default function Profile() {
           Salvar Perfil
         </button>
       </main>
+
+      {videoAtivo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setVideoAtivo(null)}
+        >
+          <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="aspect-video w-full overflow-hidden rounded-xl bg-black">
+              {videoAtivo.video_url && youtubeEmbedUrl(videoAtivo.video_url) ? (
+                <iframe
+                  className="h-full w-full"
+                  src={youtubeEmbedUrl(videoAtivo.video_url)!}
+                  title={videoAtivo.titulo}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : (
+                <a href={videoAtivo.video_url || "#"} target="_blank" rel="noopener noreferrer" className="flex h-full items-center justify-center text-white underline">
+                  Abrir vídeo
+                </a>
+              )}
+            </div>
+            <div className="mt-3 rounded-xl bg-card p-3">
+              <p className="font-medium text-foreground">{videoAtivo.titulo}</p>
+              {videoAtivo.corpo && <p className="mt-1 text-sm text-muted-foreground">{videoAtivo.corpo}</p>}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

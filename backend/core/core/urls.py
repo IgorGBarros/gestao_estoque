@@ -39,6 +39,7 @@ urlpatterns = [
     path('', include('inventory.urls')),                    # estoque, vendas, perfil, relatórios
     path('api/admin/', include('inventory.admin_urls')),    # painel administrativo
     path('api/chat/', include('ai.urls')),                  # assistente Amorinha
+    path('api/ajuda/', include('ai.ajuda_urls')),            # Central de Ajuda — endpoint único de consumo
     path('api/payments/', include('apps.payments.urls')),   # Asaas
     path('api/developers/', include('apps.developers.urls')),  # login/cadastro de desenvolvedor (produto de API)
     path('api/v1/', include('inventory.api_comercial_urls')),  # catálogo/lookup/ping — a API comercial de verdade

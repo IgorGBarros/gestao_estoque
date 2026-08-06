@@ -140,3 +140,41 @@ def tutorial_videos(request):
         }
         for v in videos
     ])
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def ajuda_list(request):
+    """
+    GET /api/ajuda/?tipo=&categoria=&status=
+
+    Endpoint ÚNICO de consumo da Central de Ajuda — a página de suporte e
+    a seção "Aprenda a usar" do profile usam exatamente este endpoint,
+    só com filtros diferentes (Etapa 2: "zero conteúdo duplicado"). A
+    busca do chat (Etapa 4) também reaproveita este mesmo dado, não bate
+    noutro lugar.
+
+    ⚠️ status é sempre 'visivel' aqui, e NÃO é sobrescrito por query string
+    — rascunho nunca deve aparecer pra consultora, mesmo que ela tente
+    forçar via URL. O parâmetro "status" existe só pra manter a mesma
+    assinatura do endpoint de admin; do lado da consultora ele é ignorado
+    de propósito, não é um "default" que dá pra trocar.
+    """
+    from .models import HelpContent
+    itens = HelpContent.objects.filter(status='visivel')
+
+    tipo = request.GET.get('tipo')
+    categoria = request.GET.get('categoria')
+
+    if tipo:
+        itens = itens.filter(tipo=tipo)
+    if categoria:
+        itens = itens.filter(categoria=categoria)
+
+    return Response([
+        {
+            'id': c.id, 'tipo': c.tipo, 'titulo': c.titulo, 'corpo': c.corpo,
+            'video_url': c.video_url, 'categoria': c.categoria, 'ordem': c.ordem,
+        }
+        for c in itens
+    ])
