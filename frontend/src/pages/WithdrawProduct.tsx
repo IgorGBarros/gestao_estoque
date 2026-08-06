@@ -66,11 +66,11 @@ export default function WithdrawProduct() {
 
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { isFeatureEnabled } = useFeatureGates();
+  const { isLocked } = useFeatureGates();
   const { toast } = useToast();
 
   const handleScannerClick = () => {
-    if (!isFeatureEnabled("barcode_scanner")) {
+    if (isLocked("barcode_scanner")) {
       setShowUpgrade(true);
       return;
     }
@@ -279,7 +279,7 @@ export default function WithdrawProduct() {
               ════════════════════════════════ */}
           {step === 0 && (
             <motion.div key="scan" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
-              {showScanner && !isFeatureEnabled("barcode_scanner") ? (
+              {showScanner && !isLocked("barcode_scanner") ? (
                 <div className="space-y-4">
                   <BarcodeScanner
                     onScan={handleBarcodeScan}
@@ -315,24 +315,24 @@ export default function WithdrawProduct() {
                   <button
                     onClick={handleScannerClick}
                     className={`w-full flex items-center justify-between p-4 border border-border rounded-xl hover:bg-secondary text-left group transition-all ${
-                      isFeatureEnabled("barcode_scanner") ? "opacity-80" : ""
+                      isLocked("barcode_scanner") ? "opacity-80" : ""
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <div
                         className={`p-2 rounded-lg ${
-                          !isFeatureEnabled("barcode_scanner") ? "bg-brand/10 text-brand" : "bg-muted text-muted-foreground"
+                          !isLocked("barcode_scanner") ? "bg-brand/10 text-brand" : "bg-muted text-muted-foreground"
                         }`}
                       >
-                        {!isFeatureEnabled("barcode_scanner") ? <ScanBarcode size={20} /> : <Lock size={20} />}
+                        {!isLocked("barcode_scanner") ? <ScanBarcode size={20} /> : <Lock size={20} />}
                       </div>
                       <div>
                         <p className="font-bold text-sm text-foreground flex items-center gap-2">
                           Escanear com Câmera
-                          {isFeatureEnabled("barcode_scanner") && <ProBadge />}
+                          {isLocked("barcode_scanner") && <ProBadge />}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {!isFeatureEnabled("barcode_scanner") ? "Use a câmera para ler o código de barras" : "Exclusivo para assinantes PRO"}
+                          {!isLocked("barcode_scanner") ? "Use a câmera para ler o código de barras" : "Exclusivo para assinantes PRO"}
                         </p>
                       </div>
                     </div>
