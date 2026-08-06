@@ -5,7 +5,6 @@ import {
   Package, TrendingDown, DollarSign, BarChart3, ScanBarcode, List,
   ArrowDownCircle, Settings, PieChart, Store, History, User, Bell, CheckCircle2,
   Users,
-  HelpCircle,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { statsApi } from "../lib/api";
@@ -175,7 +174,10 @@ export default function Index() {
           <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" />
           <ActionBtn onClick={() => navigate("/history")} icon={History} label="Extrato" desc="Movimentações" />
           <ActionBtn onClick={() => navigate("/crm")} icon={Users} label="Meus Clientes" desc="Quem comprou na vitrine" />
-          <ActionBtn onClick={() => navigate("/support")} icon={HelpCircle} label="Ajuda" desc="Suporte e vídeos" />
+          {/* ⚠️ REMOVIDO (Etapa 3): botão de Ajuda que levava direto pra
+              /support. O acesso à ajuda agora vive dentro do Profile
+              (seção "Aprenda a usar" + link "Ver central de ajuda"),
+              deixando o Index só com as ações do dia a dia de estoque. */}
           <ActionBtn
             onClick={() => {
               // Bloqueado: oferece o upgrade em vez de levar a uma tela que

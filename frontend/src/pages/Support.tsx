@@ -1,10 +1,9 @@
-// pages/Support.tsx
+// pages/Support.tsx — Central de Ajuda
 //
-// ⚠️ Simplificado: o fluxo de conversa ("Falar com a gente") mudou pra
-// dentro do ChatAssistant.tsx (o balão flutuante global, modo 🆘 Ajuda) —
-// esta página agora é só a Central de Ajuda (listagem agrupada por
-// categoria, com filtro por tipo). Consome o MESMO GET /api/ajuda/ que a
-// seção "Aprenda a usar" do profile usa.
+// Blocos separados por tipo (Vídeos, FAQs, Guias, Novidades), cada um com
+// os itens daquele tipo. Vídeos mostram thumbnail (extraída do próprio
+// link do YouTube) e tocam DENTRO do sistema, num modal com iframe — nunca
+// abrem o YouTube numa aba nova.
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, PlayCircle, HelpCircle, BookOpen, Newspaper } from "lucide-react";
@@ -22,34 +21,33 @@ interface HelpContentItem {
 }
 
 const TIPO_INFO: Record<string, { label: string; icon: any }> = {
-  video: { label: "Vídeo", icon: PlayCircle },
-  faq: { label: "Dúvida frequente", icon: HelpCircle },
-  guia: { label: "Guia", icon: BookOpen },
-  novidade: { label: "Novidade", icon: Newspaper },
+  video: { label: "Vídeos", icon: PlayCircle },
+  faq: { label: "Dúvidas Frequentes", icon: HelpCircle },
+  guia: { label: "Guias", icon: BookOpen },
+  novidade: { label: "Novidades", icon: Newspaper },
 };
+const ORDEM_BLOCOS: HelpContentItem["tipo"][] = ["video", "faq", "guia", "novidade"];
 
-// Extrai o ID de embed do YouTube de qualquer formato de link comum.
-function youtubeEmbedUrl(url: string): string | null {
+/** Extrai só o ID do vídeo, de qualquer formato de link comum do YouTube. */
+function youtubeId(url: string): string | null {
   const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([a-zA-Z0-9_-]{6,})/);
-  return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+  return m ? m[1] : null;
 }
 
 export default function Support() {
   const navigate = useNavigate();
   const [conteudos, setConteudos] = useState<HelpContentItem[]>([]);
-  const [filtroTipo, setFiltroTipo] = useState<string>("");
   const [itemAtivo, setItemAtivo] = useState<HelpContentItem | null>(null);
 
   useEffect(() => {
     api.get("ajuda/").then((r) => setConteudos(r.data)).catch(() => {});
   }, []);
 
-  const filtrados = filtroTipo ? conteudos.filter((c) => c.tipo === filtroTipo) : conteudos;
-  const grupos = filtrados.reduce<Record<string, HelpContentItem[]>>((acc, item) => {
-    const chave = item.categoria || "Geral";
-    (acc[chave] ||= []).push(item);
-    return acc;
-  }, {});
+  const blocos = ORDEM_BLOCOS.map((tipo) => ({
+    tipo,
+    info: TIPO_INFO[tipo],
+    itens: conteudos.filter((c) => c.tipo === tipo),
+  })).filter((b) => b.itens.length > 0);
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -62,57 +60,75 @@ export default function Support() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-5 space-y-5">
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => setFiltroTipo("")}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${!filtroTipo ? "bg-brand text-white" : "bg-secondary text-muted-foreground"}`}
-          >
-            Tudo
-          </button>
-          {Object.entries(TIPO_INFO).map(([k, v]) => (
-            <button
-              key={k}
-              onClick={() => setFiltroTipo(k)}
-              className={`rounded-full px-3 py-1 text-xs font-medium ${filtroTipo === k ? "bg-brand text-white" : "bg-secondary text-muted-foreground"}`}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
-
-        {Object.keys(grupos).length === 0 ? (
+      <main className="mx-auto max-w-3xl px-4 py-5 space-y-8">
+        {blocos.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">Nenhum conteúdo disponível ainda.</p>
         ) : (
-          Object.entries(grupos).map(([categoria, itens]) => (
-            <div key={categoria}>
-              <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">{categoria}</h3>
-              <div className="space-y-2">
-                {itens.map((item) => {
-                  const info = TIPO_INFO[item.tipo];
-                  const Icon = info.icon;
-                  return (
+          blocos.map(({ tipo, info, itens }) => (
+            <section key={tipo}>
+              <h2 className="mb-3 flex items-center gap-2 font-display text-base font-bold text-foreground">
+                <info.icon className="h-4.5 w-4.5 text-brand" /> {info.label}
+              </h2>
+
+              {tipo === "video" ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {itens.map((item) => {
+                    const vid = item.video_url ? youtubeId(item.video_url) : null;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => setItemAtivo(item)}
+                        className="group text-left"
+                      >
+                        <div className="relative aspect-video overflow-hidden rounded-xl bg-secondary">
+                          {vid ? (
+                            <img
+                              src={`https://img.youtube.com/vi/${vid}/hqdefault.jpg`}
+                              alt={item.titulo}
+                              className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center">
+                              <PlayCircle className="h-8 w-8 text-muted-foreground" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 transition-opacity group-hover:opacity-100">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/90">
+                              <PlayCircle className="h-5 w-5 text-brand" />
+                            </div>
+                          </div>
+                        </div>
+                        <p className="mt-1.5 line-clamp-2 text-xs font-medium text-foreground">{item.titulo}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {itens.map((item) => (
                     <button
                       key={item.id}
                       onClick={() => setItemAtivo(item)}
                       className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-brand/30"
                     >
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand/10">
-                        <Icon className="h-5 w-5 text-brand" />
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand/10">
+                        <info.icon className="h-5 w-5 text-brand" />
                       </div>
                       <div className="min-w-0">
                         <p className="truncate font-medium text-foreground">{item.titulo}</p>
-                        <p className="text-xs text-muted-foreground">{info.label}</p>
+                        {item.categoria && <p className="text-xs text-muted-foreground">{item.categoria}</p>}
                       </div>
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                  ))}
+                </div>
+              )}
+            </section>
           ))
         )}
       </main>
 
+      {/* Player embutido — o vídeo toca AQUI DENTRO, nunca abre o YouTube
+          numa aba nova. */}
       {itemAtivo && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
@@ -122,18 +138,16 @@ export default function Support() {
             {itemAtivo.tipo === "video" && itemAtivo.video_url ? (
               <>
                 <div className="aspect-video w-full overflow-hidden rounded-xl bg-black">
-                  {youtubeEmbedUrl(itemAtivo.video_url) ? (
+                  {youtubeId(itemAtivo.video_url) ? (
                     <iframe
                       className="h-full w-full"
-                      src={youtubeEmbedUrl(itemAtivo.video_url)!}
+                      src={`https://www.youtube.com/embed/${youtubeId(itemAtivo.video_url)}?autoplay=1`}
                       title={itemAtivo.titulo}
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       allowFullScreen
                     />
                   ) : (
-                    <a href={itemAtivo.video_url} target="_blank" rel="noopener noreferrer" className="flex h-full items-center justify-center text-white underline">
-                      Abrir vídeo
-                    </a>
+                    <div className="flex h-full items-center justify-center text-white">Vídeo indisponível</div>
                   )}
                 </div>
                 <div className="mt-3 rounded-xl bg-card p-3">

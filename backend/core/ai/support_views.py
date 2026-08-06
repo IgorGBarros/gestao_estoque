@@ -179,39 +179,42 @@ def ajuda_list(request):
         for c in itens
     ])
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def help_search(request):
+def _buscar_ou_escalar(query, store):
     """
-    POST /api/chat/help-search/
-    Body: {"query": "..."}
+    Núcleo compartilhado entre help_search (mantido por compatibilidade) e
+    chat_unified (novo) — busca em HelpContent, senão escala pra humano.
+    Sempre loga em HelpSearchLog, ache ou não.
 
-    Modo "🆘 Preciso de ajuda" do chat unificado — busca em HelpContent
-    (título+corpo, ILIKE), até 3 resultados. Sem resultado nenhum, escala
-    automaticamente pra humano (reaproveita o MESMO fluxo de escalada de
-    SupportConversation que já existe, não inventa um novo caminho). Toda
-    busca é logada em HelpSearchLog — vira backlog de conteúdo pro admin
-    (pergunta que ninguém respondeu = candidato a FAQ nova).
+    ⚠️ Busca por PALAVRAS-CHAVE, não pela frase inteira como substring — o
+    chat unificado manda a pergunta em linguagem natural completa (ex:
+    "como funciona a vitrine da minha loja"), e um icontains da FRASE
+    INTEIRA quase nunca bate contra um título curto como "Como funciona a
+    vitrine?" (o título não CONTÉM a pergunta completa). Em vez disso,
+    separa em palavras relevantes (ignora as muito curtas/comuns em
+    português) e busca conteúdo que contenha QUALQUER uma delas.
     """
+    import re
     from django.db.models import Q
     from .models import HelpContent, HelpSearchLog
 
-    store = get_current_store(request.user)
-    if not store:
-        return Response({'error': 'Nenhuma loja associada a este usuário.'}, status=status.HTTP_400_BAD_REQUEST)
+    PALAVRAS_COMUNS = {
+        'como', 'que', 'para', 'com', 'uma', 'um', 'de', 'da', 'do', 'das', 'dos',
+        'no', 'na', 'nos', 'nas', 'os', 'as', 'meu', 'minha', 'meus', 'minhas',
+        'eu', 'se', 'por', 'não', 'sim', 'mais', 'muito', 'aqui', 'ali', 'isso',
+        'esse', 'essa', 'este', 'esta', 'qual', 'quais', 'quando', 'onde',
+    }
+    palavras = [p for p in re.findall(r'\w+', query.lower(), flags=re.UNICODE) if len(p) >= 3 and p not in PALAVRAS_COMUNS]
 
-    query = (request.data.get('query') or '').strip()
-    if not query:
-        return Response({'error': 'query não pode ser vazia.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    resultados = list(
-        HelpContent.objects.filter(status='visivel')
-        .filter(Q(titulo__icontains=query) | Q(corpo__icontains=query))[:3]
-    )
+    resultados = []
+    if palavras:
+        filtro = Q()
+        for palavra in palavras[:8]:  # limite pra não montar uma query gigante
+            filtro |= Q(titulo__icontains=palavra) | Q(corpo__icontains=palavra)
+        resultados = list(HelpContent.objects.filter(status='visivel').filter(filtro).distinct()[:3])
 
     if resultados:
         HelpSearchLog.objects.create(query=query[:300], matched_content=resultados[0], store=store)
-        return Response({
+        return {
             'encontrou': True,
             'resultados': [
                 {
@@ -221,20 +224,106 @@ def help_search(request):
                 }
                 for r in resultados
             ],
-        })
+        }
 
-    # Nenhum resultado — loga sem match (isso É o backlog: pergunta real
-    # sem conteúdo pra responder) e escala pra humano automaticamente,
-    # reaproveitando o mesmo model/fluxo que a escalada manual já usa.
     HelpSearchLog.objects.create(query=query[:300], matched_content=None, store=store)
-
     conv = SupportConversation.objects.create(
         store=store, category='question', subject=query[:200], status='escalated',
     )
     SupportMessage.objects.create(conversation=conv, sender='user', content=query)
-    SupportMessage.objects.create(
-        conversation=conv, sender='ai',
-        content='Não encontrei nada sobre isso na Central de Ajuda — já encaminhei pra nossa equipe, elas te respondem por aqui 💜',
-    )
+    mensagem_escalada = 'Não encontrei nada sobre isso na Central de Ajuda — já encaminhei pra nossa equipe, elas te respondem por aqui 💜'
+    SupportMessage.objects.create(conversation=conv, sender='ai', content=mensagem_escalada)
+    return {'encontrou': False, 'resultados': [], 'conversation_id': str(conv.id), 'mensagem': mensagem_escalada}
 
-    return Response({'encontrou': False, 'resultados': [], 'conversation_id': str(conv.id)})
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def help_search(request):
+    """
+    POST /api/chat/help-search/ — MANTIDO por compatibilidade (nada mais
+    chama, desde que o chat virou único/sem menu — ver chat_unified
+    abaixo), mas não removido: não custa nada deixar funcionando.
+    """
+    store = get_current_store(request.user)
+    if not store:
+        return Response({'error': 'Nenhuma loja associada a este usuário.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    query = (request.data.get('query') or '').strip()
+    if not query:
+        return Response({'error': 'query não pode ser vazia.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    resultado = _buscar_ou_escalar(query, store)
+    resultado.pop('mensagem', None)
+    return Response(resultado)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def chat_unified(request):
+    """
+    POST /api/chat/unified/
+    Body: {"message": "...", "history": [...], "conversation_id": null | "uuid"}
+
+    O ÚNICO endpoint que o ChatAssistant.tsx chama agora — sem menu, sem a
+    consultora escolher "consultar" ou "ajuda" antes. A ordem de decisão:
+
+    1. Se já existe conversation_id (a conversa já foi escalada nesta
+       sessão), a mensagem vai direto pra ela — nunca tenta mais nada, a
+       consultora já está falando com gente.
+    2. Senão, tenta responder como CONSULTA de dados da própria loja
+       (query_database_with_llm, o roteador de sempre da Amorinha).
+    3. Se a resposta for EXATAMENTE FORA_DO_ESCOPO_MSG (o sinal de "isso
+       não é sobre estoque/vendas"), cai pro modo AJUDA: busca na Central
+       de Ajuda, e se não achar nada, escala pra humano automaticamente.
+    """
+    from inventory.views import has_consent_for_purpose
+    from .services import query_database_with_llm, FORA_DO_ESCOPO_MSG
+
+    store = get_current_store(request.user)
+    if not store:
+        return Response({'error': 'Nenhuma loja associada a este usuário.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    mensagem = (request.data.get('message') or '').strip()[:500]
+    if not mensagem:
+        return Response({'error': 'message não pode ser vazia.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    conversation_id = request.data.get('conversation_id')
+    if conversation_id:
+        conv = SupportConversation.objects.filter(id=conversation_id, store=store).first()
+        if not conv:
+            return Response({'error': 'Conversa não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+        SupportMessage.objects.create(conversation=conv, sender='user', content=mensagem)
+        # Se ainda estiver com a Amorinha (raro chegar aqui assim, mas
+        # possível), tenta responder; senão só registra pra equipe ver.
+        if conv.status == 'ai_handling':
+            resultado_busca = _buscar_ou_escalar(mensagem, store)
+            if resultado_busca['encontrou']:
+                return Response({'tipo': 'ajuda_encontrada', 'resultados': resultado_busca['resultados'], 'conversation_id': str(conv.id)})
+        return Response({
+            'tipo': 'escalado', 'conversation_id': str(conv.id),
+            'resposta': 'Recebido — a equipe te responde por aqui assim que possível 💜',
+        })
+
+    history = request.data.get('history')
+    history = history[-6:] if isinstance(history, list) else []
+
+    if not has_consent_for_purpose(request.user, 'ai_features'):
+        return Response(
+            {'error': 'É necessário consentir com o uso de recursos de IA (Amorinha) para usar o assistente.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    resposta_consulta = query_database_with_llm(mensagem, store, history=history)
+
+    if resposta_consulta != FORA_DO_ESCOPO_MSG:
+        return Response({'tipo': 'consulta', 'resposta': resposta_consulta})
+
+    # Não era sobre estoque/vendas da loja — tenta a Central de Ajuda.
+    resultado = _buscar_ou_escalar(mensagem, store)
+    if resultado['encontrou']:
+        return Response({'tipo': 'ajuda_encontrada', 'resultados': resultado['resultados']})
+
+    return Response({
+        'tipo': 'escalado', 'conversation_id': resultado['conversation_id'],
+        'resposta': resultado['mensagem'],
+    })

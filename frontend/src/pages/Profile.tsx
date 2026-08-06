@@ -13,10 +13,14 @@ import { usePlan } from "../hooks/usePlan";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { Badge } from "../components/ui/badge";
 
-// Extrai o ID de embed do YouTube de qualquer formato de link comum.
-function youtubeEmbedUrl(url: string): string | null {
+// Extrai só o ID do vídeo (pra thumbnail) e a URL de embed (pra tocar).
+function youtubeId(url: string): string | null {
   const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([a-zA-Z0-9_-]{6,})/);
-  return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+  return m ? m[1] : null;
+}
+function youtubeEmbedUrl(url: string): string | null {
+  const id = youtubeId(url);
+  return id ? `https://www.youtube.com/embed/${id}?autoplay=1` : null;
 }
 
 export default function Profile() {
@@ -383,16 +387,30 @@ export default function Profile() {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-2.5">
-              {videosAjuda.slice(0, 4).map((v) => (
-                <button
-                  key={v.id}
-                  onClick={() => setVideoAtivo(v)}
-                  className="flex flex-col items-start gap-2 rounded-lg border border-border p-3 text-left hover:border-brand/30"
-                >
-                  <PlayCircle className="h-5 w-5 text-brand" />
-                  <span className="line-clamp-2 text-xs font-medium text-foreground">{v.titulo}</span>
-                </button>
-              ))}
+              {videosAjuda.slice(0, 4).map((v) => {
+                const vid = v.video_url ? youtubeId(v.video_url) : null;
+                return (
+                  <button
+                    key={v.id}
+                    onClick={() => setVideoAtivo(v)}
+                    className="group overflow-hidden rounded-lg border border-border text-left hover:border-brand/30"
+                  >
+                    <div className="relative aspect-video bg-secondary">
+                      {vid ? (
+                        <img src={`https://img.youtube.com/vi/${vid}/hqdefault.jpg`} alt={v.titulo} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center">
+                          <PlayCircle className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                      )}
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/10 opacity-0 transition-opacity group-hover:opacity-100">
+                        <PlayCircle className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                    <span className="block p-2 line-clamp-2 text-xs font-medium text-foreground">{v.titulo}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
