@@ -57,7 +57,7 @@ from inventory.views import SessionControlView, SessionSummaryView
 # Views públicas
 from inventory.views import public_storefront, public_storefront_view, lookup_product
 from inventory.views import (
-    crm_leads_list, crm_lead_detail, crm_lead_upsert,
+    crm_leads_list, crm_lead_detail, crm_lead_upsert, crm_suggest_message,
     crm_lead_anonymize, crm_cart_persist, crm_notifications, crm_cart_update,
     register_promotion_view, system_config_view, health_check_view,
 )
@@ -147,6 +147,7 @@ urlpatterns = [
     path('api/crm/leads/upsert', crm_lead_upsert, name='crm_lead_upsert'),
     path('api/crm/leads/<int:lead_id>', crm_lead_detail, name='crm_lead_detail'),
     path('api/crm/leads/<int:lead_id>/anonymize', crm_lead_anonymize, name='crm_lead_anonymize'),
+    path('api/crm/leads/<int:lead_id>/suggest-message', crm_suggest_message, name='crm_suggest_message'),
     path('api/crm/carts/persist', crm_cart_persist, name='crm_cart_persist'),
     path('api/crm/notifications', crm_notifications, name='crm_notifications'),
     path('api/crm/carts/<int:cart_id>', crm_cart_update, name='crm_cart_update'),

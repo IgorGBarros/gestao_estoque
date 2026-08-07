@@ -7,6 +7,7 @@ import {
   TrendingUp, TrendingDown, Download } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { inventoryApi, formatMoney, stockReportApi } from "../lib/api";
+import { parseDateLocal, formatDateLocal, compareDateLocal } from "../lib/dateUtils";
 import { btn } from "../lib/ui";
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import StockAdjustmentModal from "../components/StockAdjustmentModal";
@@ -24,7 +25,7 @@ function getBatchStatus(batch: any) {
   if (!batch.expiration_date)
     return { status: "no_date", color: "text-muted-foreground", icon: Calendar };
 
-  const exp = new Date(batch.expiration_date);
+  const exp = parseDateLocal(batch.expiration_date)!;
   exp.setHours(0, 0, 0, 0);
   const now = new Date();
   now.setHours(0, 0, 0, 0);
@@ -48,7 +49,7 @@ const consolidateBatchesByExpiry = (batches: any[]) => {
         batch_codes: [],
         ids: [],
         formatted_date: batch.expiration_date
-          ? new Date(batch.expiration_date).toLocaleDateString("pt-BR")
+          ? formatDateLocal(batch.expiration_date)
           : "Sem validade",
       };
     }
@@ -71,12 +72,7 @@ const consolidateBatchesByExpiry = (batches: any[]) => {
       original_batches: data.batch_codes,
       formatted_date: data.formatted_date,
     }))
-    .sort((a: any, b: any) => {
-      if (!a.expiration_date && !b.expiration_date) return 0;
-      if (!a.expiration_date) return 1;
-      if (!b.expiration_date) return -1;
-      return new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime();
-    });
+    .sort((a: any, b: any) => compareDateLocal(a.expiration_date, b.expiration_date));
 };
 
 type StockFilter = "TODOS" | "COM_ESTOQUE" | "ESGOTADO";
@@ -123,9 +119,7 @@ export default function ProductList() {
             .filter((batch: any) => batch.quantity > 0)
             .sort((a: any, b: any) => {
               if (!a.expiration_date && !b.expiration_date) return a.id - b.id;
-              if (!a.expiration_date) return 1;
-              if (!b.expiration_date) return -1;
-              return new Date(a.expiration_date).getTime() - new Date(b.expiration_date).getTime();
+              return compareDateLocal(a.expiration_date, b.expiration_date);
             });
         } else {
           item.consolidatedBatches = [];
@@ -137,17 +131,17 @@ export default function ProductList() {
           item.batchSummary = {
             total: item.consolidatedBatches.length,
             expired: item.consolidatedBatches.filter(
-              (b: any) => b.expiration_date && new Date(b.expiration_date) < today
+              (b: any) => b.expiration_date && parseDateLocal(b.expiration_date)! < today
             ).length,
             nearExpiry: item.consolidatedBatches.filter((b: any) => {
               if (!b.expiration_date) return false;
-              const exp = new Date(b.expiration_date);
+              const exp = parseDateLocal(b.expiration_date)!;
               const daysLeft = Math.ceil((exp.getTime() - today.getTime()) / 86400000);
               return daysLeft > 0 && daysLeft <= 30;
             }).length,
             valid: item.consolidatedBatches.filter((b: any) => {
               if (!b.expiration_date) return true;
-              const exp = new Date(b.expiration_date);
+              const exp = parseDateLocal(b.expiration_date)!;
               const daysLeft = Math.ceil((exp.getTime() - today.getTime()) / 86400000);
               return daysLeft > 30;
             }).length,
@@ -392,7 +386,7 @@ export default function ProductList() {
                             if (batchStatus.status === "valid" || batchStatus.status === "no_date")
                               return null;
 
-                            const exp = new Date(nextExpiryBatch.expiration_date);
+                            const exp = parseDateLocal(nextExpiryBatch.expiration_date)!;
                             const now = new Date();
                             const daysLeft = Math.ceil(
                               (exp.getTime() - now.getTime()) / 86400000

@@ -470,6 +470,42 @@ export const adminApi = {
       body: JSON.stringify(data),
     }),
   listPromotions: () => apiRequest<any[]>("/admin/promotions/"),
+
+  // 💬 Suporte
+  listSupportConversations: (statusFiltro?: string) =>
+    apiRequest<any[]>(`/admin/support/conversations/${statusFiltro ? `?status=${statusFiltro}` : ""}`),
+  getSupportConversation: (id: string) => apiRequest<any>(`/admin/support/conversations/${id}/`),
+  replySupportConversation: (id: string, message: string) =>
+    apiRequest<any>(`/admin/support/conversations/${id}/`, { method: "POST", body: JSON.stringify({ message }) }),
+  updateSupportConversationStatus: (id: string, status: string) =>
+    apiRequest<any>(`/admin/support/conversations/${id}/`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  // 🎬 Vídeos tutoriais (legado — TutorialVideo, mantido por segurança;
+  // a UI atual do admin já usa a Central de Ajuda abaixo, não isto)
+  listTutorialVideos: () => apiRequest<any[]>("/admin/tutorial-videos/"),
+  createTutorialVideo: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/tutorial-videos/", { method: "POST", body: JSON.stringify(data) }),
+  updateTutorialVideo: (id: number, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/tutorial-videos/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteTutorialVideo: (id: number) =>
+    apiRequest<void>(`/admin/tutorial-videos/${id}/`, { method: "DELETE" }),
+
+  // 📚 Central de Ajuda (HelpContent) — vídeo, FAQ, guia, novidade, tudo
+  // no mesmo lugar. Substitui a tela de vídeos tutoriais no admin.
+  listHelpContent: (filtros?: { tipo?: string; categoria?: string; status?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.tipo) params.set("tipo", filtros.tipo);
+    if (filtros?.categoria) params.set("categoria", filtros.categoria);
+    if (filtros?.status) params.set("status", filtros.status);
+    const query = params.toString();
+    return apiRequest<any[]>(`/admin/help-content/${query ? `?${query}` : ""}`);
+  },
+  createHelpContent: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/help-content/", { method: "POST", body: JSON.stringify(data) }),
+  updateHelpContent: (id: number, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/help-content/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteHelpContent: (id: number) =>
+    apiRequest<void>(`/admin/help-content/${id}/`, { method: "DELETE" }),
   createPromotion: (data: Record<string, unknown>) =>
     apiRequest<any>("/admin/promotions/create/", {
       method: "POST",

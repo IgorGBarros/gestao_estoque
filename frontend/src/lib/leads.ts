@@ -109,6 +109,20 @@ export async function anonymizeLead(leadId: string): Promise<void> {
   await api.post(`/crm/leads/${leadId}/anonymize`);
 }
 
+// 🔹 Sugestão de mensagem pela Amorinha, baseada no comportamento REAL do
+// cliente (produto que mais compra, total gasto, etc.)
+export interface MessageSuggestion {
+  product: string | null;
+  discount: string | null;
+  message: string | null;
+  observacao: string | null;
+}
+
+export async function suggestMessage(leadId: string, templateKey: string): Promise<MessageSuggestion> {
+  const response = await api.post(`/crm/leads/${leadId}/suggest-message`, { template_key: templateKey });
+  return response.data;
+}
+
 // 🔹 EXCLUIR LEAD (exclusão lógica ou física, conforme política)
 export async function deleteLead(leadId: string): Promise<void> {
   await api.delete(`/crm/leads/${leadId}`);

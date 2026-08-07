@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { movementsApi, formatMoney, movementsReportApi } from "../lib/api";
+import { formatDateLocal } from "../lib/dateUtils";
 import { btn } from "../lib/ui";
 import { useAuth } from "../hooks/useAuth";
 
@@ -430,7 +431,7 @@ export default function MovementHistory() {
                               {m.expiration_date && (
                                 <p className="text-foreground text-xs">
                                   <span className="font-semibold text-brand/80">Validade:</span>{" "}
-                                  {new Date(m.expiration_date).toLocaleDateString("pt-BR")}
+                                  {formatDateLocal(m.expiration_date)}
                                 </p>
                               )}
                               {m.description && (

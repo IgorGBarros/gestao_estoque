@@ -777,11 +777,18 @@ def update_plan(request, user_id):
     store.plan = new_plan
     if new_plan == 'pro':
         store.subscription_started_at = timezone.now()
+        # ⚠️ CORREÇÃO: só definia subscription_started_at, nunca
+        # subscription_expires_at — "Virar PRO" no admin-panel concedia
+        # acesso sem nenhuma data de vencimento registrada. 30 dias é o
+        # mesmo ciclo do plano mensal pago (R$ 39,90/mês) — se o admin
+        # quiser uma duração diferente, o endpoint mais completo
+        # (update_subscription, abaixo) já aceita `expires_at` explícito.
+        store.subscription_expires_at = timezone.now() + timedelta(days=30)
     else:
         store.subscription_expires_at = None
     store.save()
     
-    return Response({'success': True, 'plan': new_plan})
+    return Response({'success': True, 'plan': new_plan, 'expires_at': store.subscription_expires_at})
 
 
 @api_view(['PATCH'])
@@ -1209,3 +1216,240 @@ def update_api_plan_config(request, plan_type):
 
     config.save()
     return Response(_serialize_api_plan_config(config))
+
+# ─────────────────────────────────────────────────────────────
+# 💬 SUPORTE — conversas escaladas e vídeos tutoriais
+# ─────────────────────────────────────────────────────────────
+
+def _serialize_support_conversation(conv, com_mensagens=False):
+    dados = {
+        'id': str(conv.id),
+        'store_id': conv.store_id,
+        'store_name': conv.store.name,
+        'store_owner_email': conv.store.owner.email if conv.store.owner_id else None,
+        'category': conv.category,
+        'status': conv.status,
+        'subject': conv.subject,
+        'created_at': conv.created_at.isoformat(),
+        'updated_at': conv.updated_at.isoformat(),
+    }
+    if com_mensagens:
+        dados['messages'] = [
+            {'id': m.id, 'sender': m.sender, 'content': m.content, 'created_at': m.created_at.isoformat()}
+            for m in conv.messages.all()
+        ]
+    return dados
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_support_conversations(request):
+    """
+    GET /api/admin/support/conversations/?status=escalated
+
+    Sem filtro, devolve tudo — o frontend do admin decide o que mostrar
+    por padrão (normalmente "escalated" primeiro).
+    """
+    from ai.models import SupportConversation
+    conversas = SupportConversation.objects.select_related('store', 'store__owner').all()
+    filtro_status = request.GET.get('status')
+    if filtro_status:
+        conversas = conversas.filter(status=filtro_status)
+    return Response([_serialize_support_conversation(c) for c in conversas])
+
+
+@api_view(['GET', 'POST', 'PATCH'])
+@permission_classes([IsAdminUser])
+def admin_support_conversation_detail(request, conversation_id):
+    from ai.models import SupportConversation, SupportMessage
+    conv = SupportConversation.objects.select_related('store', 'store__owner').filter(id=conversation_id).first()
+    if not conv:
+        return Response({'error': 'Conversa não encontrada.'}, status=404)
+
+    if request.method == 'GET':
+        return Response(_serialize_support_conversation(conv, com_mensagens=True))
+
+    if request.method == 'POST':
+        # Responder — a equipe assumiu a conversa.
+        mensagem = (request.data.get('message') or '').strip()
+        if not mensagem:
+            return Response({'error': 'Mensagem não pode ser vazia.'}, status=400)
+        SupportMessage.objects.create(conversation=conv, sender='admin', content=mensagem)
+        # Continua "escalated" até alguém marcar como resolvida — responder
+        # não fecha a conversa sozinho, a consultora pode responder de volta.
+        conv.save(update_fields=['updated_at'])
+        conv.refresh_from_db()
+        return Response(_serialize_support_conversation(conv, com_mensagens=True))
+
+    # PATCH — mudar status (resolver/encerrar)
+    novo_status = request.data.get('status')
+    if novo_status not in dict(SupportConversation.STATUS_CHOICES):
+        return Response({'error': 'status inválido.'}, status=400)
+    conv.status = novo_status
+    conv.save(update_fields=['status', 'updated_at'])
+    return Response(_serialize_support_conversation(conv))
+
+
+# ─────────────────────────────────────────────────────────────
+# 🎬 VÍDEOS TUTORIAIS
+# ─────────────────────────────────────────────────────────────
+
+def _serialize_video(v):
+    return {
+        'id': v.id, 'title': v.title, 'description': v.description,
+        'video_url': v.video_url, 'category': v.category,
+        'sort_order': v.sort_order, 'is_visible': v.is_visible,
+        'created_at': v.created_at.isoformat(),
+    }
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAdminUser])
+def admin_tutorial_videos(request):
+    from ai.models import TutorialVideo
+    if request.method == 'GET':
+        videos = TutorialVideo.objects.all()
+        return Response([_serialize_video(v) for v in videos])
+
+    title = (request.data.get('title') or '').strip()
+    video_url = (request.data.get('video_url') or '').strip()
+    if not title or not video_url:
+        return Response({'error': 'title e video_url são obrigatórios.'}, status=400)
+
+    video = TutorialVideo.objects.create(
+        title=title[:150],
+        description=(request.data.get('description') or '')[:2000],
+        video_url=video_url,
+        category=(request.data.get('category') or '')[:50],
+        sort_order=int(request.data.get('sort_order') or 0),
+        is_visible=bool(request.data.get('is_visible', True)),
+    )
+    return Response(_serialize_video(video), status=201)
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAdminUser])
+def admin_tutorial_video_detail(request, video_id):
+    from ai.models import TutorialVideo
+    video = TutorialVideo.objects.filter(id=video_id).first()
+    if not video:
+        return Response({'error': 'Vídeo não encontrado.'}, status=404)
+
+    if request.method == 'DELETE':
+        video.delete()
+        return Response(status=204)
+
+    campos = ['title', 'description', 'video_url', 'category', 'sort_order', 'is_visible']
+    for campo in campos:
+        if campo in request.data:
+            setattr(video, campo, request.data[campo])
+    video.save()
+    return Response(_serialize_video(video))
+
+# ─────────────────────────────────────────────────────────────
+# 📚 CENTRAL DE AJUDA (HelpContent) — evolução do CRUD de vídeos.
+# Etapa 1: só a camada de conteúdo/admin. O endpoint de consumo
+# (GET /api/ajuda/) e as telas da consultora vêm na Etapa 2.
+# ─────────────────────────────────────────────────────────────
+
+def _serialize_help_content(c):
+    return {
+        'id': c.id,
+        'tipo': c.tipo,
+        'titulo': c.titulo,
+        'corpo': c.corpo,
+        'video_url': c.video_url,
+        'categoria': c.categoria,
+        'status': c.status,
+        'ordem': c.ordem,
+        'created_at': c.created_at.isoformat(),
+        'updated_at': c.updated_at.isoformat(),
+    }
+
+
+def _validar_help_content(dados, tipo):
+    """
+    Regra de obrigatoriedade por tipo, centralizada aqui — o model não
+    força isso (blank=True em ambos) porque o Django não valida
+    condicionalmente por outro campo sem custom clean(), e a view é o
+    lugar mais direto pra essa regra específica.
+    """
+    from ai.models import HelpContent
+    if tipo not in dict(HelpContent.TIPO_CHOICES):
+        return f"tipo precisa ser um de: {', '.join(dict(HelpContent.TIPO_CHOICES))}."
+    if tipo == 'video' and not (dados.get('video_url') or '').strip():
+        return "video_url é obrigatório pra tipo='video'."
+    if tipo in ('faq', 'guia', 'novidade') and not (dados.get('corpo') or '').strip():
+        return f"corpo é obrigatório pra tipo='{tipo}'."
+    return None
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAdminUser])
+def admin_help_content_list_create(request):
+    from ai.models import HelpContent
+
+    if request.method == 'GET':
+        itens = HelpContent.objects.all()
+        # Mesmos três filtros do endpoint de consumo (Etapa 2) — já deixo
+        # aqui porque a lista do admin também precisa filtrar por tipo/
+        # categoria/status, só que sem o default status=visivel (o admin
+        # PRECISA ver rascunho, é o ponto de gerenciar isso).
+        tipo = request.GET.get('tipo')
+        categoria = request.GET.get('categoria')
+        status_filtro = request.GET.get('status')
+        if tipo:
+            itens = itens.filter(tipo=tipo)
+        if categoria:
+            itens = itens.filter(categoria=categoria)
+        if status_filtro:
+            itens = itens.filter(status=status_filtro)
+        return Response([_serialize_help_content(c) for c in itens])
+
+    titulo = (request.data.get('titulo') or '').strip()
+    tipo = request.data.get('tipo')
+    if not titulo:
+        return Response({'error': 'titulo é obrigatório.'}, status=400)
+
+    erro = _validar_help_content(request.data, tipo)
+    if erro:
+        return Response({'error': erro}, status=400)
+
+    item = HelpContent.objects.create(
+        tipo=tipo,
+        titulo=titulo[:150],
+        corpo=(request.data.get('corpo') or ''),
+        video_url=(request.data.get('video_url') or None),
+        categoria=(request.data.get('categoria') or '')[:50],
+        status=request.data.get('status') or 'rascunho',
+        ordem=int(request.data.get('ordem') or 0),
+    )
+    return Response(_serialize_help_content(item), status=201)
+
+
+@api_view(['PATCH', 'DELETE'])
+@permission_classes([IsAdminUser])
+def admin_help_content_detail(request, content_id):
+    from ai.models import HelpContent
+    item = HelpContent.objects.filter(id=content_id).first()
+    if not item:
+        return Response({'error': 'Conteúdo não encontrado.'}, status=404)
+
+    if request.method == 'DELETE':
+        item.delete()
+        return Response(status=204)
+
+    # PATCH — valida com o tipo FINAL (o que já está salvo, a menos que
+    # esta própria requisição esteja mudando o tipo também).
+    tipo_final = request.data.get('tipo', item.tipo)
+    dados_para_validar = {**_serialize_help_content(item), **request.data}
+    erro = _validar_help_content(dados_para_validar, tipo_final)
+    if erro:
+        return Response({'error': erro}, status=400)
+
+    campos = ['tipo', 'titulo', 'corpo', 'video_url', 'categoria', 'status', 'ordem']
+    for campo in campos:
+        if campo in request.data:
+            setattr(item, campo, request.data[campo])
+    item.save()
+    return Response(_serialize_help_content(item))

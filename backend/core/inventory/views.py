@@ -2637,6 +2637,20 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             
             quantity = abs(int(data.get('quantity', 0)))
             transaction_type = data.get('transaction_type', '').upper()
+
+            # ⚠️ REGRA DE NEGÓCIO (Igor): ajuste de saldo exige justificativa
+            # — sem isso, vira uma porta aberta pra qualquer mudança de saldo
+            # sem motivo registrado. O frontend (StockAdjustmentModal) já
+            # valida isso, mas validação só no frontend não impede chamar a
+            # API direto — a garantia de verdade precisa estar aqui.
+            if transaction_type == 'AJUSTE':
+                justificativa = (data.get('description') or data.get('notes') or '').strip()
+                if not justificativa:
+                    return Response(
+                        {'error': 'Ajuste de saldo exige uma justificativa.'},
+                        status=400
+                    )
+
             # ⚠️ CORREÇÃO: era `float(...)`. O campo do modelo é DecimalField, e
             # o objeto é serializado logo abaixo SEM recarregar do banco — o
             # atributo em memória ficava como float puro. O serializer soma
@@ -4502,30 +4516,12 @@ def crm_leads_list(request):
     return Response(LeadSerializer(leads, many=True).data)
 
 
-@api_view(['GET', 'DELETE'])
-@permission_classes([IsAuthenticated])
-def crm_lead_detail(request, lead_id):
+def _calcular_historico_compras(store, lead):
     """
-    GET    /api/crm/leads/<id> — um lead específico, só da própria loja.
-           Inclui o histórico de compras: cada pedido fechado (checked_out),
-           com os produtos, quantidade, preço e data. É o que dá pra
-           consultora ver "o que ela comprou, quando, por quanto" — sem
-           isso o Lead sozinho só mostra nome e telefone.
-    DELETE /api/crm/leads/<id> — exclusão definitiva, só da própria loja.
-    Os dois métodos compartilham a mesma URL (é assim que lib/leads.ts chama).
+    Histórico de pedidos fechados de um lead — extraído de crm_lead_detail
+    pra ser reaproveitado também pela sugestão de mensagem da Amorinha
+    (mesma fonte de dado, dois consumidores).
     """
-    store = ensure_user_has_store(request.user)
-    if not store:
-        return Response({'error': 'Loja não encontrada'}, status=400)
-
-    lead = Lead.objects.filter(store=store, id=lead_id).first()
-    if not lead:
-        return Response({'error': 'Lead não encontrado'}, status=404)
-
-    if request.method == 'DELETE':
-        lead.delete()
-        return Response(status=204)
-
     pedidos = (Cart.objects
                .filter(store=store, lead=lead, checked_out=True)
                .prefetch_related('items')
@@ -4554,11 +4550,65 @@ def crm_lead_detail(request, lead_id):
             ],
             'total': total,
         })
+    return historico
 
+
+@api_view(['GET', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def crm_lead_detail(request, lead_id):
+    """
+    GET    /api/crm/leads/<id> — um lead específico, só da própria loja.
+           Inclui o histórico de compras: cada pedido fechado (checked_out),
+           com os produtos, quantidade, preço e data. É o que dá pra
+           consultora ver "o que ela comprou, quando, por quanto" — sem
+           isso o Lead sozinho só mostra nome e telefone.
+    DELETE /api/crm/leads/<id> — exclusão definitiva, só da própria loja.
+    Os dois métodos compartilham a mesma URL (é assim que lib/leads.ts chama).
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    lead = Lead.objects.filter(store=store, id=lead_id).first()
+    if not lead:
+        return Response({'error': 'Lead não encontrado'}, status=404)
+
+    if request.method == 'DELETE':
+        lead.delete()
+        return Response(status=204)
+
+    historico = _calcular_historico_compras(store, lead)
     dados = LeadSerializer(lead).data
     dados['purchase_history'] = historico
     dados['last_purchase_at'] = historico[0]['date'] if historico else None
     return Response(dados)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def crm_suggest_message(request, lead_id):
+    """
+    POST /api/crm/leads/<id>/suggest-message/
+    Body: {"template_key": "promotion" | "welcome" | "birthday" | "custom" | "abandoned_cart"}
+
+    A Amorinha sugere {product, discount, message} baseada no histórico de
+    compra REAL desse lead — quem mais compra X vira a sugestão de
+    promoção pra X, não um texto genérico igual pra qualquer cliente.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    lead = Lead.objects.filter(store=store, id=lead_id).first()
+    if not lead:
+        return Response({'error': 'Lead não encontrado'}, status=404)
+
+    template_key = request.data.get('template_key', 'custom')
+
+    from ai.crm_ai import sugerir_mensagem
+    historico = _calcular_historico_compras(store, lead)
+    sugestao = sugerir_mensagem(lead.name, template_key, historico)
+    return Response(sugestao)
 
 
 @api_view(['POST'])

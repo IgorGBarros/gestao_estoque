@@ -45,6 +45,7 @@ import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import MovementHistory from "./pages/MovementHistory";
 import CRM from "./pages/CRM";
+import Support from "./pages/Support";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
@@ -52,6 +53,8 @@ import { useEffect, useState } from "react";
 
 import PrivacyPage from "./pages/PrivacyPage";
 import TermsPage from "./pages/TermsPage";
+
+// Remove unused Support import - component exports a named function, not default
 
 // ✅ QueryClient FORA do componente (evita recriação a cada render)
 const queryClient = new QueryClient({
@@ -256,6 +259,14 @@ const App = () => {
                         <ProtectedRoute>
                           <ProtectedLayout>
                             <CRM />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+
+                      <Route path="/support" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <Support />
                           </ProtectedLayout>
                         </ProtectedRoute>
                       } />
