@@ -13,6 +13,7 @@ export const LGPD_VERSION = "v1.0_2026-05";
 export const PURPOSES = {
   ESSENTIAL: "essential",
   AUTH: "authentication",
+  LEGAL: "legal_compliance",
   SERVICE: "service_delivery",
   ANALYTICS: "analytics",
   MARKETING: "marketing",
@@ -23,10 +24,17 @@ export const PURPOSES = {
 
 export type Purpose = (typeof PURPOSES)[keyof typeof PURPOSES];
 
-// Finalidades que NÃO podem ser revogadas (essenciais para o serviço)
+// ⚠️ CORREÇÃO: faltava "legal_compliance" aqui — o backend
+// (settings.LGPD_ESSENTIAL_PURPOSES) sempre teve 4 finalidades essenciais,
+// mas esta lista só tinha 3. Resultado: todo consentimento novo era
+// registrado SEM "legal_compliance", e a checagem seguinte (que compara
+// contra a lista de 4 do backend) sempre falhava — o modal reaparecia
+// pra quem "já tinha aceitado", porque o aceite nunca incluía essa
+// finalidade. Precisa bater exatamente com o backend.
 export const ESSENTIAL_PURPOSES = [
   PURPOSES.ESSENTIAL,
   PURPOSES.AUTH,
+  PURPOSES.LEGAL,
   PURPOSES.SERVICE,
 ] as const;
 

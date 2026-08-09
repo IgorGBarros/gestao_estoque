@@ -42,6 +42,13 @@ class Command(BaseCommand):
             '--freshness-days', type=int, default=6,
             help='Pula links já processados com sucesso há menos de N dias (default: 6, um pouco menos que o ciclo semanal)',
         )
+        # ⚠️ NOVO: faltava — cosmos_barcode_finder.py já tinha --brand,
+        # mas crawl_all3.py rodava sempre as 6 marcas juntas, sem jeito de
+        # testar/rodar uma só de cada vez.
+        parser.add_argument(
+            '--brand', type=str, default=None,
+            help='Roda só uma marca específica (ex: "O Boticário", "Mary Kay"). Sem isso, roda todas.',
+        )
 
     def handle(self, *args, **kwargs):
         max_minutes = kwargs.get('max_minutes', 45)
@@ -80,6 +87,19 @@ class Command(BaseCommand):
                 "prefix": None
             }
         ]
+
+        # ⚠️ Filtro por marca — case-insensitive, pra não exigir digitar
+        # "O Boticário" com acento/maiúscula perfeitos.
+        brand_filtro = kwargs.get('brand')
+        if brand_filtro:
+            marcas_disponiveis = [s['brand'] for s in STORES]
+            STORES = [s for s in STORES if s['brand'].lower() == brand_filtro.lower()]
+            if not STORES:
+                self.stdout.write(self.style.ERROR(
+                    f"❌ Marca '{brand_filtro}' não encontrada. Opções válidas: {', '.join(marcas_disponiveis)}"
+                ))
+                return
+            self.stdout.write(self.style.WARNING(f"🎯 Rodando só: {STORES[0]['brand']}"))
 
         self.stdout.write(self.style.WARNING("🕷️ Iniciando Super Crawler Intercalado (Anti-Bloqueio)..."))
         
