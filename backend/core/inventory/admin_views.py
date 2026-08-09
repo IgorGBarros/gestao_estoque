@@ -1453,3 +1453,115 @@ def admin_help_content_detail(request, content_id):
             setattr(item, campo, request.data[campo])
     item.save()
     return Response(_serialize_help_content(item))
+
+# ─────────────────────────────────────────────────────────────
+# 📦 REVISÃO DE CANDIDATOS DE CÓDIGO DE BARRAS (ExternalBarcodeCatalog)
+#
+# O cosmos_barcode_finder só grava sozinho no Product quando a confiança é
+# muito alta (correção anterior). Tudo abaixo disso (high/medium/low) fica
+# parado aqui, esperando alguém confirmar — é exatamente essa fila que
+# esta tela existe pra esvaziar, sem precisar abrir o banco na mão.
+# ─────────────────────────────────────────────────────────────
+
+def _serialize_barcode_candidate(c):
+    from inventory.models import Product
+    ja_tem_barcode = Product.objects.filter(bar_code=c.gtin).exists()
+    return {
+        'id': c.id,
+        'gtin': c.gtin,
+        'brand': c.brand,
+        'description': c.description,
+        'confidence_level': c.confidence_level,
+        'searched_product_sku': c.searched_product_sku,
+        'searched_product_name': c.searched_product_name,
+        'search_term_used': c.search_term_used,
+        'matched': c.matched,
+        'created_at': c.created_at.isoformat(),
+        'ja_aplicado': ja_tem_barcode,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_barcode_candidates(request):
+    """
+    GET /api/admin/barcode-candidates/?brand=&confidence=
+    Lista candidatos que ainda não foram aplicados a nenhum Product — a
+    fila de revisão. Por padrão exclui os de confiança muito alta (esses
+    já foram aplicados automaticamente, não sobra nada pra revisar ali) e
+    exclui os já descartados.
+    """
+    from inventory.models import ExternalBarcodeCatalog, Product
+
+    candidatos = ExternalBarcodeCatalog.objects.filter(matched=True).exclude(
+        confidence_level='very_high'
+    ).exclude(
+        confidence_level__startswith='alternative_'
+    ).order_by('-created_at')
+
+    brand = request.GET.get('brand')
+    confidence = request.GET.get('confidence')
+    if brand:
+        candidatos = candidatos.filter(brand__iexact=brand)
+    if confidence:
+        candidatos = candidatos.filter(confidence_level=confidence)
+
+    # Não mostra de novo o que já foi aprovado antes (já virou bar_code
+    # de algum Product) — evita a mesma linha aparecer pra sempre na fila.
+    gtins_ja_aplicados = set(
+        Product.objects.filter(bar_code__in=candidatos.values_list('gtin', flat=True))
+        .values_list('bar_code', flat=True)
+    )
+    candidatos = [c for c in candidatos[:200] if c.gtin not in gtins_ja_aplicados]
+
+    return Response([_serialize_barcode_candidate(c) for c in candidatos])
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_barcode_candidate_approve(request, candidate_id):
+    """
+    POST /api/admin/barcode-candidates/<id>/approve/
+    Confirma manualmente: aplica o GTIN candidato ao Product correspondente
+    (achado pelo SKU que o crawler já vinculou na busca), sem sobrescrever
+    se o produto já tiver código de barras de outra fonte.
+    """
+    from inventory.models import ExternalBarcodeCatalog, Product
+
+    candidato = ExternalBarcodeCatalog.objects.filter(id=candidate_id).first()
+    if not candidato:
+        return Response({'error': 'Candidato não encontrado.'}, status=404)
+
+    produto = None
+    if candidato.searched_product_sku:
+        produto = Product.objects.filter(natura_sku=candidato.searched_product_sku).first()
+
+    if not produto:
+        return Response({'error': 'Não achei o produto original vinculado a este candidato — verifique manualmente.'}, status=400)
+
+    if produto.bar_code and produto.bar_code != candidato.gtin:
+        return Response({'error': f'Este produto já tem outro código de barras ({produto.bar_code}). Recuse este candidato se estiver errado, ou remova o código atual primeiro.'}, status=409)
+
+    produto.bar_code = candidato.gtin
+    produto.save(update_fields=['bar_code'])
+    return Response({'aprovado': True, 'produto': produto.name, 'gtin': candidato.gtin})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_barcode_candidate_reject(request, candidate_id):
+    """
+    POST /api/admin/barcode-candidates/<id>/reject/
+    Descarta o candidato — some da fila de revisão, sem tocar em nenhum
+    Product. Não apaga o registro (mantém como histórico do que já foi
+    olhado e recusado), só marca como não-confirmado.
+    """
+    from inventory.models import ExternalBarcodeCatalog
+
+    candidato = ExternalBarcodeCatalog.objects.filter(id=candidate_id).first()
+    if not candidato:
+        return Response({'error': 'Candidato não encontrado.'}, status=404)
+
+    candidato.matched = False
+    candidato.save(update_fields=['matched'])
+    return Response({'recusado': True})

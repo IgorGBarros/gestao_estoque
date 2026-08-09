@@ -7,7 +7,7 @@ import {
   Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
   Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
   FileText, Download, Upload, Eye, EyeOff, Palette, Zap, Bell, Gift, Percent,
-  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy, MessageCircle
+  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy, MessageCircle, Barcode
 } from "lucide-react";
 
 import { profileApi, adminApi, adminHealthApi, systemConfigApi, SystemConfigStatus } from "../lib/api";
@@ -21,6 +21,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs"
 import React from "react";
 import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
 import ApiManagementTab from "../components/admin/ApiManagementTab";
+import AdminCatalogTab from "../components/admin/AdminCatalogTab";
 import AdminSupportTab from "../components/admin/AdminSupportTab";
 
 // Acesso ao painel é por email autorizado (is_staff, definido pelo backend
@@ -1259,42 +1260,49 @@ export default function AdminPanel() {
       <main className="mx-auto max-w-7xl px-4 py-6">
         {/* Tabs de Navegação */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
-            <TabsTrigger value="dashboard" className="flex items-center gap-2">
+          {/* ⚠️ Rolagem horizontal, não grid de colunas fixas — com 10
+              abas agora, um número fixo de colunas sempre acaba quebrando
+              de novo a cada aba nova adicionada. */}
+          <TabsList className="flex w-full gap-1 overflow-x-auto">
+            <TabsTrigger value="dashboard" className="flex shrink-0 items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Dashboard
             </TabsTrigger>
-            <TabsTrigger value="stores" className="flex items-center gap-2">
+            <TabsTrigger value="stores" className="flex shrink-0 items-center gap-2">
               <Store className="h-4 w-4" />
               Lojas
             </TabsTrigger>
-            <TabsTrigger value="plans" className="flex items-center gap-2">
+            <TabsTrigger value="plans" className="flex shrink-0 items-center gap-2">
               <Settings2 className="h-4 w-4" />
               Planos
             </TabsTrigger>
-            <TabsTrigger value="promotions" className="flex items-center gap-2">
+            <TabsTrigger value="promotions" className="flex shrink-0 items-center gap-2">
               <Megaphone className="h-4 w-4" />
               Promoções
             </TabsTrigger>
-            <TabsTrigger value="payments" className="flex items-center gap-2">
+            <TabsTrigger value="payments" className="flex shrink-0 items-center gap-2">
               <CreditCard className="h-4 w-4" />
               Pagamentos
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center gap-2">
+            <TabsTrigger value="analytics" className="flex shrink-0 items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Analytics
             </TabsTrigger>
-            <TabsTrigger value="support" className="flex items-center gap-2">
+            <TabsTrigger value="support" className="flex shrink-0 items-center gap-2">
               <MessageCircle className="h-4 w-4" />
               Suporte
             </TabsTrigger>
-            <TabsTrigger value="system" className="flex items-center gap-2">
+            <TabsTrigger value="system" className="flex shrink-0 items-center gap-2">
               <Server className="h-4 w-4" />
               Sistema
             </TabsTrigger>
-            <TabsTrigger value="api" className="flex items-center gap-2">
+            <TabsTrigger value="api" className="flex shrink-0 items-center gap-2">
               <Key className="h-4 w-4" />
               API
+            </TabsTrigger>
+            <TabsTrigger value="catalog" className="flex shrink-0 items-center gap-2">
+              <Barcode className="h-4 w-4" />
+              Catálogo
             </TabsTrigger>
           </TabsList>
 
@@ -2531,6 +2539,13 @@ export default function AdminPanel() {
               ========================================== */}
           <TabsContent value="api" className="space-y-6">
             <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
+          </TabsContent>
+
+          {/* ==========================================
+              TAB: CATÁLOGO (Revisão de códigos de barras do crawler)
+              ========================================== */}
+          <TabsContent value="catalog" className="space-y-6">
+            <AdminCatalogTab toast={toast} />
           </TabsContent>
 
         </Tabs>
