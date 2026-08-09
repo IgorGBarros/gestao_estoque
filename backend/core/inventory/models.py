@@ -1304,3 +1304,26 @@ class PromotionView(models.Model):
     class Meta:
         unique_together = [('promotion', 'store')]
         indexes = [models.Index(fields=['promotion', 'store'])]
+
+class CrawledUrl(models.Model):
+    """
+    Memória persistente entre execuções do crawl_all3 — sem isso, cada
+    execução embaralha e reamostra do MESMO balde de links descobertos na
+    página 1 (o orçamento de tempo nunca é suficiente pra passar da
+    página 1 em catálogos grandes, tipo o da Mary Kay sozinha já traz
+    ~900 links ali). Resultado real observado: o mesmo produto sendo
+    processado em execuções diferentes, minutos depois, sem necessidade.
+
+    Guarda só a URL e quando foi processada com sucesso pela última vez —
+    o crawler pula links já vistos recentemente na fase de descoberta,
+    priorizando o que ainda não foi tocado.
+    """
+    url = models.URLField(max_length=500, unique=True, db_index=True)
+    last_crawled_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'crawled_url'
+        indexes = [models.Index(fields=['last_crawled_at'])]
+
+    def __str__(self):
+        return f"{self.url} (última vez: {self.last_crawled_at})"

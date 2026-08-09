@@ -506,6 +506,19 @@ export const adminApi = {
     apiRequest<any>(`/admin/help-content/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteHelpContent: (id: number) =>
     apiRequest<void>(`/admin/help-content/${id}/`, { method: "DELETE" }),
+
+  // 📦 Revisão de candidatos de código de barras (ExternalBarcodeCatalog)
+  listBarcodeCandidates: (filtros?: { brand?: string; confidence?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.brand) params.set("brand", filtros.brand);
+    if (filtros?.confidence) params.set("confidence", filtros.confidence);
+    const query = params.toString();
+    return apiRequest<any[]>(`/admin/barcode-candidates/${query ? `?${query}` : ""}`);
+  },
+  approveBarcodeCandidate: (id: number) =>
+    apiRequest<any>(`/admin/barcode-candidates/${id}/approve/`, { method: "POST" }),
+  rejectBarcodeCandidate: (id: number) =>
+    apiRequest<any>(`/admin/barcode-candidates/${id}/reject/`, { method: "POST" }),
   createPromotion: (data: Record<string, unknown>) =>
     apiRequest<any>("/admin/promotions/create/", {
       method: "POST",

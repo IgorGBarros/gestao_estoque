@@ -286,13 +286,13 @@ def has_consent_for_purpose(user, purpose: str) -> bool:
 # Imports Locais
 from .models import (
     Product, Store, InventoryItem, InventoryBatch, 
-    Sale, SaleItem, PriceHistory, StockTransaction
+    Sale, SaleItem, PriceHistory, StockTransaction, ExternalBarcodeCatalog
 )
 from .serializers import (
     ProductSerializer, InventoryItemSerializer, 
     StockEntrySerializer, SaleSerializer, StockTransactionSerializer
 )
-from .scraper import search_google_shopping
+from .scraper import search_google_shopping, detect_category
 
 # ==========================================
 # 0. HELPERS & MIXINS MULTI-TENANT
@@ -1245,54 +1245,68 @@ def lookup_product(request):
 
     # --- 2. SE FOR BUSCA POR EAN / SKU (NÚMERO) ---
     print(f"   ↳ Busca Numérica detectada. Verificando base local...")
-    
+
     if not force_remote:
         local = Product.objects.filter(Q(bar_code=query) | Q(natura_sku=query)).first()
         if local:
             print(f"   ✅ Encontrado no banco local (Match Exato): {local.name}")
             return Response({"found": True, "source": "local", "data": ProductSerializer(local).data})
-            
-    # Se não achou local ou forçou remoto, vai pros Scrapers (Google/Natura/Cosmos)
+
+        # ✅ NOVO: catálogo pré-vetado do Cosmos (cosmos_barcode_finder) —
+        # antes era preenchido e NUNCA CONSULTADO aqui, um beco sem saída.
+        # Só confiança muito alta é usada — o mesmo critério do próprio
+        # crawler pra escrever automaticamente (ver cosmos_barcode_finder.py).
+        # Isso já passou por um processo de pontuação offline, deliberado —
+        # diferente do fallback ao vivo abaixo, que é uma tentativa síncrona
+        # durante a própria requisição da consultora.
+        catalogo = ExternalBarcodeCatalog.objects.filter(
+            gtin=query, matched=True, confidence_level='very_high'
+        ).first()
+        if catalogo:
+            print(f"   ✅ Encontrado no catálogo Cosmos pré-vetado (confiança muito alta): {catalogo.description}")
+            product, created = Product.objects.get_or_create(
+                bar_code=query,
+                defaults={
+                    'name': catalogo.searched_product_name or catalogo.description,
+                    'brand': catalogo.brand,
+                    'natura_sku': catalogo.searched_product_sku,
+                    'category': detect_category(catalogo.searched_product_name or catalogo.description),
+                    'last_checked_at': timezone.now(),
+                },
+            )
+            return Response({"found": True, "source": "catalog_verified", "data": ProductSerializer(product).data})
+
+    # Se não achou local nem no catálogo pré-vetado (ou forçou remoto),
+    # tenta os scrapers ao vivo (Google/Natura/Cosmos).
     if len(query) > 5:
-        print(f"   ↳ Não achou EAN localmente. Iniciando Scraper para {query}...")
-        
+        print(f"   ↳ Não achou localmente. Iniciando busca ao vivo para {query}...")
+
         online_data = search_google_shopping(query)
-        
-        if online_data:
-            sku_found = online_data.get('natura_sku')
-            name_found = online_data.get('name')
-            
-            # Salvar resultados adicionais (se a busca trouxe vários)
-            all_results = online_data.get('all_results', [])
-            for p in all_results:
-                Product.objects.update_or_create(
-                    natura_sku=p['natura_sku'],
-                    defaults={'name': p['name'], 'official_price': p.get('sale_price', 0), 'category': p.get('category', 'Geral'), 'last_checked_at': timezone.now()}
-                )
-            
-            # CASO 1: TEM SKU (Google ou Natura achou)
-            if sku_found:
-                try:
-                    product = Product.objects.get(natura_sku=sku_found)
-                    product.bar_code = query
-                    product.save()
-                    print(f"   🧠 APRENDIZADO: Vinculado EAN {query} ao SKU existente {sku_found}")
-                except Product.DoesNotExist:
-                    product = Product.objects.create(
-                        natura_sku=sku_found, bar_code=query, name=name_found,
-                        official_price=online_data.get('sale_price', 0), category=online_data.get('category', 'Geral'), description=online_data.get('description', '')
-                    )
-                    print(f"   🧠 APRENDIZADO: Novo produto criado (SKU {sku_found})")
-                
-                return Response({"found": True, "source": "remote_learned", "data": ProductSerializer(product).data})
-                
-            # CASO 2: SÓ TEM NOME (Ex: Cosmos achou)
-            elif name_found:
-                return Response({
-                    "found": True, "source": "remote_partial", "data": online_data,
-                    "message": "Produto achado, mas sem código Natura oficial."
-                })
-                
+
+        if online_data and (online_data.get('natura_sku') or online_data.get('name')):
+            # ⚠️ CORREÇÃO CRÍTICA: antes, este bloco criava ou atualizava o
+            # Product AQUI — durante a própria busca, ANTES da consultora
+            # ver ou confirmar qualquer coisa. Se o scrape ao vivo errasse
+            # (o que é bem possível — é busca por texto/heurística, não
+            # match garantido), o erro ficava gravado pra sempre no
+            # catálogo GLOBAL, afetando toda consultora futura que
+            # escaneasse o mesmo código. Product.objects.create(...) e
+            # product.save() foram removidos daqui.
+            #
+            # A gravação de verdade já acontece em StockEntryView (POST
+            # /api/stock/entry/), quando a consultora efetivamente clica
+            # "Salvar" — e aquele fluxo já é seguro (não sobrescreve
+            # produto protegido, só preenche campo que estava vazio). Aqui
+            # só devolvemos a sugestão pra ela revisar no formulário.
+            print(f"   ℹ️ Encontrado ao vivo, mas como sugestão não confirmada (fonte: {online_data.get('source', 'desconhecida')})")
+            online_data['bar_code'] = online_data.get('bar_code') or query
+            return Response({
+                "found": True,
+                "source": "remote_unconfirmed",
+                "data": online_data,
+                "message": "Encontrado na internet — confira os dados antes de salvar.",
+            })
+
     return Response({"found": False, "source": None})
 
 
