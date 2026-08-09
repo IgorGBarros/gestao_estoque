@@ -1,9 +1,10 @@
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from inventory.models import Product, PriceHistory
+from inventory.models import Product, PriceHistory, CrawledUrl
 from seleniumbase import SB
 from bs4 import BeautifulSoup
 import re
+import time
 from decimal import Decimal
 import random
 
@@ -20,9 +21,44 @@ def detect_category(name):
     return "Geral"
 
 class Command(BaseCommand):
-    help = 'Super Crawler Intercalado: Natura, Avon, O Boticário, Eudora e Quem Disse Berenice'
+    help = 'Super Crawler Intercalado: Natura, Avon, O Boticário, Eudora, Quem Disse Berenice e Mary Kay'
+
+    def add_arguments(self, parser):
+        # ⚠️ NOVO: MAX_PAGES=10 sozinho não limita bem o tempo real de
+        # execução — 10 páginas com centenas de produtos cada, com delay
+        # de 2.5-4.5s por produto, ainda pode levar horas. Um orçamento de
+        # tempo é uma proteção mais direta contra estourar o job do
+        # GitHub Actions (mesmo padrão já aplicado em crawl_all.py).
+        parser.add_argument(
+            '--max-minutes', type=int, default=45,
+            help='Tempo máximo de execução em minutos antes de parar graciosamente (default: 45)',
+        )
+        # ⚠️ NOVO: sem isso, toda execução reamostra do MESMO balde de
+        # links descobertos na página 1 (nunca dá tempo de chegar na
+        # página 2 em catálogos grandes) — o mesmo produto processado em
+        # execuções diferentes, sem necessidade nenhuma. Link processado
+        # com sucesso dentro dessa janela é pulado na descoberta.
+        parser.add_argument(
+            '--freshness-days', type=int, default=6,
+            help='Pula links já processados com sucesso há menos de N dias (default: 6, um pouco menos que o ciclo semanal)',
+        )
 
     def handle(self, *args, **kwargs):
+        max_minutes = kwargs.get('max_minutes', 45)
+        deadline = time.monotonic() + (max_minutes * 60)
+        freshness_cutoff = timezone.now() - timezone.timedelta(days=kwargs.get('freshness_days', 6))
+
+        # ⚠️ Busca UMA VEZ só, no início — checar isso por link individual
+        # seria uma consulta ao banco por item, entre milhares de links
+        # descobertos por execução. Um set em memória resolve com lookup
+        # O(1), sem bater no banco de novo durante a descoberta.
+        urls_recentes = set(
+            CrawledUrl.objects.filter(last_crawled_at__gte=freshness_cutoff).values_list('url', flat=True)
+        )
+        self.stdout.write(self.style.WARNING(
+            f"📋 {len(urls_recentes)} URLs já processadas nos últimos {kwargs.get('freshness_days', 6)} dias — serão puladas na descoberta."
+        ))
+
         # 🚀 CONFIGURAÇÃO DAS 6 MARCAS COM DOMÍNIOS EXATOS
         STORES = [
             {"brand": "Natura", "list_url": "https://www.natura.com.br/c/todos-produtos", "domain": "www.natura.com.br", "prefix": "NATBRA"},
@@ -57,6 +93,13 @@ class Command(BaseCommand):
             
             page = 1
             while page <= MAX_PAGES:
+                if time.monotonic() >= deadline:
+                    self.stdout.write(self.style.WARNING(
+                        f"\n⏰ Orçamento de {max_minutes} min atingido — parando de propósito. "
+                        f"O próximo agendamento continua a partir daqui."
+                    ))
+                    break
+
                 self.stdout.write(self.style.WARNING(f"\n--- 📂 LENDO PÁGINA {page} DE {MAX_PAGES} DE TODAS AS MARCAS ---"))
                 discovered_links = []
                 
@@ -111,7 +154,31 @@ class Command(BaseCommand):
                                         
                                     is_product = False
                                     if store['brand'] == "Mary Kay":
-                                        if len(href) > 15 and 'login' not in href and 'account' not in href:
+                                        # ⚠️ CORREÇÃO PARCIAL: antes qualquer
+                                        # link com mais de 15 caracteres que
+                                        # não fosse login/account contava
+                                        # como produto — isso certamente
+                                        # também capturava link de rodapé,
+                                        # blog, central de ajuda, etc.
+                                        # Ampliei a lista de exclusão com
+                                        # termos genéricos comuns de
+                                        # e-commerce. ⚠️ Não tenho acesso ao
+                                        # site ao vivo pra confirmar o
+                                        # padrão exato de URL de produto da
+                                        # Mary Kay — isso reduz falsos
+                                        # positivos, mas vale conferir o log
+                                        # de execução pra ver se ainda pega
+                                        # lixo.
+                                        href_lower = href.lower()
+                                        termos_excluidos = [
+                                            'login', 'account', 'minha-conta', 'cadastro',
+                                            'carrinho', 'cart', 'checkout', 'busca', 'search',
+                                            'wishlist', 'favoritos', 'sobre', 'contato', 'ajuda',
+                                            'faq', 'termos', 'privacidade', 'blog', 'politica',
+                                            'trabalhe-conosco', 'seja-uma-consultora', 'facebook.com',
+                                            'instagram.com', 'youtube.com', 'twitter.com',
+                                        ]
+                                        if len(href) > 15 and not any(t in href_lower for t in termos_excluidos):
                                             is_product = True
                                     else:
                                         if '/p' in href:
@@ -126,8 +193,20 @@ class Command(BaseCommand):
                                 empty_pages[store['brand']] += 1
                             else:
                                 empty_pages[store['brand']] = 0
-                                discovered_links.extend(links_loja)
-                                self.stdout.write(self.style.SUCCESS(f"   ✅ Encontrados {len(links_loja)} links em {store['brand']}"))
+                                # ⚠️ Filtro de "já visto recentemente" aplicado
+                                # AQUI, depois da contagem de página vazia —
+                                # não antes. Filtrar antes faria uma página
+                                # cheia de links já processados parecer
+                                # "vazia" pro contador, encerrando a
+                                # paginação daquela marca cedo demais por
+                                # engano.
+                                links_novos = [l for l in links_loja if l['url'] not in urls_recentes]
+                                pulados = len(links_loja) - len(links_novos)
+                                discovered_links.extend(links_novos)
+                                msg = f"   ✅ Encontrados {len(links_loja)} links em {store['brand']}"
+                                if pulados:
+                                    msg += f" ({pulados} já processados recentemente, pulados)"
+                                self.stdout.write(self.style.SUCCESS(msg))
                                 
                         except Exception as e:
                             self.stdout.write(self.style.ERROR(f"❌ Erro ao listar {store['brand']}: {e}"))
@@ -147,6 +226,12 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING(f"\n🛒 Iniciando extração profunda de {len(discovered_links)} produtos embaralhados..."))
                 
                 for item in discovered_links:
+                    if time.monotonic() >= deadline:
+                        self.stdout.write(self.style.WARNING(
+                            f"\n⏰ Orçamento de {max_minutes} min atingido durante o enriquecimento — parando de propósito."
+                        ))
+                        return
+
                     product_url = item["url"]
                     brand = item["brand"]
                     
@@ -319,16 +404,45 @@ class Command(BaseCommand):
                                 product.official_price = d_price
                                 product.last_checked_at = timezone.now()
                                 product.last_checked_price = d_price
+                            if not created:
+                                # ⚠️ CORREÇÃO: capturado ANTES de sobrescrever
+                                # official_price, pra poder comparar depois e
+                                # decidir se o preço realmente mudou.
+                                preco_anterior = product.official_price
+                                product.name = d_name[:255]
+                                product.brand = brand               
+                                product.category = smart_category   
+                                product.official_price = d_price
+                                product.last_checked_at = timezone.now()
+                                product.last_checked_price = d_price
                                 if d_image: product.image_url = d_image
                                 if d_desc: product.description = d_desc
                                 product.save()
-                                
-                            if d_price > 0:
+                            else:
+                                preco_anterior = None  # produto novo — não tem preço anterior pra comparar
+
+                            # ⚠️ CORREÇÃO: antes criava uma linha de
+                            # PriceHistory TODA vez que o produto era
+                            # re-processado, mesmo com o preço idêntico ao
+                            # da semana anterior — rodando semanalmente,
+                            # isso acumula histórico sem informação nova
+                            # nenhuma. Agora só registra quando é produto
+                            # novo (primeiro preço, estabelece a base) ou
+                            # quando o preço realmente mudou.
+                            if d_price > 0 and (created or preco_anterior != d_price):
                                 PriceHistory.objects.create(product=product, price=d_price)
                                 
                             status = "✨" if created else "🔄"
                             img_status = "🖼️" if d_image else "❌"
                             self.stdout.write(self.style.SUCCESS(f"{status} [{brand}] {d_sku} ({smart_category}) - {d_name[:25]}... | R$ {d_price} | {img_status}"))
+
+                        # ⚠️ Marca a URL da PÁGINA como processada — uma vez
+                        # só, fora do loop de variantes (uma página da Mary
+                        # Kay pode gerar vários produtos, todos com a mesma
+                        # URL). Próxima execução, dentro da janela de
+                        # atualidade, pula direto pra outra coisa.
+                        if products_to_save:
+                            CrawledUrl.objects.update_or_create(url=product_url)
 
                     except Exception as e:
                         # Falha silenciosa no produto para não derrubar o bot
