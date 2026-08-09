@@ -387,7 +387,7 @@ export default function ProductForm() {
             </div>
             <div>
               <label className="text-sm font-medium text-foreground">
-                SKU Natura
+                SKU Produto 
               </label>
               <input
                 type="text"

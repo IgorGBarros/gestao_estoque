@@ -470,8 +470,83 @@ export const adminApi = {
       body: JSON.stringify(data),
     }),
   listPromotions: () => apiRequest<any[]>("/admin/promotions/"),
+
+  // 💬 Suporte
+  listSupportConversations: (statusFiltro?: string) =>
+    apiRequest<any[]>(`/admin/support/conversations/${statusFiltro ? `?status=${statusFiltro}` : ""}`),
+  getSupportConversation: (id: string) => apiRequest<any>(`/admin/support/conversations/${id}/`),
+  replySupportConversation: (id: string, message: string) =>
+    apiRequest<any>(`/admin/support/conversations/${id}/`, { method: "POST", body: JSON.stringify({ message }) }),
+  updateSupportConversationStatus: (id: string, status: string) =>
+    apiRequest<any>(`/admin/support/conversations/${id}/`, { method: "PATCH", body: JSON.stringify({ status }) }),
+
+  // 🎬 Vídeos tutoriais (legado — TutorialVideo, mantido por segurança;
+  // a UI atual do admin já usa a Central de Ajuda abaixo, não isto)
+  listTutorialVideos: () => apiRequest<any[]>("/admin/tutorial-videos/"),
+  createTutorialVideo: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/tutorial-videos/", { method: "POST", body: JSON.stringify(data) }),
+  updateTutorialVideo: (id: number, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/tutorial-videos/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteTutorialVideo: (id: number) =>
+    apiRequest<void>(`/admin/tutorial-videos/${id}/`, { method: "DELETE" }),
+
+  // 📚 Central de Ajuda (HelpContent) — vídeo, FAQ, guia, novidade, tudo
+  // no mesmo lugar. Substitui a tela de vídeos tutoriais no admin.
+  listHelpContent: (filtros?: { tipo?: string; categoria?: string; status?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.tipo) params.set("tipo", filtros.tipo);
+    if (filtros?.categoria) params.set("categoria", filtros.categoria);
+    if (filtros?.status) params.set("status", filtros.status);
+    const query = params.toString();
+    return apiRequest<any[]>(`/admin/help-content/${query ? `?${query}` : ""}`);
+  },
+  createHelpContent: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/help-content/", { method: "POST", body: JSON.stringify(data) }),
+  updateHelpContent: (id: number, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/help-content/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteHelpContent: (id: number) =>
+    apiRequest<void>(`/admin/help-content/${id}/`, { method: "DELETE" }),
+
+  // 📦 Revisão de candidatos de código de barras (ExternalBarcodeCatalog)
+  listBarcodeCandidates: (filtros?: { brand?: string; confidence?: string }) => {
+    const params = new URLSearchParams();
+    if (filtros?.brand) params.set("brand", filtros.brand);
+    if (filtros?.confidence) params.set("confidence", filtros.confidence);
+    const query = params.toString();
+    return apiRequest<any[]>(`/admin/barcode-candidates/${query ? `?${query}` : ""}`);
+  },
+  approveBarcodeCandidate: (id: number) =>
+    apiRequest<any>(`/admin/barcode-candidates/${id}/approve/`, { method: "POST" }),
+  rejectBarcodeCandidate: (id: number) =>
+    apiRequest<any>(`/admin/barcode-candidates/${id}/reject/`, { method: "POST" }),
+  createPromotion: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/promotions/create/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updatePromotion: (id: string, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/promotions/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deletePromotion: (id: string) =>
+    apiRequest<void>(`/admin/promotions/${id}/`, { method: "DELETE" }),
+  // ⚙️ Configuração global — substitui os dois localStorage fantasmas
+  // (manutenção e feature flags) por um estado real, compartilhado.
+  updateSystemConfig: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/system-config/", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
   getSystemStats: () => apiRequest<any>("/admin/stats/"),
   getApiMonitor: () => apiRequest<any>("/admin/api-monitor/"),
+  // 💰 Fase 4 — planos de API (starter/pro/enterprise) que o admin configura.
+  listApiPlanConfigs: () => apiRequest<any[]>("/admin/api-plan-configs/"),
+  updateApiPlanConfig: (planType: string, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/api-plan-configs/${planType}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
   getAsaasConfig: () => apiRequest<AsaasConfig>("/payments/asaas/config/"),
   testAsaasConnection: () =>
     apiRequest<AsaasConnectionTest>("/payments/asaas/test/", {
@@ -810,8 +885,30 @@ let statsInFlight: Promise<DashboardStats> | null = null;
 const STATS_CACHE_MS = 30_000;
 
 // ✅ Planos públicos (preços reais do PlanConfig, mesma fonte do checkout).
+// 🔹 Registra que a loja viu uma promoção — chamado pelo PromotionBanner.
+// É o que alimenta "Visualizações" e "Taxa de Conversão" de verdade no
+// admin-panel, em vez do Math.random() de antes.
+export const promotionTrackingApi = {
+  registerView: (promotionId: string) =>
+    apiRequest<void>(`/promotions/${promotionId}/view/`, { method: "POST" }),
+};
+
 export const plansApi = {
   list: () => apiRequest<any[]>("/plans/"),
+};
+
+export interface SystemConfigStatus {
+  maintenance_mode: boolean;
+  maintenance_message: string;
+  ai_enabled: boolean;
+  storefront_enabled: boolean;
+  ocr_enabled: boolean;
+}
+
+// 🔹 Pública — precisa funcionar até pra quem ainda não conseguiu logar,
+// pra avisar de manutenção antes mesmo da tentativa de autenticação.
+export const systemConfigApi = {
+  get: () => apiRequest<SystemConfigStatus>("/system-config/"),
 };
 
 /** Janelas de período usadas nos relatórios e no painel do MEI. */

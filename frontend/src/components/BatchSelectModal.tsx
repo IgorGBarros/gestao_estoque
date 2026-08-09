@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Layers, Calendar, Check } from "lucide-react";
 import { InventoryBatch, formatMoney } from "../lib/api";
+import { parseDateLocal } from "../lib/dateUtils";
 
 interface BatchSelectModalProps {
   productName: string;
@@ -16,8 +17,13 @@ export default function BatchSelectModal({ productName, batches, onSelect, onClo
   );
 
   const formatDate = (d: string | null) => {
-    if (!d) return "Sem validade";
-    return new Date(d).toLocaleDateString("pt-BR", { month: "2-digit", year: "numeric" });
+    // ⚠️ CORREÇÃO: new Date("YYYY-MM-DD") direto interpreta como meia-noite
+    // UTC — em fuso -3, isso pode mostrar o MÊS/ANO errado perto da
+    // virada (ex: validade 01/2028 aparecendo como 12/2027). Mesmo bug já
+    // corrigido em outras telas nesta sessão (ProductList, MovementHistory).
+    const data = parseDateLocal(d);
+    if (!data) return "Sem validade";
+    return data.toLocaleDateString("pt-BR", { month: "2-digit", year: "numeric" });
   };
 
   return (
@@ -56,7 +62,7 @@ export default function BatchSelectModal({ productName, batches, onSelect, onClo
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">{formatDate(batch.expiry_date)}</span>
+                  <span className="text-sm font-medium text-foreground">{formatDate(batch.expiration_date)}</span>
                   {i === 0 && (
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">FIFO</span>
                   )}

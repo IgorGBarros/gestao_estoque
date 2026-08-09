@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   ArrowLeft, Key, BarChart3, Bell, Settings, 
-  Copy, RefreshCw, TrendingUp, AlertCircle, LogOut
+  Copy, RefreshCw, TrendingUp, AlertCircle, LogOut, Play, Check, Terminal
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { devApi, isDevLoggedIn, clearDevTokens } from '../lib/devApi';
 
 // Tipos
 interface ApiKey {
@@ -42,51 +43,88 @@ export default function ApiDashboard() {
   const [newKeyName, setNewKeyName] = useState('');
   const [newKeyPlan, setNewKeyPlan] = useState<'starter' | 'pro' | 'enterprise'>('starter');
 
-  // Carregar dados (mock para demo)
-  useEffect(() => {
-    const loadData = async () => {
-      // Em produção: buscar da API real
-      // const [keysData, usageData] = await Promise.all([
-      //   commercialApi.listKeys(),
-      //   commercialApi.getUsage()
-      // ]);
-      
-      // Mock data para demo
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setKeys([
-        {
-          id: 'key_1',
-          name: 'Meu App de Vendas',
-          key_prefix: 'pk_live_a8f2c91••••',
-          plan: 'pro',
-          scopes: ['read:products', 'read:storefront'],
-          rate_limit: 100,
-          monthly_quota: 50000,
-          last_used: new Date(Date.now() - 3600000).toISOString(),
-          is_active: true,
-        },
-        {
-          id: 'key_2',
-          name: 'Integração ERP',
-          key_prefix: 'pk_live_b3d7e44••••',
-          plan: 'enterprise',
-          scopes: ['read:products', 'read:analytics', 'write:webhooks'],
-          rate_limit: 500,
-          monthly_quota: 999999,
-          last_used: new Date(Date.now() - 7200000).toISOString(),
-          is_active: true,
-        },
-      ]);
-      
-      setUsage({
-        requests_30d: 12450,
-        quota: 50000,
-        success_rate: 99.2,
-        avg_latency_ms: 142,
+  // 🧪 Sandbox — antes era uma página pública separada (/api/sandbox), com
+  // resposta 100% inventada (mockResponse) e o botão de copiar curl
+  // apontando pra um domínio que nunca existiu. Agora mora aqui dentro do
+  // painel autenticado, e as chamadas são reais. A chave completa só
+  // aparece uma vez no cadastro (por segurança), então ela precisa colar a
+  // chave que já guardou — igual o Postman ou o próprio painel da Stripe.
+  const API_BASE_URL = ((import.meta as any).env?.VITE_API_BASE_URL || 'https://dev-brih.onrender.com').replace(/\/$/, '');
+  const [sbEndpoint, setSbEndpoint] = useState('/api/v1/products/');
+  const [sbParams, setSbParams] = useState('');
+  const [sbApiKey, setSbApiKey] = useState('');
+  const [sbResponse, setSbResponse] = useState<{ status: number; body: any } | null>(null);
+  const [sbLoading, setSbLoading] = useState(false);
+  const [sbCopied, setSbCopied] = useState(false);
+
+  const runSandboxRequest = async () => {
+    if (!sbApiKey.trim()) {
+      setSbResponse({ status: 0, body: { error: 'Cole sua API Key acima antes de testar.' } });
+      return;
+    }
+    setSbLoading(true);
+    setSbResponse(null);
+    try {
+      const url = `${API_BASE_URL}${sbEndpoint}${sbParams ? `?${sbParams}` : ''}`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${sbApiKey.trim()}` },
       });
-      
-      setLoading(false);
+      const body = await res.json().catch(() => ({}));
+      setSbResponse({ status: res.status, body });
+    } catch (err: any) {
+      setSbResponse({ status: 0, body: { error: err.message || 'Falha de rede' } });
+    } finally {
+      setSbLoading(false);
+    }
+  };
+
+  const copySandboxCurl = () => {
+    const curl = `curl "${API_BASE_URL}${sbEndpoint}${sbParams ? `?${sbParams}` : ''}" \\\n  -H "Authorization: Bearer ${sbApiKey || 'pk_test_•••'}"`;
+    navigator.clipboard.writeText(curl);
+    setSbCopied(true);
+    setTimeout(() => setSbCopied(false), 2000);
+  };
+
+  // 🔹 CORREÇÃO: antes tinha uma chamada real COMENTADA, substituída por um
+  // setTimeout(500ms) fingindo carregar, seguido de dados inventados na
+  // tela toda. Agora busca de verdade — chaves reais, uso real, tudo vindo
+  // de ApiUsageLog através de /api/developers/dashboard/.
+  useEffect(() => {
+    if (!isDevLoggedIn()) {
+      navigate('/api/login');
+      return;
+    }
+
+    const loadData = async () => {
+      try {
+        const dados = await devApi.dashboard();
+        // ⚠️ Blindagem: se a resposta vier num formato inesperado (erro
+        // tratado como sucesso, campo ausente), não deixa a tela inteira
+        // quebrar com "map is not a function" — mostra vazio e segue.
+        setKeys((Array.isArray(dados.keys) ? dados.keys : []).map((k) => ({
+          id: k.id,
+          name: k.name,
+          key_prefix: k.key_prefix,
+          plan: k.plan as ApiKey['plan'],
+          scopes: k.scopes,
+          rate_limit: k.rate_limit,
+          monthly_quota: k.monthly_quota,
+          last_used: k.last_used,
+          is_active: k.is_active,
+        })));
+        setUsage({
+          requests_30d: dados.requests_this_month,
+          quota: dados.quota_limit,
+          success_rate: dados.success_rate_percent,
+          avg_latency_ms: dados.avg_latency_ms,
+        });
+      } catch {
+        // Token inválido/expirado — manda pra tela de login de novo.
+        clearDevTokens();
+        navigate('/api/login');
+      } finally {
+        setLoading(false);
+      }
     };
     
     loadData();
@@ -171,6 +209,9 @@ export default function ApiDashboard() {
             <TabsTrigger value="keys" className="gap-2">
               <Key className="h-4 w-4" /> Minhas Chaves
             </TabsTrigger>
+            <TabsTrigger value="sandbox" className="gap-2">
+              <Terminal className="h-4 w-4" /> Sandbox
+            </TabsTrigger>
             <TabsTrigger value="usage" className="gap-2">
               <BarChart3 className="h-4 w-4" /> Uso
             </TabsTrigger>
@@ -184,6 +225,19 @@ export default function ApiDashboard() {
 
           {/* Tab: Minhas Chaves */}
           <TabsContent value="keys" className="space-y-4">
+            {/* 💰 Fase 4: aviso de upgrade — antes não existia nenhum caminho
+                daqui pra assinar um plano pago. */}
+            {keys.length > 0 && keys.every((k) => k.plan === 'starter') && (
+              <Card className="border-primary/40 bg-primary/5">
+                <CardContent className="flex flex-wrap items-center justify-between gap-3 py-4">
+                  <div>
+                    <p className="text-sm font-medium">Você está no plano Starter (grátis)</p>
+                    <p className="text-xs text-muted-foreground">Precisa de mais cota ou limite por minuto? Dá pra assinar Pro ou Enterprise.</p>
+                  </div>
+                  <Button size="sm" onClick={() => navigate('/api/pricing')}>Ver planos</Button>
+                </CardContent>
+              </Card>
+            )}
             {keys.length === 0 ? (
               <Card>
                 <CardContent className="py-12 text-center">
@@ -237,7 +291,7 @@ export default function ApiDashboard() {
                             Última usada: {key.last_used ? new Date(key.last_used).toLocaleString('pt-BR') : 'Nunca'}
                           </p>
                           <div className="flex flex-wrap gap-1 mt-2">
-                            {key.scopes.map((scope) => (
+                            {(key.scopes ?? []).map((scope) => (
                               <Badge key={scope} variant="outline" className="text-[10px]">
                                 {scope}
                               </Badge>
@@ -270,6 +324,79 @@ export default function ApiDashboard() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          {/* Tab: Sandbox — chamadas reais, não mais mock */}
+          <TabsContent value="sandbox" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">Testar a API</CardTitle>
+                <CardDescription>
+                  Chamadas de verdade contra {API_BASE_URL} — cole sua chave abaixo.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="sb-key">Sua API Key</Label>
+                  <Input
+                    id="sb-key"
+                    placeholder="pk_test_••••"
+                    value={sbApiKey}
+                    onChange={(e) => setSbApiKey(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A chave completa só aparece uma vez, no cadastro — cole a que você guardou.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sb-endpoint">Endpoint</Label>
+                    <Select value={sbEndpoint} onValueChange={setSbEndpoint}>
+                      <SelectTrigger id="sb-endpoint"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="/api/v1/ping/">GET /api/v1/ping/</SelectItem>
+                        <SelectItem value="/api/v1/products/">GET /api/v1/products/</SelectItem>
+                        <SelectItem value="/api/v1/products/lookup/">GET /api/v1/products/lookup/</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="sb-params">Parâmetros (query string)</Label>
+                    <Input
+                      id="sb-params"
+                      placeholder="brand=Natura ou barcode=7891234567890"
+                      value={sbParams}
+                      onChange={(e) => setSbParams(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button onClick={runSandboxRequest} disabled={sbLoading} className="gap-2">
+                    {sbLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                    Executar
+                  </Button>
+                  <Button variant="outline" onClick={copySandboxCurl} className="gap-2">
+                    {sbCopied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+                    Copiar como curl
+                  </Button>
+                </div>
+
+                {sbResponse && (
+                  <div>
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <Badge variant={sbResponse.status >= 200 && sbResponse.status < 300 ? "default" : "destructive"}>
+                        {sbResponse.status || "erro de rede"}
+                      </Badge>
+                    </div>
+                    <pre className="max-h-80 overflow-auto rounded-lg border border-border bg-secondary/30 p-3 text-xs">
+                      {JSON.stringify(sbResponse.body, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Tab: Uso */}
@@ -439,7 +566,7 @@ export default function ApiDashboard() {
                     size="sm" 
                     className="gap-2"
                     onClick={() => {
-                      localStorage.removeItem('api_key_demo');
+                      clearDevTokens();
                       navigate('/api');
                     }}
                   >

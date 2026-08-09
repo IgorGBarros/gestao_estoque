@@ -277,6 +277,14 @@ def _formatar_historico(history: list) -> str:
     )
 
 
+# ⚠️ Extraído como constante (era string inline) porque o chat unificado
+# (ai/support_views.py:chat_unified) precisa comparar contra este texto
+# EXATO pra decidir se cai pro modo de ajuda — comparar contra uma string
+# solta duplicada nos dois arquivos seria um jeito fácil de os dois
+# desalinharem silenciosamente numa edição futura.
+FORA_DO_ESCOPO_MSG = "Desculpe, só posso responder sobre estoque, produtos e vendas da sua loja."
+
+
 def query_database_with_llm(user_question: str, store, history: list = None) -> str:
     """
     `store`: instância de inventory.models.Store do usuário autenticado.
@@ -315,7 +323,7 @@ def query_database_with_llm(user_question: str, store, history: list = None) -> 
         argumentos = argumentos if isinstance(argumentos, dict) else {}
 
         if not funcao_nome or funcao_nome not in FUNCOES_PERMITIDAS:
-            return "Desculpe, só posso responder sobre estoque, produtos e vendas da sua loja."
+            return FORA_DO_ESCOPO_MSG
 
         funcao, parametros_aceitos = FUNCOES_PERMITIDAS[funcao_nome]
 

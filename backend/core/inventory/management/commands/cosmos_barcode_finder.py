@@ -180,7 +180,7 @@ class Command(BaseCommand):
             sb.sleep(3)
             
             # Preparar busca
-            search_term = self.prepare_search_term(product.name)
+            search_term = self.prepare_search_term(product.name, product.brand)
             result['search_term'] = search_term
             
             if debug:
@@ -302,12 +302,16 @@ class Command(BaseCommand):
             product_name_lower = product.name.lower()
             product_words = self.normalize_text(product.name).lower().split()
             
-            # Identificar palavras-chave importantes
+            # Identificar palavras-chave importantes — exclui a marca
+            # (qualquer uma, não só "natura") porque ela já ganha pontuação
+            # própria acima; deixá-la aqui infla o score sem agregar
+            # precisão real ao match.
             important_words = []
             volume_info = {'number': None, 'unit': None}
-            
+            marca_lower = (product.brand or '').lower()
+
             for word in product_words:
-                if len(word) > 2 and word not in ['produto', 'natura']:
+                if len(word) > 2 and word != 'produto' and word != marca_lower:
                     important_words.append(word)
             
             # Extrair informação de volume/tamanho
@@ -370,10 +374,14 @@ class Command(BaseCommand):
                             score += 10  # Só a unidade
                             match_details.append(f"Unidade {volume_info['unit']} +10")
                     
-                    # 3. Marca Natura (PESO ALTO)
-                    if 'natura' in context_lower:
+                    # 3. Marca do produto mencionada no contexto (PESO ALTO)
+                    # ⚠️ CORREÇÃO: era hardcoded pra "natura" só — qualquer
+                    # marca (Boticário, Avon, Eudora...) nunca ganhava esse
+                    # bônus, mesmo quando a busca já era filtrada por marca
+                    # (--brand). Agora usa a marca de verdade do produto.
+                    if product.brand and product.brand.lower() in context_lower:
                         score += 30
-                        match_details.append("Marca Natura +30")
+                        match_details.append(f"Marca {product.brand} +30")
                     
                     # 4. Evitar produtos relacionados mas diferentes
                     # Penalizar se for pincel, refil, etc.
@@ -530,7 +538,15 @@ class Command(BaseCommand):
                         print(f"⏭️ GTIN {gtin} ignorado (score: {score}, critério não atendido)")
             
             # ✅ 3. SALVAR NO PRODUTO - APENAS SE bar_code FOR NULL
-            if confidence in ['very_high', 'high', 'medium']:
+            # ⚠️ CORREÇÃO: aceitava 'medium' também — mas isso é uma busca
+            # por TEXTO com heurística de pontuação, não um match garantido.
+            # 'medium' significa "algumas palavras bateram", não "certeza".
+            # Alinhado agora com o mesmo critério de lookup_product (só
+            # muito alta promove sozinho pro catálogo compartilhado) —
+            # 'high' e 'medium' continuam salvos em ExternalBarcodeCatalog
+            # (linha abaixo, já roda antes disto) como candidato, só não
+            # são mais escritos automaticamente no Product de todo mundo.
+            if confidence == 'very_high':
                 # ✅ VERIFICAÇÃO CRÍTICA: só preencher se bar_code for NULL
                 if not product.bar_code:  # ← PROTEÇÃO ADICIONADA
                     product.bar_code = best_gtin
@@ -539,7 +555,7 @@ class Command(BaseCommand):
                 else:
                     print(f"🔒 Produto {product.natura_sku} já tem código de barras: {product.bar_code} (não sobrescrito)")
             else:
-                print(f"⚠️ Confiança baixa ({confidence}) - não salvo no produto")
+                print(f"⚠️ Confiança '{confidence}' — guardado como candidato em ExternalBarcodeCatalog, mas não aplicado automaticamente ao produto")
             
         except Exception as e:
             print(f"❌ Erro ao salvar GTIN {best_gtin}: {e}")
@@ -586,11 +602,17 @@ class Command(BaseCommand):
                 self.stdout.write(f"   ❌ Erro na busca: {e}")
             return False
     
-    def prepare_search_term(self, product_name):
+    def prepare_search_term(self, product_name, brand=None):
         """Prepara termo de busca otimizado"""
         term = self.normalize_text(product_name)
-        
-        stop_words = ['produto', 'natura', 'ml', 'g', 'unidade', 'un', 'cx', 'caixa']
+
+        # ⚠️ CORREÇÃO: "natura" era hardcoded na lista de stop words — pra
+        # qualquer outra marca, o próprio nome da marca continuava entrando
+        # no termo de busca (ex: buscar "boticario malbec" em vez de só
+        # "malbec"), o que piora a precisão da busca no Cosmos.
+        stop_words = ['produto', 'ml', 'g', 'unidade', 'un', 'cx', 'caixa']
+        if brand:
+            stop_words.append(brand.lower())
         words = term.split()
         filtered_words = [w for w in words if w.lower() not in stop_words and len(w) > 2]
         

@@ -2,7 +2,7 @@
 import { Toaster } from "./components/ui/toaster";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation, Navigate } from "react-router-dom";
 
 // ✅ Providers - ORDEM CRÍTICA:
 import { AuthProvider, useAuth } from "./hooks/useAuth";
@@ -15,6 +15,8 @@ import { ThemeProvider } from "./hooks/useTheme";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ImpersonationBanner from "./components/ImpersonationBanner";
 import { TrialBanner } from "./components/TrailBanner";
+import { PromotionBanner } from "./components/PromotionBanner";
+import { MaintenanceBanner } from "./components/MaintenanceBanner";
 // ✅ ErrorBoundary REMOVIDO
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
 import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
@@ -27,9 +29,9 @@ import NotFound from "./pages/NotFound";
 
 // Pages - API / Dev
 import ApiLanding from "./pages/ApiLanding";
+import ApiDevAuth from "./pages/ApiDevAuth";
 import ApiDocs from "./pages/ApiDocs";
 import ApiPricing from "./pages/ApiPricing";
-import ApiSandbox from "./pages/ApiSandbox";
 import ApiDashboard from "./pages/ApiDashboard";
 
 // Pages - Protected (App Core)
@@ -43,6 +45,7 @@ import Dashboard from "./pages/Dashboard";
 import Settings from "./pages/Settings";
 import MovementHistory from "./pages/MovementHistory";
 import CRM from "./pages/CRM";
+import Support from "./pages/Support";
 import AdminPanel from "./pages/AdminPanel";
 import Profile from "./pages/Profile";
 import Plans from "./pages/Plans";
@@ -50,6 +53,8 @@ import { useEffect, useState } from "react";
 
 import PrivacyPage from "./pages/PrivacyPage";
 import TermsPage from "./pages/TermsPage";
+
+// Remove unused Support import - component exports a named function, not default
 
 // ✅ QueryClient FORA do componente (evita recriação a cada render)
 const queryClient = new QueryClient({
@@ -73,6 +78,13 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
     <ImpersonationBanner />
     {/* Contagem regressiva do teste. Some sozinha fora do período. */}
     <TrialBanner />
+    {/* Aviso de manutenção — vem antes da promoção de propósito: um alerta
+        de possível instabilidade é mais importante que uma oferta. */}
+    <MaintenanceBanner />
+    {/* Promoção ativa pra esta loja — segmento amplo ou selecionada
+        especificamente pelo admin. Sem isto, nenhuma promoção criada no
+        admin-panel jamais chegava até a consultora. */}
+    <PromotionBanner />
     <main className="flex-1">{children}</main>
   </div>
 );
@@ -156,9 +168,14 @@ const App = () => {
 
                       {/* Rotas de API / Desenvolvedores */}
                       <Route path="/api" element={<ApiLanding />} />
+                      <Route path="/api/login" element={<ApiDevAuth />} />
                       <Route path="/api/docs" element={<ApiDocs />} />
                       <Route path="/api/pricing" element={<ApiPricing />} />
-                      <Route path="/api/sandbox" element={<ApiSandbox />} />
+                      {/* ⚠️ O sandbox saiu daqui — agora é uma aba dentro do
+                          painel autenticado (ApiDashboard), com chamadas
+                          reais em vez do mockResponse fixo de antes. Link
+                          antigo redireciona em vez de dar 404. */}
+                      <Route path="/api/sandbox" element={<Navigate to="/api/dashboard" replace />} />
                       <Route path="/api/dashboard" element={<ApiDashboard />} />
 
                       {/* ==========================================
@@ -242,6 +259,14 @@ const App = () => {
                         <ProtectedRoute>
                           <ProtectedLayout>
                             <CRM />
+                          </ProtectedLayout>
+                        </ProtectedRoute>
+                      } />
+
+                      <Route path="/support" element={
+                        <ProtectedRoute>
+                          <ProtectedLayout>
+                            <Support />
                           </ProtectedLayout>
                         </ProtectedRoute>
                       } />

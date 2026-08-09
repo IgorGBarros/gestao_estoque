@@ -15,7 +15,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status, permissions, generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.decorators import api_view, permission_classes, action, authentication_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -37,6 +37,7 @@ from .models import (
     Sale, SaleItem, PriceHistory, StockTransaction,
     PlanConfig, Promotion, ConsentRecord,  # ✅ Novo modelo LGPD
     Lead, Cart, CartItem,  # ✅ CRM da vitrine
+    SystemConfig, PromotionView,  # ⚙️ Configuração global + métricas reais de promoção
 )
 
 # Imports dos seus serializers
@@ -48,6 +49,7 @@ from .serializers import (
     ConsentRecordSerializer, ConsentRevocationSerializer, ConsentSummarySerializer,  # ✅ Serializers LGPD
     PlanConfigSerializer,
     LeadSerializer, CartItemSerializer,  # ✅ CRM da vitrine
+    PromotionSerializer,
 )
 
 from .scraper import search_google_shopping
@@ -160,85 +162,25 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 # Firebase imports
-import firebase_admin
-from firebase_admin import auth as firebase_auth, credentials
+from firebase_admin import auth as firebase_auth
 
 from .models import CustomUser
 from .utils import ensure_user_has_store
+from .firebase_utils import init_firebase_safe
 
 logger = logging.getLogger(__name__)
 
 
 class FirebaseLoginView(APIView):
     permission_classes = [permissions.AllowAny]
-    
-    def _init_firebase_safe(self) -> bool:
-        """
-        Inicializa Firebase com correção agressiva de caracteres.
-        Retorna True se sucesso, False se falhou (NUNCA lança exceção).
-        """
-        try:
-            # Se já inicializado, retorna
-            if firebase_admin._apps:
-                return True
-            
-            creds_json = os.environ.get("FIREBASE_CREDENTIALS")
-            if not creds_json:
-                logger.error("❌ FIREBASE_CREDENTIALS não configurada")
-                return False
-            
-            # 🔧 CORREÇÃO AGRESSIVA DE CARACTERES
-            # 1. Placeholder para \\ (para não duplicar escapes)
-            creds_json = creds_json.replace('\\\\', '\x00BSLASH\x00')
-            
-            # 2. Escapar caracteres de controle REAIS
-            creds_json = (creds_json
-                .replace('\n', '\\n')
-                .replace('\r', '\\r')
-                .replace('\t', '\\t')
-                .replace('\b', '\\b')
-                .replace('\f', '\\f')
-            )
-            
-            # 3. Restaurar \\
-            creds_json = creds_json.replace('\x00BSLASH\x00', '\\\\')
-            
-            # 4. Parse JSON
-            creds_dict = json.loads(creds_json)
-            
-            # 5. Validar campos obrigatórios
-            required = ['type', 'project_id', 'private_key', 'client_email']
-            missing = [k for k in required if k not in creds_dict]
-            if missing:
-                logger.error(f"❌ Firebase JSON missing: {missing}")
-                return False
-            
-            # 6. Inicializar SDK
-            cred = credentials.Certificate(creds_dict)
-            firebase_admin.initialize_app(cred, {'projectId': creds_dict.get('project_id')})
-            logger.info("✅ Firebase inicializado com sucesso")
-            return True
-            
-        except json.JSONDecodeError as e:
-            pos = getattr(e, 'pos', '?')
-            logger.error(f"❌ JSON decode error at pos {pos}: {str(e)[:150]}")
-            # Log de diagnóstico seguro (primeiros 200 chars)
-            if creds_json and isinstance(pos, int) and pos < len(creds_json):
-                start = max(0, pos - 30)
-                end = min(len(creds_json), pos + 30)
-                logger.error(f"🔍 Context: ...{creds_json[start:end]}...")
-            return False
-        except Exception as e:
-            logger.error(f"❌ Firebase init error: {type(e).__name__}: {str(e)[:150]}")
-            return False
-    
+
     def post(self, request):
         token = request.data.get("token")
         if not token:
             return Response({"error": "Token ausente"}, status=400)
         
         # Inicializar Firebase AGORA (na request, não no startup)
-        if not self._init_firebase_safe():
+        if not init_firebase_safe():
             # Fallback para DEBUG: mock user
             if settings.DEBUG:
                 user, _ = CustomUser.objects.get_or_create(
@@ -344,13 +286,13 @@ def has_consent_for_purpose(user, purpose: str) -> bool:
 # Imports Locais
 from .models import (
     Product, Store, InventoryItem, InventoryBatch, 
-    Sale, SaleItem, PriceHistory, StockTransaction
+    Sale, SaleItem, PriceHistory, StockTransaction, ExternalBarcodeCatalog
 )
 from .serializers import (
     ProductSerializer, InventoryItemSerializer, 
     StockEntrySerializer, SaleSerializer, StockTransactionSerializer
 )
-from .scraper import search_google_shopping
+from .scraper import search_google_shopping, detect_category
 
 # ==========================================
 # 0. HELPERS & MIXINS MULTI-TENANT
@@ -578,6 +520,33 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
     # são pequenos (dezenas de itens), então resposta sem paginação é ok.
     pagination_class = None
 
+    def get_queryset(self):
+        """
+        ⚠️ RESTAURADO a partir da v1.0.0 (comparação pedida pelo Igor): esta
+        view usava seu PRÓPRIO get_queryset, com Prefetch ordenando os lotes
+        por validade — comentário original já dizia "✅ CORREÇÃO: Ordenar
+        lotes por validade (FIFO)". Em algum refactor (provavelmente quando
+        TenantModelMixin foi introduzido/simplificado), esse Prefetch se
+        perdeu, e a view passou a usar o get_queryset genérico do mixin, sem
+        nenhuma ordenação. Era a causa raiz da validade errada em "Meu
+        Estoque" — o InventoryItemSerializer.get_batches (correção anterior,
+        já testada) cobre o caso mesmo sem isto, mas o Prefetch aqui evita
+        uma query por item (N+1) e é a fonte de verdade original.
+        """
+        try:
+            store = self.get_store()
+            return InventoryItem.objects.filter(store=store).select_related('product').prefetch_related(
+                Prefetch(
+                    'batches',
+                    queryset=InventoryBatch.objects.filter(quantity__gt=0).order_by(
+                        F('expiration_date').asc(nulls_last=True), 'id'
+                    )
+                )
+            ).order_by('-updated_at')
+        except Exception as e:
+            print(f"❌ Erro no get_queryset Inventory: {e}")
+            return InventoryItem.objects.none()
+
     # ✅ GET /api/inventory/by-barcode/<code>/ — o frontend (lib/api.ts) já
     # chamava esta rota, mas ela nunca existiu no backend (Auditoria P0.1).
     @action(detail=False, methods=['get'], url_path='by-barcode/(?P<barcode>[^/]+)')
@@ -619,8 +588,11 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
         
         # Agrupar lotes por data de validade
         batches_by_date = defaultdict(list)
-        
-        for batch in inventory_item.batches.filter(quantity__gt=0):
+
+        # ⚠️ .order_by() explícito aqui, mesmo com o Meta.ordering do
+        # InventoryBatch já corrigido — não deixa o "lote mantido" na
+        # consolidação abaixo (batches[0]) depender implicitamente de nada.
+        for batch in inventory_item.batches.filter(quantity__gt=0).order_by('id'):
             date_key = batch.expiration_date.isoformat() if batch.expiration_date else 'no_date'
             batches_by_date[date_key].append(batch)
         
@@ -1273,54 +1245,68 @@ def lookup_product(request):
 
     # --- 2. SE FOR BUSCA POR EAN / SKU (NÚMERO) ---
     print(f"   ↳ Busca Numérica detectada. Verificando base local...")
-    
+
     if not force_remote:
         local = Product.objects.filter(Q(bar_code=query) | Q(natura_sku=query)).first()
         if local:
             print(f"   ✅ Encontrado no banco local (Match Exato): {local.name}")
             return Response({"found": True, "source": "local", "data": ProductSerializer(local).data})
-            
-    # Se não achou local ou forçou remoto, vai pros Scrapers (Google/Natura/Cosmos)
+
+        # ✅ NOVO: catálogo pré-vetado do Cosmos (cosmos_barcode_finder) —
+        # antes era preenchido e NUNCA CONSULTADO aqui, um beco sem saída.
+        # Só confiança muito alta é usada — o mesmo critério do próprio
+        # crawler pra escrever automaticamente (ver cosmos_barcode_finder.py).
+        # Isso já passou por um processo de pontuação offline, deliberado —
+        # diferente do fallback ao vivo abaixo, que é uma tentativa síncrona
+        # durante a própria requisição da consultora.
+        catalogo = ExternalBarcodeCatalog.objects.filter(
+            gtin=query, matched=True, confidence_level='very_high'
+        ).first()
+        if catalogo:
+            print(f"   ✅ Encontrado no catálogo Cosmos pré-vetado (confiança muito alta): {catalogo.description}")
+            product, created = Product.objects.get_or_create(
+                bar_code=query,
+                defaults={
+                    'name': catalogo.searched_product_name or catalogo.description,
+                    'brand': catalogo.brand,
+                    'natura_sku': catalogo.searched_product_sku,
+                    'category': detect_category(catalogo.searched_product_name or catalogo.description),
+                    'last_checked_at': timezone.now(),
+                },
+            )
+            return Response({"found": True, "source": "catalog_verified", "data": ProductSerializer(product).data})
+
+    # Se não achou local nem no catálogo pré-vetado (ou forçou remoto),
+    # tenta os scrapers ao vivo (Google/Natura/Cosmos).
     if len(query) > 5:
-        print(f"   ↳ Não achou EAN localmente. Iniciando Scraper para {query}...")
-        
+        print(f"   ↳ Não achou localmente. Iniciando busca ao vivo para {query}...")
+
         online_data = search_google_shopping(query)
-        
-        if online_data:
-            sku_found = online_data.get('natura_sku')
-            name_found = online_data.get('name')
-            
-            # Salvar resultados adicionais (se a busca trouxe vários)
-            all_results = online_data.get('all_results', [])
-            for p in all_results:
-                Product.objects.update_or_create(
-                    natura_sku=p['natura_sku'],
-                    defaults={'name': p['name'], 'official_price': p.get('sale_price', 0), 'category': p.get('category', 'Geral'), 'last_checked_at': timezone.now()}
-                )
-            
-            # CASO 1: TEM SKU (Google ou Natura achou)
-            if sku_found:
-                try:
-                    product = Product.objects.get(natura_sku=sku_found)
-                    product.bar_code = query
-                    product.save()
-                    print(f"   🧠 APRENDIZADO: Vinculado EAN {query} ao SKU existente {sku_found}")
-                except Product.DoesNotExist:
-                    product = Product.objects.create(
-                        natura_sku=sku_found, bar_code=query, name=name_found,
-                        official_price=online_data.get('sale_price', 0), category=online_data.get('category', 'Geral'), description=online_data.get('description', '')
-                    )
-                    print(f"   🧠 APRENDIZADO: Novo produto criado (SKU {sku_found})")
-                
-                return Response({"found": True, "source": "remote_learned", "data": ProductSerializer(product).data})
-                
-            # CASO 2: SÓ TEM NOME (Ex: Cosmos achou)
-            elif name_found:
-                return Response({
-                    "found": True, "source": "remote_partial", "data": online_data,
-                    "message": "Produto achado, mas sem código Natura oficial."
-                })
-                
+
+        if online_data and (online_data.get('natura_sku') or online_data.get('name')):
+            # ⚠️ CORREÇÃO CRÍTICA: antes, este bloco criava ou atualizava o
+            # Product AQUI — durante a própria busca, ANTES da consultora
+            # ver ou confirmar qualquer coisa. Se o scrape ao vivo errasse
+            # (o que é bem possível — é busca por texto/heurística, não
+            # match garantido), o erro ficava gravado pra sempre no
+            # catálogo GLOBAL, afetando toda consultora futura que
+            # escaneasse o mesmo código. Product.objects.create(...) e
+            # product.save() foram removidos daqui.
+            #
+            # A gravação de verdade já acontece em StockEntryView (POST
+            # /api/stock/entry/), quando a consultora efetivamente clica
+            # "Salvar" — e aquele fluxo já é seguro (não sobrescreve
+            # produto protegido, só preenche campo que estava vazio). Aqui
+            # só devolvemos a sugestão pra ela revisar no formulário.
+            print(f"   ℹ️ Encontrado ao vivo, mas como sugestão não confirmada (fonte: {online_data.get('source', 'desconhecida')})")
+            online_data['bar_code'] = online_data.get('bar_code') or query
+            return Response({
+                "found": True,
+                "source": "remote_unconfirmed",
+                "data": online_data,
+                "message": "Encontrado na internet — confira os dados antes de salvar.",
+            })
+
     return Response({"found": False, "source": None})
 
 
@@ -2665,6 +2651,20 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             
             quantity = abs(int(data.get('quantity', 0)))
             transaction_type = data.get('transaction_type', '').upper()
+
+            # ⚠️ REGRA DE NEGÓCIO (Igor): ajuste de saldo exige justificativa
+            # — sem isso, vira uma porta aberta pra qualquer mudança de saldo
+            # sem motivo registrado. O frontend (StockAdjustmentModal) já
+            # valida isso, mas validação só no frontend não impede chamar a
+            # API direto — a garantia de verdade precisa estar aqui.
+            if transaction_type == 'AJUSTE':
+                justificativa = (data.get('description') or data.get('notes') or '').strip()
+                if not justificativa:
+                    return Response(
+                        {'error': 'Ajuste de saldo exige uma justificativa.'},
+                        status=400
+                    )
+
             # ⚠️ CORREÇÃO: era `float(...)`. O campo do modelo é DecimalField, e
             # o objeto é serializado logo abaixo SEM recarregar do banco — o
             # atributo em memória ficava como float puro. O serializer soma
@@ -2730,7 +2730,61 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             else:
                 # ✅ ENTRADA NORMAL (sem FIFO) - para ENTRADA ou outros tipos
                 print(f"🔄 ENTRADA DETECTADA ({transaction_type}) - Sem FIFO")
-                
+
+                # ⚠️ CORREÇÃO GRAVE: até aqui, uma ENTRADA só criava o registro
+                # de StockTransaction (o "log" do movimento) — nunca
+                # atualizava InventoryItem.total_quantity nem criava/somava
+                # em nenhum InventoryBatch. "Ajustar Saldo" pra AUMENTAR
+                # quantidade (que manda ENTRADA, ver StockAdjustmentModal.tsx)
+                # respondia 201 (sucesso) mas o estoque exibido em "Meu
+                # Estoque" nunca mudava — confirmado com teste real.
+                #
+                # A correção soma em InventoryBatch (não só em total_quantity
+                # direto) porque apply_fifo_withdrawal SEMPRE recalcula
+                # total_quantity como Sum(batches) — se só o total fosse
+                # atualizado aqui, a próxima venda/saída sobrescreveria o
+                # ajuste silenciosamente, porque os lotes não bateriam com o
+                # total.
+                from django.db import transaction as db_transaction
+                with db_transaction.atomic():
+                    data_validade = data.get('expiration_date') or None
+                    lote_codigo = data.get('batch_code') or ''
+
+                    if data_validade:
+                        # Veio de um fluxo que informa validade (ex.: nova
+                        # entrada de estoque de verdade) — soma num lote
+                        # EXISTENTE com a mesma validade, se houver, em vez
+                        # de criar lotes fragmentados pra mesma data.
+                        lote = inventory_item.batches.filter(expiration_date=data_validade).first()
+                        if lote:
+                            lote.quantity += quantity
+                            lote.save(update_fields=['quantity'])
+                        else:
+                            InventoryBatch.objects.create(
+                                item=inventory_item, quantity=quantity,
+                                expiration_date=data_validade, batch_code=lote_codigo,
+                            )
+                    else:
+                        # Ajuste manual sem validade informada (o modal de
+                        # "Ajustar Saldo" não pede validade) — soma num lote
+                        # "sem validade" já existente, ou cria um novo.
+                        lote = inventory_item.batches.filter(expiration_date__isnull=True).first()
+                        if lote:
+                            lote.quantity += quantity
+                            lote.save(update_fields=['quantity'])
+                        else:
+                            InventoryBatch.objects.create(
+                                item=inventory_item, quantity=quantity,
+                                expiration_date=None, batch_code=lote_codigo or 'Ajuste manual',
+                            )
+
+                    inventory_item.total_quantity = inventory_item.batches.aggregate(
+                        total=Sum('quantity')
+                    )['total'] or 0
+                    inventory_item.save(update_fields=['total_quantity'])
+
+                    print(f"📊 Total atualizado (ENTRADA): {product.name} - {inventory_item.total_quantity}")
+
                 # ✅ Validar serializer
                 serializer = self.get_serializer(data=data)
                 serializer.is_valid(raise_exception=True)
@@ -3516,12 +3570,18 @@ def dashboard_stats(request):
         created_at__month=now.month,
         transaction_type='VENDA'
     )
-    month_sales = month_txs.aggregate(total=Sum(F('unit_price') * F('quantity')))['total'] or 0
-    # ⚠️ CORREÇÃO: StockTransaction não tem campo 'profit' (nunca teve) — o
-    # aggregate anterior (Sum(F('profit'))) sempre lançava FieldError e
-    # derrubava esse endpoint com 500. Lucro = (preço de venda - custo) * quantidade.
+    # ⚠️ CORREÇÃO: StockTransaction.quantity é NEGATIVO pra saída/venda (ver
+    # StockTransactionViewSet.create — "CRIAR TRANSAÇÃO COM QUANTIDADE
+    # NEGATIVA (saída)"). Sum(unit_price * quantity) sem Abs() multiplicava
+    # um valor positivo por uma quantidade negativa e dava "Vendas deste
+    # Mês" e "Lucro Real do Mês" negativos no Index — mesmo problema de
+    # sinal já corrigido antes em ai/services.py (_vendas_periodo/
+    # _lucro_periodo da Amorinha), só que este endpoint nunca tinha
+    # recebido a mesma correção.
+    from django.db.models.functions import Abs
+    month_sales = month_txs.aggregate(total=Sum(F('unit_price') * Abs(F('quantity'))))['total'] or 0
     month_profit = month_txs.aggregate(
-        total=Sum((F('unit_price') - F('unit_cost')) * F('quantity'))
+        total=Sum((F('unit_price') - F('unit_cost')) * Abs(F('quantity')))
     )['total'] or 0
     
     return Response({
@@ -4190,6 +4250,59 @@ def public_plans_view(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def active_promotions_view(request):
+    """
+    GET /api/promotions/active/ — promoções que a loja de quem está logado
+    deve ver agora. Sem isso, o admin podia criar e ativar uma promoção que
+    NUNCA aparecia pra ninguém — o recurso não tinha efeito nenhum fora do
+    próprio painel administrativo.
+
+    Prioridade: se a promoção tem `target_stores` preenchido, só aparece
+    pras lojas selecionadas ali (alvo específico, mais forte). Senão, cai no
+    segmento amplo de `target_audience` (todos / free / pro / novos /
+    inativos) — o comportamento que já existia.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response([])
+
+    agora = timezone.now()
+    base = Promotion.objects.filter(is_active=True, starts_at__lte=agora).filter(
+        Q(ends_at__isnull=True) | Q(ends_at__gte=agora)
+    ).exclude(
+        max_views__isnull=False, current_views__gte=F('max_views')
+    )
+
+    candidatas = []
+    for promo in base:
+        if promo.target_stores.exists():
+            # Alvo específico: só vale se ESTA loja estiver na lista.
+            if promo.target_stores.filter(id=store.id).exists():
+                candidatas.append(promo)
+            continue
+
+        # Sem alvo específico: cai no segmento amplo de sempre.
+        alvo = promo.target_audience
+        if alvo == 'all':
+            candidatas.append(promo)
+        elif alvo == 'free' and store.plan != 'pro':
+            candidatas.append(promo)
+        elif alvo == 'pro' and store.plan == 'pro':
+            candidatas.append(promo)
+        elif alvo == 'new_users' and store.created_at >= agora - timedelta(days=7):
+            candidatas.append(promo)
+        elif alvo == 'inactive':
+            ativo_recente = UserBehaviorLog.objects.filter(
+                store=store, created_at__gte=agora - timedelta(days=30)
+            ).exists()
+            if not ativo_recente:
+                candidatas.append(promo)
+
+    return Response(PromotionSerializer(candidatas, many=True).data)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def movements_report_csv(request):
     """
     GET /api/movements/report/?period=dia|mes|ano|tudo
@@ -4417,30 +4530,12 @@ def crm_leads_list(request):
     return Response(LeadSerializer(leads, many=True).data)
 
 
-@api_view(['GET', 'DELETE'])
-@permission_classes([IsAuthenticated])
-def crm_lead_detail(request, lead_id):
+def _calcular_historico_compras(store, lead):
     """
-    GET    /api/crm/leads/<id> — um lead específico, só da própria loja.
-           Inclui o histórico de compras: cada pedido fechado (checked_out),
-           com os produtos, quantidade, preço e data. É o que dá pra
-           consultora ver "o que ela comprou, quando, por quanto" — sem
-           isso o Lead sozinho só mostra nome e telefone.
-    DELETE /api/crm/leads/<id> — exclusão definitiva, só da própria loja.
-    Os dois métodos compartilham a mesma URL (é assim que lib/leads.ts chama).
+    Histórico de pedidos fechados de um lead — extraído de crm_lead_detail
+    pra ser reaproveitado também pela sugestão de mensagem da Amorinha
+    (mesma fonte de dado, dois consumidores).
     """
-    store = ensure_user_has_store(request.user)
-    if not store:
-        return Response({'error': 'Loja não encontrada'}, status=400)
-
-    lead = Lead.objects.filter(store=store, id=lead_id).first()
-    if not lead:
-        return Response({'error': 'Lead não encontrado'}, status=404)
-
-    if request.method == 'DELETE':
-        lead.delete()
-        return Response(status=204)
-
     pedidos = (Cart.objects
                .filter(store=store, lead=lead, checked_out=True)
                .prefetch_related('items')
@@ -4469,11 +4564,65 @@ def crm_lead_detail(request, lead_id):
             ],
             'total': total,
         })
+    return historico
 
+
+@api_view(['GET', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def crm_lead_detail(request, lead_id):
+    """
+    GET    /api/crm/leads/<id> — um lead específico, só da própria loja.
+           Inclui o histórico de compras: cada pedido fechado (checked_out),
+           com os produtos, quantidade, preço e data. É o que dá pra
+           consultora ver "o que ela comprou, quando, por quanto" — sem
+           isso o Lead sozinho só mostra nome e telefone.
+    DELETE /api/crm/leads/<id> — exclusão definitiva, só da própria loja.
+    Os dois métodos compartilham a mesma URL (é assim que lib/leads.ts chama).
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    lead = Lead.objects.filter(store=store, id=lead_id).first()
+    if not lead:
+        return Response({'error': 'Lead não encontrado'}, status=404)
+
+    if request.method == 'DELETE':
+        lead.delete()
+        return Response(status=204)
+
+    historico = _calcular_historico_compras(store, lead)
     dados = LeadSerializer(lead).data
     dados['purchase_history'] = historico
     dados['last_purchase_at'] = historico[0]['date'] if historico else None
     return Response(dados)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def crm_suggest_message(request, lead_id):
+    """
+    POST /api/crm/leads/<id>/suggest-message/
+    Body: {"template_key": "promotion" | "welcome" | "birthday" | "custom" | "abandoned_cart"}
+
+    A Amorinha sugere {product, discount, message} baseada no histórico de
+    compra REAL desse lead — quem mais compra X vira a sugestão de
+    promoção pra X, não um texto genérico igual pra qualquer cliente.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response({'error': 'Loja não encontrada'}, status=400)
+
+    lead = Lead.objects.filter(store=store, id=lead_id).first()
+    if not lead:
+        return Response({'error': 'Lead não encontrado'}, status=404)
+
+    template_key = request.data.get('template_key', 'custom')
+
+    from ai.crm_ai import sugerir_mensagem
+    historico = _calcular_historico_compras(store, lead)
+    sugestao = sugerir_mensagem(lead.name, template_key, historico)
+    return Response(sugestao)
 
 
 @api_view(['POST'])
@@ -4793,3 +4942,91 @@ def crm_cart_update(request, cart_id):
         'payment_method': cart.payment_method,
         'payment_confirmed': cart.payment_confirmed,
     })
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_promotion_view(request, promotion_id):
+    """
+    POST /api/promotions/<id>/view/ — a loja de quem está logado viu esta
+    promoção agora. Chamado pelo PromotionBanner quando ele efetivamente
+    mostra uma promoção na tela.
+
+    Idempotente por (promoção, loja): repetir a chamada na mesma sessão não
+    infla a contagem — é o que torna "Visualizações" e "Taxa de Conversão"
+    do admin-panel um número real, em vez de aleatório.
+    """
+    store = ensure_user_has_store(request.user)
+    if not store:
+        return Response(status=204)  # sem loja, não há o que registrar — não é erro do cliente
+
+    promo = Promotion.objects.filter(id=promotion_id).first()
+    if not promo:
+        return Response(status=204)
+
+    PromotionView.objects.get_or_create(promotion=promo, store=store)
+    return Response(status=204)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def system_config_view(request):
+    """
+    GET /api/system-config/ — status de manutenção e feature flags globais,
+    do jeito que QUALQUER consultora (ou a tela de login, antes mesmo de
+    autenticar) precisa ver. Público de propósito: se o sistema está em
+    manutenção, isso precisa aparecer mesmo pra quem ainda não conseguiu
+    logar.
+    """
+    cfg = SystemConfig.get_solo()
+    return Response({
+        'maintenance_mode': cfg.maintenance_mode,
+        'maintenance_message': cfg.maintenance_message if cfg.maintenance_mode else '',
+        'ai_enabled': cfg.ai_enabled,
+        'storefront_enabled': cfg.storefront_enabled,
+        'ocr_enabled': cfg.ocr_enabled,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check_view(request):
+    """
+    GET /api/health/ — checagem real de infraestrutura, pro card
+    "Saúde do Sistema" do admin-panel. Antes: "Banco de Dados" só repetia o
+    resultado da própria API (nunca testava o banco de verdade), e
+    "Gateway Pagamento" estava sempre fixo em "operational", sem checar
+    nada. Latência era texto fixo ("~80ms"), não medida.
+    """
+    import time
+    from django.db import connection
+
+    resultado = {'api_status': 'operational'}
+
+    # Banco: consulta real, cronometrada — não um espelho do status da API.
+    inicio_db = time.monotonic()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+        resultado['database_status'] = 'operational'
+    except Exception:
+        resultado['database_status'] = 'down'
+    resultado['database_latency_ms'] = round((time.monotonic() - inicio_db) * 1000, 1)
+
+    # Asaas: chamada real à API deles, reaproveitando o mesmo client já
+    # usado no teste de conexão do admin (apps/payments).
+    inicio_asaas = time.monotonic()
+    try:
+        from apps.payments.services.asaas_service import asaas_service
+        asaas_service._request('GET', 'finance/balance')
+        resultado['payment_gateway_status'] = 'operational'
+    except Exception:
+        resultado['payment_gateway_status'] = 'down'
+    resultado['payment_gateway_latency_ms'] = round((time.monotonic() - inicio_asaas) * 1000, 1)
+
+    resultado['last_check'] = timezone.now().isoformat()
+    return Response(resultado)
+
+# ⚠️ api_ping_view foi movida pra inventory/api_comercial_views.py — junto
+# com os outros endpoints de /api/v1/ (products, lookup, storefront), pra
+# não ter dois arquivos diferentes definindo pedaços da mesma superfície
+# comercial. Ver api_comercial_urls.py.

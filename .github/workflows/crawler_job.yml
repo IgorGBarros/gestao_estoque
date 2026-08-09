@@ -2,14 +2,53 @@ name: Inventory Crawler 🕷️
 
 on:
   schedule:
-    # Roda todo dia às 03:00 AM (UTC)
-    - cron: '0 3 * * *'
-  workflow_dispatch: # Permite rodar manualmente clicando num botão
+    # ⚠️ CORREÇÃO: era todo dia às 03:00 — catálogo de cosmético não muda
+    # com essa frequência (preço/produto novo é coisa de semana, não de
+    # dia), e rodar diariamente consumia minutos do GitHub Actions sem
+    # necessidade real. Agora roda 1x por semana (segunda, 03:00 UTC).
+    # Ajuste pra '0 3 * * *' se quiser voltar a diário.
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      max_minutes:
+        description: 'Tempo máximo de execução (minutos)'
+        required: false
+        default: '45'
+      environment:
+        description: 'Banco de dados alvo'
+        required: false
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - dev
 
 jobs:
   run-crawler:
     runs-on: ubuntu-latest
+    # ⚠️ NOVO: teto duro — se algo travar (ex: site mudou de layout e o
+    # SeleniumBase fica preso esperando um elemento que não existe mais),
+    # o job morre aqui em vez de rodar até o limite de 6h da runner,
+    # consumindo minutos à toa. Um pouco acima do --max-minutes do
+    # comando (que já para sozinho antes disso, de forma graciosa).
+    timeout-minutes: 60
     steps:
+      - name: 🎯 Escolher banco de dados (dev ou produção)
+        # ⚠️ NOVO: o agendamento automático (cron) SEMPRE aponta pra
+        # produção — é a base de verdade que as consultoras usam.
+        # O input "environment" só existe em execução manual
+        # (workflow_dispatch); numa execução por cron, github.event.inputs
+        # fica vazio, então o fallback "production" entra sozinho.
+        id: escolher_banco
+        run: |
+          if [ "${{ github.event.inputs.environment }}" == "dev" ]; then
+            echo "database_url=${{ secrets.DATABASE_URL_DEV }}" >> "$GITHUB_OUTPUT"
+            echo "🧪 Rodando contra o banco de DEV"
+          else
+            echo "database_url=${{ secrets.DATABASE_URL }}" >> "$GITHUB_OUTPUT"
+            echo "🚀 Rodando contra o banco de PRODUÇÃO"
+          fi
+
       - name: 📥 Checkout código
         uses: actions/checkout@v4
 
@@ -17,23 +56,58 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          # ⚠️ NOVO: cache de pip — evita rebaixar todas as dependências
+          # (Django, DRF, etc.) a cada execução semanal.
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: 💾 Cache do Chromedriver
+        # ⚠️ NOVO: sbase install chromedriver baixa o binário do zero toda
+        # vez — isso sozinho já é uma fatia relevante do tempo de setup.
+        # Com cache, só baixa de novo se a versão mudar.
+        uses: actions/cache@v4
+        with:
+          path: ~/.seleniumbase
+          key: seleniumbase-chromedriver-${{ runner.os }}
 
       - name: 📦 Instalar Dependências
         run: |
-          cd backend # 🚀 CORREÇÃO: Entra apenas na pasta 'backend' para achar o requirements.txt
+          cd backend
           pip install -r requirements.txt
           pip install seleniumbase
-          sbase install chromedriver  # Baixa driver do Chrome
+          sbase install chromedriver
 
       - name: 🚀 Rodar Crawler (Discovery + Enrichment)
+        # ⚠️ Aponta pra crawl_all3 (não crawl_all) — é a versão mais
+        # completa, com as 6 marcas configuradas incluindo Mary Kay.
         env:
-            DATABASE_URL: ${{ secrets.DATABASE_URL }}
-            SECRET_KEY: ${{ secrets.SECRET_KEY }}
-            DEBUG: "False"
+          DATABASE_URL: ${{ steps.escolher_banco.outputs.database_url }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          DEBUG: "False"
         run: |
-          cd backend/core # Mantém a entrada no core aqui porque o manage.py está lá
-          python manage.py crawl_all
+          cd backend/core
+          python manage.py crawl_all3 --max-minutes ${{ github.event.inputs.max_minutes || '45' }}
+
+      - name: 🔍 Buscar Códigos de Barras Pendentes (Cosmos)
+        # ⚠️ NOVO: antes o cosmos_barcode_finder só rodava manualmente,
+        # nunca fazia parte da automação. Agora que só aplica sozinho em
+        # confiança MUITO ALTA (correção anterior), rodar automaticamente
+        # é seguro — na pior hipótese, só alimenta a fila de revisão no
+        # admin-panel (aba Catálogo), nunca escreve errado no produto.
+        # Roda pra cada marca, com limite pequeno pra não estourar o
+        # tempo do job (é a etapa mais lenta — abre o Cosmos por produto).
+        env:
+          DATABASE_URL: ${{ steps.escolher_banco.outputs.database_url }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          DEBUG: "False"
+        run: |
+          cd backend/core
+          for BRAND in "Natura" "Avon" "O Boticário" "Eudora" "Quem Disse Berenice" "Mary Kay"; do
+            echo "🔎 Buscando códigos de barras: $BRAND"
+            python manage.py cosmos_barcode_finder --brand "$BRAND" --limit 15 --skip-existing --delay 6 || true
+          done
 
       - name: ✅ Notificar Sucesso (Opcional)
         if: success()
         run: echo "Banco de dados atualizado com sucesso!"
+        

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Search, Download, MessageCircle, Trash2, Loader2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag, QrCode, CreditCard, Check } from "lucide-react";
+import { ArrowLeft, Search, Download, MessageCircle, Trash2, Loader2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag, QrCode, CreditCard, Check, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
-import { listLeads, getLead, deleteLead, exportLeadsCsv, downloadCsv, updateCartPayment, deleteCart, Lead, Purchase } from "../lib/leads";
+import { listLeads, getLead, deleteLead, exportLeadsCsv, downloadCsv, updateCartPayment, deleteCart, suggestMessage, MessageSuggestion, Lead, Purchase } from "../lib/leads";
 import { WA_TEMPLATES, WaTemplateKey, buildWaLink, renderTemplate } from "@/lib/whatsapp";
 
 export default function CRM() {
@@ -139,6 +139,37 @@ export default function CRM() {
     } finally {
       setExcluindoPedido(false);
     }
+  };
+
+  const [sugestaoAtiva, setSugestaoAtiva] = useState<{ lead: Lead; sugestao: MessageSuggestion } | null>(null);
+  const [carregandoSugestao, setCarregandoSugestao] = useState<string | null>(null);
+
+  const handleSugerirIA = async (l: Lead) => {
+    if (l.anonymized_at) return toast.error("Lead anonimizado");
+    setCarregandoSugestao(l.id);
+    try {
+      const sugestao = await suggestMessage(l.id, tplKey);
+      setSugestaoAtiva({ lead: l, sugestao });
+    } catch {
+      toast.error("Não deu pra gerar uma sugestão agora");
+    } finally {
+      setCarregandoSugestao(null);
+    }
+  };
+
+  const handleUsarSugestao = () => {
+    if (!sugestaoAtiva) return;
+    const { lead: l, sugestao } = sugestaoAtiva;
+    const corpo = sugestao.message || template.body;
+    const link = buildWaLink(l.phone, corpo, {
+      name: l.name.split(" ")[0],
+      seller: user?.name || "sua consultora",
+      product: sugestao.product || "",
+      link: window.location.origin,
+      discount: sugestao.discount || "10% OFF",
+    });
+    window.open(link, "_blank", "noopener,noreferrer");
+    setSugestaoAtiva(null);
   };
 
   const handleWhatsapp = (l: Lead) => {
@@ -434,6 +465,16 @@ export default function CRM() {
                         <Button
                           size="icon"
                           variant="ghost"
+                          disabled={!!l.anonymized_at || carregandoSugestao === l.id}
+                          title="Sugerir mensagem com IA"
+                          onClick={() => handleSugerirIA(l)}
+                          className="h-8 w-8 text-brand"
+                        >
+                          {carregandoSugestao === l.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
                           disabled={!l.whatsapp_opt_in || !!l.anonymized_at}
                           title={!l.whatsapp_opt_in ? "Ela não autorizou receber mensagem" : "Enviar WhatsApp"}
                           onClick={() => handleWhatsapp(l)}
@@ -712,6 +753,61 @@ export default function CRM() {
             </Button>
             <Button className="flex-1" onClick={confirmarEnvioMassa}>
               Abrir conversas
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* 🔹 Modal de sugestão da Amorinha — mostra o que ela sugeriu com base
+        no comportamento REAL da cliente antes de abrir o WhatsApp, pra
+        consultora poder revisar (não manda nada sozinho). */}
+    {sugestaoAtiva && (
+      <div
+        className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"
+        onClick={() => setSugestaoAtiva(null)}
+      >
+        <div className="w-full max-w-sm rounded-2xl bg-card p-5" onClick={(e) => e.stopPropagation()}>
+          <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-brand/10">
+            <Sparkles className="h-5 w-5 text-brand" />
+          </div>
+          <h3 className="text-center font-display text-base font-bold text-foreground">
+            Sugestão pra {sugestaoAtiva.lead.name.split(" ")[0]}
+          </h3>
+
+          {sugestaoAtiva.sugestao.observacao && (
+            <p className="mt-2 rounded-lg bg-secondary px-3 py-2 text-center text-xs text-muted-foreground">
+              {sugestaoAtiva.sugestao.observacao}
+            </p>
+          )}
+
+          <div className="mt-3 space-y-2 text-sm">
+            {sugestaoAtiva.sugestao.product && (
+              <div className="flex justify-between rounded-lg border border-border px-3 py-2">
+                <span className="text-muted-foreground">Produto</span>
+                <span className="font-medium text-foreground">{sugestaoAtiva.sugestao.product}</span>
+              </div>
+            )}
+            {sugestaoAtiva.sugestao.discount && (
+              <div className="flex justify-between rounded-lg border border-border px-3 py-2">
+                <span className="text-muted-foreground">Desconto sugerido</span>
+                <span className="font-medium text-foreground">{sugestaoAtiva.sugestao.discount}</span>
+              </div>
+            )}
+            {sugestaoAtiva.sugestao.message && (
+              <div className="rounded-lg border border-border px-3 py-2">
+                <span className="text-xs text-muted-foreground">Mensagem sugerida</span>
+                <p className="mt-1 text-foreground">{sugestaoAtiva.sugestao.message}</p>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-5 flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={() => setSugestaoAtiva(null)}>
+              Fechar
+            </Button>
+            <Button className="flex-1" onClick={handleUsarSugestao}>
+              Usar e abrir WhatsApp
             </Button>
           </div>
         </div>

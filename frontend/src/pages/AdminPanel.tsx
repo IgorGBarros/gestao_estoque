@@ -7,10 +7,10 @@ import {
   Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
   Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
   FileText, Download, Upload, Eye, EyeOff, Palette, Zap, Bell, Gift, Percent,
-  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy
+  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy, MessageCircle, Barcode
 } from "lucide-react";
 
-import { profileApi, adminApi, adminHealthApi } from "../lib/api";
+import { profileApi, adminApi, adminHealthApi, systemConfigApi, SystemConfigStatus } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import ConsultantsHealthTab from "../components/admin/ConsultantsHealthTab";
 import CrmOverviewTab from "../components/admin/CrmOverviewTab";
@@ -21,6 +21,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs"
 import React from "react";
 import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
 import ApiManagementTab from "../components/admin/ApiManagementTab";
+import AdminCatalogTab from "../components/admin/AdminCatalogTab";
+import AdminSupportTab from "../components/admin/AdminSupportTab";
 
 // Acesso ao painel é por email autorizado (is_staff, definido pelo backend
 // via ADMIN_EMAILS). Não há mais senha no frontend.
@@ -31,6 +33,7 @@ import ApiManagementTab from "../components/admin/ApiManagementTab";
 
 export interface AdminUser {
   id: string | number;
+  store_id?: string | number;  // ⚠️ ID da LOJA — usado pra vincular Promotion.target_stores
   email: string;
   display_name: string | null;
   plan: string;
@@ -74,6 +77,7 @@ export interface Promotion {
   title: string;
   message: string;
   target_audience: string;
+  target_store_ids?: (string | number)[];
   discount_percent: number;
   discount_amount: number;
   is_active: boolean;
@@ -81,6 +85,10 @@ export interface Promotion {
   ends_at: string | null;
   max_views_per_store: number | null;
   created_at: string;
+  // 📊 Métricas reais — ver active_promotions_view/_serialize_promotion no backend
+  views_count?: number;
+  conversions_count?: number;
+  conversion_rate?: number;
 }
 
 export interface SystemStats {
@@ -89,8 +97,11 @@ export interface SystemStats {
   pro_stores: number;
   free_stores: number;
   total_products: number;
-  total_revenue: number;
+  total_revenue: number;      // ⚠️ vendas de produto das consultoras (GMV), NÃO é receita do Minha Amora
   monthly_revenue: number;
+  platform_revenue_total: number;   // 💰 receita REAL da plataforma — assinaturas pagas via Asaas
+  platform_revenue_month: number;
+  platform_revenue_by_day: { date: string; value: number }[];
   churn_rate: number;
   conversion_rate: number;
   avg_products_per_store: number;
@@ -379,14 +390,16 @@ const PromotionModal = ({
   isOpen,
   onClose,
   promotion,
-  onSave
+  onSave,
+  stores
 }: {
   isOpen: boolean;
   onClose: () => void;
   promotion: Promotion | null;
   onSave: (data: Partial<Promotion>) => void;
+  stores: AdminUser[];
 }) => {
-  const [formData, setFormData] = useState<Partial<Promotion>>({
+  const [formData, setFormData] = useState<Partial<Promotion> & { target_store_ids?: (string | number)[] }>({
     title: '',
     message: '',
     target_audience: 'free',
@@ -395,7 +408,8 @@ const PromotionModal = ({
     is_active: true,
     starts_at: new Date().toISOString().slice(0, 16),
     ends_at: null,
-    max_views_per_store: null
+    max_views_per_store: null,
+    target_store_ids: [],
   });
 
   useEffect(() => {
@@ -456,9 +470,67 @@ const PromotionModal = ({
                 <option value="all">Todos</option>
                 <option value="free">Plano Free</option>
                 <option value="pro">Plano PRO</option>
-                <option value="new_stores">Lojas Novas</option>
+                {/* ⚠️ CORREÇÃO: era "new_stores", mas o modelo espera
+                    "new_users" — o valor nunca batia com nada, essa opção
+                    nunca funcionou. E faltava "inativos", que já existe no
+                    modelo mas nunca aparecia aqui pra escolher. */}
+                <option value="new_users">Lojas Novas (menos de 7 dias)</option>
+                <option value="inactive">Inativas (mais de 30 dias sem uso)</option>
               </select>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Usado só se nenhuma consultora específica for selecionada abaixo.
+              </p>
             </div>
+          </div>
+
+          {/* 🎯 Alvo por consultora específica — o que faltava pra o admin
+              conseguir mandar uma promoção só pra quem ele quiser, em vez de
+              só um segmento amplo. Quando alguém aqui está marcado, vale
+              MAIS que o Público-Alvo acima (ver active_promotions_view). */}
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              Ou consultoras específicas
+              {(formData.target_store_ids?.length || 0) > 0 && (
+                <span className="ml-1.5 text-xs font-normal text-brand">
+                  ({formData.target_store_ids!.length} selecionada{formData.target_store_ids!.length > 1 ? "s" : ""})
+                </span>
+              )}
+            </label>
+            <div className="max-h-40 overflow-y-auto rounded-lg border border-input p-2 space-y-1">
+              {stores.length === 0 ? (
+                <p className="p-2 text-xs text-muted-foreground">Nenhuma consultora encontrada.</p>
+              ) : (
+                stores.map((s) => {
+                  const marcado = (formData.target_store_ids || []).includes(s.store_id ?? s.id);
+                  return (
+                    <label
+                      key={s.store_id ?? s.id}
+                      className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-secondary/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={marcado}
+                        onChange={(e) => {
+                          const idLoja = s.store_id ?? s.id;
+                          const atual = formData.target_store_ids || [];
+                          setFormData({
+                            ...formData,
+                            target_store_ids: e.target.checked
+                              ? [...atual, idLoja]
+                              : atual.filter((v) => v !== idLoja),
+                          });
+                        }}
+                        className="h-4 w-4 rounded border-input"
+                      />
+                      <span className="truncate">{s.display_name || s.email}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Desconto (%)</label>
               <input
@@ -588,6 +660,33 @@ export default function AdminPanel() {
 
   // Estados Enterprise: Health & Audit
   const [systemHealth, setSystemHealth] = useState<SystemHealth | null>(null);
+  // ⚙️ Configuração global real (manutenção + feature flags) — substitui
+  // os dois localStorage que só valiam pro navegador do próprio admin.
+  const [systemConfig, setSystemConfig] = useState<SystemConfigStatus | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const fetchSystemConfig = useCallback(async () => {
+    try {
+      const cfg = await systemConfigApi.get();
+      setSystemConfig(cfg);
+    } catch {
+      /* mantém o que já estava — não derruba a tela por isso */
+    }
+  }, []);
+
+  const updateConfig = useCallback(async (patch: Partial<SystemConfigStatus>) => {
+    setSavingConfig(true);
+    try {
+      const atualizado = await adminApi.updateSystemConfig(patch);
+      setSystemConfig(atualizado);
+      return true;
+    } catch {
+      toast({ title: "Erro", description: "Não foi possível salvar a configuração", variant: "destructive" });
+      return false;
+    } finally {
+      setSavingConfig(false);
+    }
+  }, [toast]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<Set<string | number>>(new Set());
 
@@ -760,6 +859,9 @@ export default function AdminPanel() {
           total_products: total * 15,
           total_revenue: pro * 39.90,
           monthly_revenue: pro * 39.90,
+          platform_revenue_total: pro * 39.90,
+          platform_revenue_month: pro * 39.90,
+          platform_revenue_by_day: [],
           churn_rate: 5.2,
           conversion_rate: total > 0 ? (pro / total) * 100 : 0,
           avg_products_per_store: 15,
@@ -901,23 +1003,18 @@ export default function AdminPanel() {
   const savePromotion = useCallback(async (promotionData: Partial<Promotion>) => {
     try {
       if (editingPromotion) {
-        setPromotions(prev => prev.map(p => 
-          p.id === editingPromotion.id ? { ...p, ...promotionData } : p
-        ));
+        const atualizada = await adminApi.updatePromotion(String(editingPromotion.id), promotionData);
+        setPromotions(prev => prev.map(p => (p.id === editingPromotion.id ? atualizada : p)));
         toast({ title: "Promoção atualizada" });
       } else {
-        const newPromotion = { 
-          ...promotionData, 
-          id: Date.now().toString(),
-          created_at: new Date().toISOString()
-        } as Promotion;
-        setPromotions(prev => [...prev, newPromotion]);
+        const nova = await adminApi.createPromotion(promotionData);
+        setPromotions(prev => [...prev, nova]);
         toast({ title: "Promoção criada" });
       }
-      
+
       setShowPromotionModal(false);
       setEditingPromotion(null);
-      
+
     } catch (err: any) {
       toast({ title: "Erro", description: "Falha ao salvar promoção", variant: "destructive" });
     }
@@ -925,16 +1022,26 @@ export default function AdminPanel() {
 
   const togglePromotionStatus = useCallback(async (promotion: Promotion) => {
     try {
-      setPromotions(prev => prev.map(p => 
-        p.id === promotion.id ? { ...p, is_active: !p.is_active } : p
-      ));
-      
-      toast({ 
-        title: `Promoção ${promotion.is_active ? 'desativada' : 'ativada'}` 
+      const atualizada = await adminApi.updatePromotion(String(promotion.id), { is_active: !promotion.is_active });
+      setPromotions(prev => prev.map(p => (p.id === promotion.id ? atualizada : p)));
+
+      toast({
+        title: `Promoção ${promotion.is_active ? 'desativada' : 'ativada'}`
       });
-      
+
     } catch (err: any) {
       toast({ title: "Erro", description: "Falha ao alterar status", variant: "destructive" });
+    }
+  }, [setPromotions, toast]);
+
+  const deletePromotion = useCallback(async (promotion: Promotion) => {
+    if (!confirm(`Excluir a promoção "${promotion.title}"? Não tem como desfazer.`)) return;
+    try {
+      await adminApi.deletePromotion(String(promotion.id));
+      setPromotions(prev => prev.filter(p => p.id !== promotion.id));
+      toast({ title: "Promoção excluída" });
+    } catch (err: any) {
+      toast({ title: "Erro", description: "Falha ao excluir promoção", variant: "destructive" });
     }
   }, [setPromotions, toast]);
 
@@ -946,6 +1053,7 @@ export default function AdminPanel() {
     if (authenticated) {
       fetchCriticalData();      // Dados rápidos no mount
       fetchSystemHealth();
+      fetchSystemConfig();
       logAuditEvent('LOGIN_ADMIN');
     }
   }, [authenticated]);
@@ -1121,6 +1229,7 @@ export default function AdminPanel() {
         }}
         promotion={editingPromotion}
         onSave={savePromotion}
+        stores={users}
       />
 
       {/* Header */}
@@ -1151,38 +1260,49 @@ export default function AdminPanel() {
       <main className="mx-auto max-w-7xl px-4 py-6">
         {/* Tabs de Navegação */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:grid-cols-8">
-            <TabsTrigger value="dashboard" className="flex items-center gap-2">
+          {/* ⚠️ Rolagem horizontal, não grid de colunas fixas — com 10
+              abas agora, um número fixo de colunas sempre acaba quebrando
+              de novo a cada aba nova adicionada. */}
+          <TabsList className="flex w-full gap-1 overflow-x-auto">
+            <TabsTrigger value="dashboard" className="flex shrink-0 items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Dashboard
             </TabsTrigger>
-            <TabsTrigger value="stores" className="flex items-center gap-2">
+            <TabsTrigger value="stores" className="flex shrink-0 items-center gap-2">
               <Store className="h-4 w-4" />
               Lojas
             </TabsTrigger>
-            <TabsTrigger value="plans" className="flex items-center gap-2">
+            <TabsTrigger value="plans" className="flex shrink-0 items-center gap-2">
               <Settings2 className="h-4 w-4" />
               Planos
             </TabsTrigger>
-            <TabsTrigger value="promotions" className="flex items-center gap-2">
+            <TabsTrigger value="promotions" className="flex shrink-0 items-center gap-2">
               <Megaphone className="h-4 w-4" />
               Promoções
             </TabsTrigger>
-            <TabsTrigger value="payments" className="flex items-center gap-2">
+            <TabsTrigger value="payments" className="flex shrink-0 items-center gap-2">
               <CreditCard className="h-4 w-4" />
               Pagamentos
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex items-center gap-2">
+            <TabsTrigger value="analytics" className="flex shrink-0 items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Analytics
             </TabsTrigger>
-            <TabsTrigger value="system" className="flex items-center gap-2">
+            <TabsTrigger value="support" className="flex shrink-0 items-center gap-2">
+              <MessageCircle className="h-4 w-4" />
+              Suporte
+            </TabsTrigger>
+            <TabsTrigger value="system" className="flex shrink-0 items-center gap-2">
               <Server className="h-4 w-4" />
               Sistema
             </TabsTrigger>
-            <TabsTrigger value="api" className="flex items-center gap-2">
+            <TabsTrigger value="api" className="flex shrink-0 items-center gap-2">
               <Key className="h-4 w-4" />
-              API & Webhooks
+              API
+            </TabsTrigger>
+            <TabsTrigger value="catalog" className="flex shrink-0 items-center gap-2">
+              <Barcode className="h-4 w-4" />
+              Catálogo
             </TabsTrigger>
           </TabsList>
 
@@ -1198,7 +1318,7 @@ export default function AdminPanel() {
             ) : dashboardStats ? (
               <>
                 {/* Cards de Estatísticas */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {[
                     { 
                       label: "Total de Lojas", 
@@ -1229,11 +1349,24 @@ export default function AdminPanel() {
                       change: `${dashboardStats.avg_products_per_store.toFixed(1)} por loja`
                     },
                     { 
-                      label: "Receita Total", 
+                      // ⚠️ Renomeado de "Receita Total": era fácil confundir com a
+                      // receita da PLATAFORMA. Isto aqui é quanto as consultoras
+                      // venderam de produto nas lojas delas (GMV) — não é dinheiro
+                      // que o Minha Amora recebeu.
+                      label: "Vendas nas Lojas", 
                       value: formatCurrency(dashboardStats.total_revenue), 
+                      icon: Package, 
+                      color: "text-muted-foreground",
+                      change: `${formatCurrency(dashboardStats.monthly_revenue)} este mês`
+                    },
+                    { 
+                      // 💰 Esta sim é a receita do NEGÓCIO — assinaturas pagas de
+                      // verdade, direto dos webhooks confirmados do Asaas.
+                      label: "Receita da Assinatura", 
+                      value: formatCurrency(dashboardStats.platform_revenue_total), 
                       icon: DollarSign, 
                       color: "text-success",
-                      change: `${formatCurrency(dashboardStats.monthly_revenue)} este mês`
+                      change: `${formatCurrency(dashboardStats.platform_revenue_month)} este mês`
                     },
                     { 
                       label: "Taxa Conversão", 
@@ -1829,12 +1962,7 @@ export default function AdminPanel() {
                           <Edit2 className="h-4 w-4" />
                         </button>
                         <button
-                          onClick={() => {
-                            if (confirm('Tem certeza que deseja excluir esta promoção?')) {
-                              setPromotions(prev => prev.filter(p => p.id !== promotion.id));
-                              toast({ title: "Promoção excluída" });
-                            }
-                          }}
+                          onClick={() => deletePromotion(promotion)}
                           className="p-2 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
                           title="Excluir"
                         >
@@ -1843,23 +1971,26 @@ export default function AdminPanel() {
                       </div>
                     </div>
 
-                    {/* Métricas da promoção (simuladas) */}
+                    {/* 📊 Métricas reais — antes eram Math.random(), recalculadas
+                        (e diferentes!) a cada vez que a tela renderizava. Agora
+                        vêm de PromotionView (quem viu de verdade) e de quem
+                        virou PRO DEPOIS de ver. */}
                     <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border">
                       <div className="text-center">
                         <p className="text-2xl font-bold text-primary">
-                          {Math.floor(Math.random() * 50) + 10}
+                          {promotion.views_count ?? 0}
                         </p>
                         <p className="text-xs text-muted-foreground">Visualizações</p>
                       </div>
                       <div className="text-center">
                         <p className="text-2xl font-bold text-success">
-                          {Math.floor(Math.random() * 15) + 1}
+                          {promotion.conversions_count ?? 0}
                         </p>
                         <p className="text-xs text-muted-foreground">Conversões</p>
                       </div>
                       <div className="text-center">
                         <p className="text-2xl font-bold text-amber-600">
-                          {((Math.floor(Math.random() * 15) + 1) / (Math.floor(Math.random() * 50) + 10) * 100).toFixed(1)}%
+                          {(promotion.conversion_rate ?? 0).toFixed(1)}%
                         </p>
                         <p className="text-xs text-muted-foreground">Taxa Conversão</p>
                       </div>
@@ -1966,7 +2097,7 @@ export default function AdminPanel() {
                       Top Marcas por Quantidade
                     </h3>
                     <div className="space-y-3">
-                      {productAnalytics.brands.slice(0, 10).map((brand, index) => (
+                      {(productAnalytics.brands ?? []).slice(0, 10).map((brand, index) => (
                         <div key={index} className="flex justify-between items-center">
                           <div>
                             <span className="text-sm font-medium">{brand.name}</span>
@@ -1997,7 +2128,7 @@ export default function AdminPanel() {
                       Distribuição por Categoria
                     </h3>
                     <div className="space-y-3">
-                      {productAnalytics.categories.slice(0, 10).map((cat, index) => (
+                      {(productAnalytics.categories ?? []).slice(0, 10).map((cat, index) => (
                         <div key={index} className="flex justify-between items-center">
                           <span className="text-sm font-medium">{cat.name}</span>
                           <div className="flex items-center gap-2">
@@ -2034,7 +2165,7 @@ export default function AdminPanel() {
                         </tr>
                       </thead>
                       <tbody>
-                        {productAnalytics.popular_products.map((product, index) => (
+                        {(productAnalytics.popular_products ?? []).map((product, index) => (
                           <tr key={index} className="border-b border-border/50 last:border-0">
                             <td className="py-3 px-3">
                               <span className="text-sm font-medium">{product.name}</span>
@@ -2059,7 +2190,7 @@ export default function AdminPanel() {
                 <div className="rounded-xl border border-border bg-card p-6">
                   <h3 className="font-semibold text-lg mb-4">Distribuição de Preços</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {Object.entries(productAnalytics.price_ranges).map(([range, count]) => (
+                    {Object.entries(productAnalytics.price_ranges ?? {}).map(([range, count]) => (
                       <div key={range} className="text-center p-4 bg-secondary/30 rounded-lg">
                         <p className="text-2xl font-bold text-primary">{count}</p>
                         <p className="text-xs text-muted-foreground mt-1">R$ {range}</p>
@@ -2083,7 +2214,7 @@ export default function AdminPanel() {
                 <div className="rounded-xl border border-border bg-card p-6">
                   <h4 className="font-medium mb-4">Padrões de Onboarding por Período</h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {Object.entries(behaviorAnalytics.behavior_patterns.onboarding_patterns).map(([period, data]: [string, any]) => (
+                    {Object.entries(behaviorAnalytics.behavior_patterns?.onboarding_patterns ?? {}).map(([period, data]: [string, any]) => (
                       <div key={period} className="p-4 border border-border rounded-lg">
                         <p className="text-sm font-medium capitalize mb-2">{period.replace('_', ' ')}</p>
                         <div className="space-y-1 text-xs">
@@ -2105,7 +2236,7 @@ export default function AdminPanel() {
                 <div className="rounded-xl border border-border bg-card p-6">
                   <h4 className="font-medium mb-4">Preferências de Marca por Segmento</h4>
                   <div className="space-y-4">
-                    {behaviorAnalytics.behavior_patterns.product_preferences.slice(0, 5).map((pref: any, index: number) => (
+                    {(behaviorAnalytics.behavior_patterns?.product_preferences ?? []).slice(0, 5).map((pref: any, index: number) => (
                       <div key={index} className="flex items-center justify-between p-3 bg-secondary/30 rounded-lg">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
@@ -2218,6 +2349,13 @@ export default function AdminPanel() {
           </TabsContent>
 
           {/* ==========================================
+              TAB: SUPORTE
+              ========================================== */}
+          <TabsContent value="support" className="space-y-6">
+            <AdminSupportTab toast={toast} />
+          </TabsContent>
+
+          {/* ==========================================
               TAB: SYSTEM HEALTH & AUDIT
               ========================================== */}
           <TabsContent value="system" className="space-y-6">
@@ -2276,11 +2414,11 @@ export default function AdminPanel() {
                 </h3>
                 <div className="space-y-3">
                   {[
-                    { key: 'ai_enabled', label: 'Assistente IA', desc: 'Liga/desliga chat IA globalmente' },
-                    { key: 'storefront_enabled', label: 'Vitrine Pública', desc: 'Permite vitrines públicas' },
-                    { key: 'ocr_enabled', label: 'OCR de Validade', desc: 'Reconhecimento via foto' },
+                    { key: 'ai_enabled' as const, label: 'Assistente IA', desc: 'Liga/desliga a Amorinha globalmente' },
+                    { key: 'storefront_enabled' as const, label: 'Vitrine Pública', desc: 'Permite vitrines públicas' },
+                    { key: 'ocr_enabled' as const, label: 'OCR de Validade', desc: 'Reconhecimento via foto' },
                   ].map((f) => {
-                    const active = (localStorage.getItem(`flag_${f.key}`) ?? 'true') === 'true';
+                    const active = systemConfig?.[f.key] ?? true;
                     return (
                       <div key={f.key} className="flex items-center justify-between p-3 border border-border rounded-lg">
                         <div>
@@ -2288,13 +2426,15 @@ export default function AdminPanel() {
                           <p className="text-xs text-muted-foreground">{f.desc}</p>
                         </div>
                         <button
-                          onClick={() => {
-                            localStorage.setItem(`flag_${f.key}`, active ? 'false' : 'true');
-                            logAuditEvent(active ? `DISABLE_${f.key.toUpperCase()}` : `ENABLE_${f.key.toUpperCase()}`);
-                            toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
-                            setSystemHealth(h => h ? { ...h } : h);
+                          disabled={savingConfig}
+                          onClick={async () => {
+                            const ok = await updateConfig({ [f.key]: !active });
+                            if (ok) {
+                              logAuditEvent(active ? `DISABLE_${f.key.toUpperCase()}` : `ENABLE_${f.key.toUpperCase()}`);
+                              toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
+                            }
                           }}
-                          className={active ? 'text-success' : 'text-muted-foreground'}
+                          className={`disabled:opacity-60 ${active ? 'text-success' : 'text-muted-foreground'}`}
                         >
                           {active ? <ToggleRight className="h-7 w-7" /> : <ToggleLeft className="h-7 w-7" />}
                         </button>
@@ -2309,7 +2449,7 @@ export default function AdminPanel() {
                   <AlertCircle className="h-5 w-5 text-amber-500" /> Modo de Manutenção
                 </h3>
                 {(() => {
-                  const maintenance = localStorage.getItem('maintenance_mode') === 'true';
+                  const maintenance = systemConfig?.maintenance_mode ?? false;
                   return (
                     <>
                       <div className={`p-4 rounded-lg mb-4 ${maintenance ? 'bg-amber-50 border border-amber-200' : 'bg-secondary/30'}`}>
@@ -2317,18 +2457,32 @@ export default function AdminPanel() {
                           Status: {maintenance ? '🟡 EM MANUTENÇÃO' : '🟢 Operação normal'}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {maintenance ? 'Usuários veem tela de manutenção ao acessar.' : 'Sistema disponível para todos os usuários.'}
+                          {maintenance
+                            ? 'Toda consultora vê um aviso ao entrar no sistema — não bloqueia o acesso, só avisa.'
+                            : 'Sistema disponível para todos os usuários, sem nenhum aviso.'}
                         </p>
                       </div>
+                      {maintenance && (
+                        <textarea
+                          value={systemConfig?.maintenance_message ?? ''}
+                          onChange={(e) => setSystemConfig(cfg => cfg ? { ...cfg, maintenance_message: e.target.value } : cfg)}
+                          onBlur={(e) => updateConfig({ maintenance_message: e.target.value })}
+                          placeholder="Mensagem que a consultora vai ver..."
+                          className="w-full mb-3 rounded-lg border border-input px-3 py-2 text-sm"
+                          rows={2}
+                        />
+                      )}
                       <button
-                        onClick={() => {
+                        disabled={savingConfig}
+                        onClick={async () => {
                           const next = !maintenance;
-                          localStorage.setItem('maintenance_mode', String(next));
-                          logAuditEvent(next ? 'ENABLE_MAINTENANCE' : 'DISABLE_MAINTENANCE');
-                          toast({ title: next ? "Manutenção ativada" : "Manutenção desativada", variant: next ? "destructive" : "default" });
-                          setSystemHealth(h => h ? { ...h } : h);
+                          const ok = await updateConfig({ maintenance_mode: next });
+                          if (ok) {
+                            logAuditEvent(next ? 'ENABLE_MAINTENANCE' : 'DISABLE_MAINTENANCE');
+                            toast({ title: next ? "Manutenção ativada" : "Manutenção desativada", variant: next ? "destructive" : "default" });
+                          }
                         }}
-                        className={`w-full py-2 rounded-lg font-medium ${maintenance ? 'bg-primary text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
+                        className={`w-full py-2 rounded-lg font-medium disabled:opacity-60 ${maintenance ? 'bg-primary text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
                       >
                         {maintenance ? 'Desativar Manutenção' : 'Ativar Modo Manutenção'}
                       </button>
@@ -2387,6 +2541,13 @@ export default function AdminPanel() {
             <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
           </TabsContent>
 
+          {/* ==========================================
+              TAB: CATÁLOGO (Revisão de códigos de barras do crawler)
+              ========================================== */}
+          <TabsContent value="catalog" className="space-y-6">
+            <AdminCatalogTab toast={toast} />
+          </TabsContent>
+
         </Tabs>
 
         {/* Modal de Assinatura Manual (mantido do código original) */}
@@ -2429,6 +2590,7 @@ export default function AdminPanel() {
                     onChange={(e) => setSubForm({ ...subForm, external_id: e.target.value })}
                     className="w-full border border-input rounded-lg px-3 py-2 text-sm"
                     placeholder="ID da transação/cliente"
+                  
                   />
                 </div>
                 <div>
