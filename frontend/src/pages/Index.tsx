@@ -1,16 +1,17 @@
 // pages/Index.tsx — VERSÃO SEGURA E OTIMIZADA
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import {
   Package, TrendingDown, DollarSign, BarChart3, ScanBarcode, List,
   ArrowDownCircle, Settings, PieChart, Store, History, User,
   Users,
 } from "lucide-react";
-import { statsApi } from "../lib/api";
+import { statsApi, profileApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import { ChatAssistant } from "../components/ChatAssistant";
 import NotificationBell from "../components/NotificationBell";
+import { OnboardingTour } from "../components/OnboardingTour";
 import ProBadge from "../components/ProBadge";
 import UpgradeModal from "../components/UpgradeModal";
 import ProfileCompletionBanner from "../components/ProfileCompletionBanner";
@@ -28,6 +29,7 @@ interface Stats {
 
 export default function Index() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const { isLocked, loading: gatesLoading } = useFeatureGates();
   const { aiEnabled } = useSystemConfig();
@@ -39,9 +41,44 @@ export default function Index() {
     monthProfit: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [showTour, setShowTour] = useState(false);
+  const [tourJaDecidido, setTourJaDecidido] = useState(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeCtx, setUpgradeCtx] = useState({ feature: "", description: "" });
   const [storeSlug, setStoreSlug] = useState<string | null>(null);
+
+  // 🧭 Mostra o tour sozinho na primeira vez (onboarding_completed ainda
+  // false), ou sob demanda quando vem da Central de Ajuda com ?tour=1 —
+  // nesse segundo caso, mostra de novo mesmo já tendo sido concluído.
+  useEffect(() => {
+    if (tourJaDecidido) return;
+    const forcarViaLink = searchParams.get("tour") === "1";
+
+    if (forcarViaLink) {
+      setShowTour(true);
+      setTourJaDecidido(true);
+      // Limpa o parâmetro da URL pra não reabrir de novo num refresh manual.
+      searchParams.delete("tour");
+      setSearchParams(searchParams, { replace: true });
+      return;
+    }
+
+    if (user && user.onboarding_completed === false) {
+      setShowTour(true);
+      setTourJaDecidido(true);
+    } else if (user) {
+      setTourJaDecidido(true);
+    }
+  }, [user, tourJaDecidido, searchParams, setSearchParams]);
+
+  const finalizarTour = () => {
+    setShowTour(false);
+    // ⚠️ Atualiza local primeiro (fecha o tour na hora, sem esperar rede)
+    // e só depois persiste — se a requisição falhar, na pior hipótese o
+    // tour aparece de novo no próximo login, o que é um problema bem
+    // menor do que travar a tela esperando confirmação do servidor.
+    profileApi.update({ onboarding_completed: true }).catch(() => {});
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -115,7 +152,7 @@ export default function Index() {
                 nenhum. NotificationBell.tsx já existia pronto (alertas de
                 validade, marcos de venda, assinatura, CRM) mas nunca
                 tinha sido importado em lugar nenhum — só faltava plugar. */}
-            <NotificationBell />
+            <span data-tour="notificacoes"><NotificationBell /></span>
             <button onClick={() => navigate("/profile")} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
               <User className="h-5 w-5" />
             </button>
@@ -148,11 +185,11 @@ export default function Index() {
 
         {/* BOTÕES DE AÇÃO */}
         <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <ActionBtn onClick={() => navigate("/add")} icon={ScanBarcode} label="Cadastrar" desc="Escanear entrada" primary />
-          <ActionBtn onClick={() => navigate("/withdraw")} icon={ArrowDownCircle} label="Baixa" desc="Registrar saída" />
-          <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" />
+          <ActionBtn onClick={() => navigate("/add")} icon={ScanBarcode} label="Cadastrar" desc="Escanear entrada" primary tourId="cadastrar" />
+          <ActionBtn onClick={() => navigate("/withdraw")} icon={ArrowDownCircle} label="Baixa" desc="Registrar saída" tourId="baixa" />
+          <ActionBtn onClick={() => navigate("/products")} icon={List} label="Meu Estoque" desc="Lista completa" tourId="estoque" />
           <ActionBtn onClick={() => navigate("/history")} icon={History} label="Extrato" desc="Movimentações" />
-          <ActionBtn onClick={() => navigate("/crm")} icon={Users} label="Meus Clientes" desc="Quem comprou na vitrine" />
+          <ActionBtn onClick={() => navigate("/crm")} icon={Users} label="Meus Clientes" desc="Quem comprou na vitrine" tourId="crm" />
           {/* ⚠️ REMOVIDO (Etapa 3): botão de Ajuda que levava direto pra
               /support. O acesso à ajuda agora vive dentro do Profile
               (seção "Aprenda a usar" + link "Ver central de ajuda"),
@@ -173,6 +210,7 @@ export default function Index() {
             desc="Gráficos e análises"
             proBadge={isLocked("dashboard_charts")}
             proBadgeLoading={gatesLoading}
+            tourId="dashboard"
           />
           <ActionBtn
             onClick={() => {
@@ -190,6 +228,7 @@ export default function Index() {
             desc="Sua loja online"
             proBadge={isLocked("storefront")}
             proBadgeLoading={gatesLoading}
+            tourId="vitrine"
           />
         </div>
 
@@ -218,6 +257,8 @@ export default function Index() {
           flag global "Assistente IA" do admin-panel — antes essa flag não
           controlava nada de verdade, era só localStorage sem consumidor. */}
       {!gatesLoading && !isLocked("chat_assistant") && aiEnabled && <ChatAssistant />}
+
+      {showTour && <OnboardingTour onFinish={finalizarTour} />}
       <UpgradeModal
         isOpen={showUpgrade}
         onClose={() => setShowUpgrade(false)}
@@ -237,6 +278,7 @@ function ActionBtn({
   primary,
   proBadge,
   proBadgeLoading,
+  tourId,
 }: {
   onClick: () => void;
   icon: typeof Package;
@@ -245,10 +287,12 @@ function ActionBtn({
   primary?: boolean;
   proBadge?: boolean;
   proBadgeLoading?: boolean;
+  tourId?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      data-tour={tourId}
       className={`flex items-center gap-3 rounded-xl p-4 text-left transition-all hover:scale-[1.02] hover:shadow-md ${
         primary
           ? "border-2 border-brand bg-gradient-to-br from-brand to-brand-hover shadow-sm"
