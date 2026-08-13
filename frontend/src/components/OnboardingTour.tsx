@@ -5,7 +5,8 @@
 // no overlay escuro), e um cartão com explicação + navegação. Some
 // sozinho quando termina ou quando a pessoa clica "Pular", e marca
 // onboarding_completed=true no perfil pra não aparecer de novo sozinho —
-// mas pode ser revisto a qualquer momento pela Central de Ajuda.
+// mas pode ser revisto a qualquer momento (Central de Ajuda, ou o botão
+// de bússola no cabeçalho do Index).
 import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, ChevronRight, ChevronLeft } from "lucide-react";
@@ -24,6 +25,8 @@ interface Rect {
 }
 
 const PADDING = 8; // respiro ao redor do elemento destacado
+const LARGURA_CARTAO_DESKTOP = 320;
+const MARGEM_LATERAL_MOBILE = 16;
 
 export const ONBOARDING_STEPS: TourStep[] = [
   {
@@ -71,29 +74,59 @@ interface Props {
 export const OnboardingTour: React.FC<Props> = ({ steps = ONBOARDING_STEPS, onFinish }) => {
   const [stepIndex, setStepIndex] = useState(0);
   const [rect, setRect] = useState<Rect | null>(null);
+  const [larguraJanela, setLarguraJanela] = useState(window.innerWidth);
 
   const step = steps[stepIndex];
   const isLast = stepIndex === steps.length - 1;
 
-  const medirAlvo = useCallback(() => {
+  const medir = useCallback(() => {
+    const el = document.querySelector<HTMLElement>(`[data-tour="${step?.target}"]`);
+    if (!el) {
+      setRect(null);
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+    setLarguraJanela(window.innerWidth);
+  }, [step]);
+
+  useEffect(() => {
     const el = document.querySelector<HTMLElement>(`[data-tour="${step?.target}"]`);
     if (!el) {
       setRect(null);
       return;
     }
     el.scrollIntoView({ behavior: "smooth", block: "center" });
-    // Espera o scroll assentar antes de medir a posição de verdade.
-    setTimeout(() => {
-      const r = el.getBoundingClientRect();
-      setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
-    }, 300);
-  }, [step]);
+
+    // ⚠️ CORREÇÃO: antes media a posição UMA vez, 300ms depois do scroll —
+    // se um banner (teste grátis, manutenção, promoção) carregasse depois
+    // disso e empurrasse o layout pra baixo, a medição ficava desatualizada
+    // e o destaque saía do lugar certo. Agora:
+    // 1. Um ResizeObserver no <body> pega qualquer mudança de tamanho da
+    //    página inteira (banner aparecendo/sumindo, imagem carregando) e
+    //    remede automaticamente, sem depender de um tempo fixo de espera.
+    // 2. Reforça com algumas remedições nos primeiros instantes (parado
+    //    às vezes some, então uma remedição só não é suficiente), e no
+    //    fim do scroll suave.
+    const observer = new ResizeObserver(() => medir());
+    observer.observe(document.body);
+
+    const timers = [100, 300, 600, 1000].map((ms) => setTimeout(medir, ms));
+
+    return () => {
+      observer.disconnect();
+      timers.forEach(clearTimeout);
+    };
+  }, [step, medir]);
 
   useEffect(() => {
-    medirAlvo();
-    window.addEventListener("resize", medirAlvo);
-    return () => window.removeEventListener("resize", medirAlvo);
-  }, [medirAlvo]);
+    window.addEventListener("resize", medir);
+    window.addEventListener("scroll", medir, { passive: true });
+    return () => {
+      window.removeEventListener("resize", medir);
+      window.removeEventListener("scroll", medir);
+    };
+  }, [medir]);
 
   // ⚠️ Se o elemento-alvo não existir na tela (ex: passo desatualizado
   // depois de uma mudança de layout), pula esse passo automaticamente em
@@ -116,12 +149,18 @@ export const OnboardingTour: React.FC<Props> = ({ steps = ONBOARDING_STEPS, onFi
 
   if (!step) return null;
 
-  // Posição do cartão — abaixo do elemento por padrão, acima se não
-  // couber (perto do fim da tela).
+  // ⚠️ Responsivo: em tela estreita (celular), o cartão fica com largura
+  // baseada na janela (menos a margem dos dois lados) em vez de um valor
+  // fixo em pixels — evita estourar a tela ou ficar cortado na lateral.
+  const ehMobile = larguraJanela < 480;
+  const larguraCartao = ehMobile ? larguraJanela - MARGEM_LATERAL_MOBILE * 2 : LARGURA_CARTAO_DESKTOP;
+
   const espacoAbaixo = rect ? window.innerHeight - (rect.top + rect.height) : 999;
   const cardAcima = espacoAbaixo < 220;
   const cardTop = rect ? (cardAcima ? rect.top - PADDING : rect.top + rect.height + PADDING + 12) : window.innerHeight / 2;
-  const cardLeft = rect ? Math.min(Math.max(rect.left, 16), window.innerWidth - 336) : 16;
+  const cardLeft = rect
+    ? Math.min(Math.max(rect.left, MARGEM_LATERAL_MOBILE), larguraJanela - larguraCartao - MARGEM_LATERAL_MOBILE)
+    : MARGEM_LATERAL_MOBILE;
 
   return (
     <div className="fixed inset-0 z-[100]">
@@ -149,7 +188,7 @@ export const OnboardingTour: React.FC<Props> = ({ steps = ONBOARDING_STEPS, onFi
 
       {rect && (
         <div
-          className="pointer-events-none absolute rounded-xl ring-2 ring-brand transition-all duration-300"
+          className="pointer-events-none absolute rounded-xl ring-2 ring-brand transition-all duration-200"
           style={{ top: rect.top - PADDING, left: rect.left - PADDING, width: rect.width + PADDING * 2, height: rect.height + PADDING * 2 }}
         />
       )}
@@ -161,8 +200,8 @@ export const OnboardingTour: React.FC<Props> = ({ steps = ONBOARDING_STEPS, onFi
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
-          className="absolute w-[320px] rounded-2xl border border-brand/20 bg-card p-4 shadow-2xl"
-          style={{ top: cardTop, left: cardLeft, transform: cardAcima ? "translateY(-100%)" : undefined }}
+          className="absolute rounded-2xl border border-brand/20 bg-card p-4 shadow-2xl transition-all duration-200"
+          style={{ top: cardTop, left: cardLeft, width: larguraCartao, transform: cardAcima ? "translateY(-100%)" : undefined }}
         >
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">{stepIndex + 1} de {steps.length}</span>
