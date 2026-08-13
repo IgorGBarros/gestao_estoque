@@ -1,6 +1,6 @@
 // pages/Index.tsx — VERSÃO SEGURA E OTIMIZADA
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   Package, TrendingDown, DollarSign, BarChart3, ScanBarcode, List,
   ArrowDownCircle, Settings, PieChart, Store, History, User,
@@ -29,7 +29,7 @@ interface Stats {
 
 export default function Index() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const { user, refreshProfile } = useAuth();
   const { isLocked, loading: gatesLoading } = useFeatureGates();
   const { aiEnabled } = useSystemConfig();
@@ -42,7 +42,7 @@ export default function Index() {
   });
   const [loading, setLoading] = useState(true);
   const [showTour, setShowTour] = useState(false);
-  const [tourJaDecidido, setTourJaDecidido] = useState(false);
+  const tourInicializado = useRef(false);
   const [showUpgrade, setShowUpgrade] = useState(false);
   const [upgradeCtx, setUpgradeCtx] = useState({ feature: "", description: "" });
   const [storeSlug, setStoreSlug] = useState<string | null>(null);
@@ -50,26 +50,43 @@ export default function Index() {
   // 🧭 Mostra o tour sozinho na primeira vez (onboarding_completed ainda
   // false), ou sob demanda quando vem da Central de Ajuda com ?tour=1 —
   // nesse segundo caso, mostra de novo mesmo já tendo sido concluído.
+  //
+  // ⚠️ CORREÇÃO: a versão anterior usava useState pro "já decidiu" e
+  // colocava searchParams/setSearchParams no array de dependências — só
+  // que o próprio efeito CHAMA setSearchParams (pra limpar o ?tour=1 da
+  // URL), o que muda a referência de searchParams, o que podia disparar
+  // o efeito de novo antes do primeiro ciclo assentar. Um useRef não
+  // participa de array de dependência e não causa re-render — junto com
+  // tirar searchParams/setSearchParams das dependências (só precisa ler
+  // o valor UMA vez, no mount), a lógica fica bem mais previsível.
   useEffect(() => {
-    if (tourJaDecidido) return;
-    const forcarViaLink = searchParams.get("tour") === "1";
+    if (tourInicializado.current) return;
+
+    const forcarViaLink = new URLSearchParams(window.location.search).get("tour") === "1";
 
     if (forcarViaLink) {
+      tourInicializado.current = true;
       setShowTour(true);
-      setTourJaDecidido(true);
       // Limpa o parâmetro da URL pra não reabrir de novo num refresh manual.
-      searchParams.delete("tour");
-      setSearchParams(searchParams, { replace: true });
+      const params = new URLSearchParams(window.location.search);
+      params.delete("tour");
+      setSearchParams(params, { replace: true });
       return;
     }
 
-    if (user && user.onboarding_completed === false) {
+    // ⚠️ Se 'user' ainda não carregou, NÃO marca como decidido — o efeito
+    // roda de novo (sem custo, só checa a condição) assim que 'user'
+    // chegar. Marcar cedo demais aqui faria o tour nunca aparecer pra
+    // usuária genuinamente nova, porque a decisão "não precisa" seria
+    // tomada com dado incompleto, antes do onboarding_completed real
+    // estar disponível.
+    if (!user) return;
+
+    tourInicializado.current = true;
+    if (user.onboarding_completed === false) {
       setShowTour(true);
-      setTourJaDecidido(true);
-    } else if (user) {
-      setTourJaDecidido(true);
     }
-  }, [user, tourJaDecidido, searchParams, setSearchParams]);
+  }, [user]);
 
   const finalizarTour = () => {
     setShowTour(false);
