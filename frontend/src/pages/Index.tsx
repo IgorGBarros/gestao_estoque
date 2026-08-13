@@ -30,7 +30,7 @@ interface Stats {
 export default function Index() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, refreshProfile } = useAuth();
   const { isLocked, loading: gatesLoading } = useFeatureGates();
   const { aiEnabled } = useSystemConfig();
   const [stats, setStats] = useState<Stats>({
@@ -73,11 +73,17 @@ export default function Index() {
 
   const finalizarTour = () => {
     setShowTour(false);
-    // ⚠️ Atualiza local primeiro (fecha o tour na hora, sem esperar rede)
-    // e só depois persiste — se a requisição falhar, na pior hipótese o
-    // tour aparece de novo no próximo login, o que é um problema bem
-    // menor do que travar a tela esperando confirmação do servidor.
-    profileApi.update({ onboarding_completed: true }).catch(() => {});
+    // ⚠️ CORREÇÃO: antes só persistia no backend, mas nunca atualizava o
+    // `user` que já estava em memória no useAuth — como o Index.tsx
+    // desmonta e remonta a cada troca de rota (o React perde todo o
+    // estado local, incluindo `tourJaDecidido`), a checagem seguinte
+    // sempre lia o valor ANTIGO de onboarding_completed (ainda false),
+    // fazendo o tour reaparecer toda vez que voltava pro Index. Chamar
+    // refreshProfile() aqui atualiza o `user` em memória (e no
+    // localStorage) na hora, então a próxima checagem já vê o valor certo.
+    profileApi.update({ onboarding_completed: true })
+      .then(() => refreshProfile())
+      .catch(() => {});
   };
 
   useEffect(() => {
