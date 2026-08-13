@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import {
   Package, TrendingDown, DollarSign, BarChart3, ScanBarcode, List,
   ArrowDownCircle, Settings, PieChart, Store, History, User,
-  Users,
+  Users, Compass,
 } from "lucide-react";
 import { statsApi, profileApi } from "../lib/api";
 import { useAuth } from "../hooks/useAuth";
@@ -175,6 +175,18 @@ export default function Index() {
                 nenhum. NotificationBell.tsx já existia pronto (alertas de
                 validade, marcos de venda, assinatura, CRM) mas nunca
                 tinha sido importado em lugar nenhum — só faltava plugar. */}
+            {/* ⚠️ NOVO: atalho direto pro tour — antes só existia pelo
+                caminho Perfil → Central de Ajuda → aba Guias (3 cliques
+                pra achar). Aqui é 1 clique, e não precisa navegar pra
+                lugar nenhum — chama o tour direto, já que estamos no
+                Index de qualquer forma. */}
+            <button
+              onClick={() => setShowTour(true)}
+              className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+              title="Rever o tour rápido"
+            >
+              <Compass className="h-5 w-5" />
+            </button>
             <span data-tour="notificacoes"><NotificationBell /></span>
             <button onClick={() => navigate("/profile")} className="rounded-lg p-2 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
               <User className="h-5 w-5" />
