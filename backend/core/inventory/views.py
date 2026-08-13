@@ -235,7 +235,7 @@ class FirebaseLoginView(APIView):
             "access": str(access),
             "refresh": str(refresh),
             "user": {"email": user.email, "name": user.name},
-            "store": {"plan": store.plan} if store else None,
+            "store": {"plan": store.plan, "onboarding_completed": store.onboarding_completed} if store else None,
         })
 # ==========================================
 # UTILITÁRIOS LGPD - ANONIMIZAÇÃO E SEGURANÇA

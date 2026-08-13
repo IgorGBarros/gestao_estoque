@@ -186,6 +186,11 @@ class Store(models.Model):
     trial_started_at = models.DateTimeField(blank=True, null=True)
     trial_ends_at = models.DateTimeField(blank=True, null=True)
 
+    # 🧭 Tour interativo de primeiros passos — mostrado sozinho na primeira
+    # vez (Index.tsx checa isso no login), e pode ser revisto a qualquer
+    # momento pela Central de Ajuda > Guias, mesmo já tendo sido concluído.
+    onboarding_completed = models.BooleanField(default=False)
+
     class Meta:
         verbose_name = 'Loja'
         verbose_name_plural = 'Lojas'

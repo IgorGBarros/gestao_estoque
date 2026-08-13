@@ -67,6 +67,7 @@ export interface User {
   has_store?: boolean;
   can_add_products?: boolean;
   is_staff?: boolean;
+  onboarding_completed?: boolean;
 }
 
 interface AuthContextData {

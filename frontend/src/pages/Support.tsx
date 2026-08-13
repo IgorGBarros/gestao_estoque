@@ -126,6 +126,7 @@ export default function Support() {
 // Central de Ajuda — conteúdo em blocos por tipo
 // ─────────────────────────────────────────────────────────────
 function CentralDeAjuda() {
+  const navigate = useNavigate();
   const [conteudos, setConteudos] = useState<HelpContentItem[]>([]);
   const [itemAtivo, setItemAtivo] = useState<HelpContentItem | null>(null);
   const [carregando, setCarregando] = useState(true);
@@ -196,6 +197,20 @@ function CentralDeAjuda() {
               </div>
             ) : (
               <div className="space-y-2">
+                {tipo === "guia" && (
+                  <button
+                    onClick={() => navigate("/?tour=1")}
+                    className="flex w-full items-center gap-3 rounded-xl border border-brand/30 bg-brand-soft p-3 text-left transition-colors hover:border-brand/50"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-brand/15">
+                      <Sparkles className="h-5 w-5 text-brand" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-foreground">Rever o tour rápido</p>
+                      <p className="text-xs text-muted-foreground">Passeio interativo pelas funções principais</p>
+                    </div>
+                  </button>
+                )}
                 {itens.map((item) => (
                   <button
                     key={item.id}

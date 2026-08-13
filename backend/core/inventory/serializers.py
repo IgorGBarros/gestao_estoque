@@ -56,6 +56,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             "store_slug": store.slug if store else None,
             "plan": store.plan if store else 'free',
             "can_add_products": store.can_add_products if store else True,
+            "onboarding_completed": store.onboarding_completed if store else True,
         })
         
         return data
@@ -533,7 +534,8 @@ class ProfileSerializer(serializers.ModelSerializer):
             "id", "user", "email", "is_staff", "display_name", "store_slug", "whatsapp_number", 
             "created_at", "updated_at", "plan", "plan_config", "current_limits",
             "active_promotions", "subscription_status", "stats",
-            "payment_provider", "subscription_started_at", "subscription_expires_at"
+            "payment_provider", "subscription_started_at", "subscription_expires_at",
+            "onboarding_completed",
         ]
         read_only_fields = [
             "id", "user", "email", "is_staff", "created_at", "updated_at", "store_slug", 
