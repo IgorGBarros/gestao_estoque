@@ -152,12 +152,30 @@ export default function NotificationBell() {
 
       <AnimatePresence>
         {open && (
-          <motion.div
+          <>
+            {/* Fundo escurecido — só em mobile (o painel fixed ali não tem
+                mais uma posição "presa" no sino que já deixa claro que é
+                um dropdown; o fundo ajuda a ler como modal de verdade). */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setOpen(false)}
+              className="fixed inset-0 z-40 bg-black/30 sm:hidden"
+            />
+            <motion.div
             initial={{ opacity: 0, y: -8, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-12 z-50 flex max-h-[min(80vh,32rem)] w-[calc(100vw-2rem)] max-w-[360px] flex-col overflow-hidden rounded-2xl border border-brand/15 bg-card shadow-2xl"
+            // ⚠️ CORREÇÃO: em tela estreita, "absolute right-0" ancorado no
+            // sino fazia o painel (quase largura total) esticar bastante
+            // pra esquerda, cobrindo o cabeçalho/logo. Em mobile (abaixo
+            // de sm), passa a ser "fixed" com margem igual dos dois lados
+            // da TELA (não do botão) — sempre centralizado, nunca cobre
+            // o cabeçalho. A partir de sm, volta a ser o dropdown ancorado
+            // no sino, que já cabe bem em tela maior.
+            className="fixed inset-x-4 top-16 z-50 flex max-h-[min(75vh,32rem)] flex-col overflow-hidden rounded-2xl border border-brand/15 bg-card shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[360px] sm:max-h-[min(80vh,32rem)]"
           >
             {/* Header */}
             <div className="flex shrink-0 items-center justify-between border-b border-brand-peach/30 bg-gradient-to-r from-brand-soft to-transparent px-4 py-3">
@@ -178,7 +196,7 @@ export default function NotificationBell() {
             {/* Tabs — rolagem horizontal porque com Promoções/Novidades
                 juntas já são 6 abas, apertado demais pra dividir em partes
                 iguais (flex-1) num painel deste tamanho. */}
-            <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-brand-peach/30 px-2 py-1.5">
+            <div className="scrollbar-hide flex shrink-0 gap-1 overflow-x-auto border-b border-brand-peach/30 px-2 py-1.5">
               {([
                 { key: "all" as const, label: "Tudo", count: totalCount },
                 { key: "sales" as const, label: "Vendas", count: filteredSalesCount },
@@ -375,6 +393,7 @@ export default function NotificationBell() {
               </button>
             </div>
           </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>
