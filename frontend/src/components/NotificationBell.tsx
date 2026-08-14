@@ -115,17 +115,13 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  if (totalCount === 0) {
-    return (
-      <div
-        className="relative rounded-lg p-2 text-muted-foreground/60"
-        title="Nenhuma notificação no momento"
-        aria-label="Nenhuma notificação"
-      >
-        <Bell className="h-5 w-5" />
-      </div>
-    );
-  }
+  // ⚠️ CORREÇÃO: antes, com totalCount === 0, o componente retornava uma
+  // <div> sem onClick nenhum — nem botão de verdade. Isso deixava o sino
+  // completamente morto justo quando não tinha nada novo, impedindo até
+  // de abrir o painel pra ver o histórico (Promoções/Novidades/Suporte
+  // já mostram tudo, não só o que é novo — e o painel já tem um estado
+  // vazio próprio pra "Tudo em dia", com atalhos pra essas abas). O sino
+  // agora é sempre clicável, independente de ter algo novo ou não.
 
   const hasCritical = filteredCritical > 0 || subscriptionAlert?.expired === true;
 
@@ -136,17 +132,19 @@ export default function NotificationBell() {
         className="relative rounded-lg p-2 text-muted-foreground hover:bg-brand-soft hover:text-brand transition-colors"
       >
         <Bell className="h-5 w-5" />
-        <span
-          className={`absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
-            hasCritical
-              ? "bg-destructive"
-              : filteredMilestones.length > 0
-              ? "bg-brand"
-              : "bg-brand-rose"
-          }`}
-        >
-          {totalCount > 9 ? "9+" : totalCount}
-        </span>
+        {totalCount > 0 && (
+          <span
+            className={`absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
+              hasCritical
+                ? "bg-destructive"
+                : filteredMilestones.length > 0
+                ? "bg-brand"
+                : "bg-brand-rose"
+            }`}
+          >
+            {totalCount > 9 ? "9+" : totalCount}
+          </span>
+        )}
         {hasCritical && (
           <span className="absolute -right-0.5 -top-0.5 h-5 w-5 animate-ping rounded-full bg-destructive/40" />
         )}
@@ -154,34 +152,51 @@ export default function NotificationBell() {
 
       <AnimatePresence>
         {open && (
-          <motion.div
+          <>
+            {/* Fundo escurecido — só em mobile (o painel fixed ali não tem
+                mais uma posição "presa" no sino que já deixa claro que é
+                um dropdown; o fundo ajuda a ler como modal de verdade). */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setOpen(false)}
+              className="fixed inset-0 z-40 bg-black/30 sm:hidden"
+            />
+            <motion.div
             initial={{ opacity: 0, y: -8, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-12 z-50 w-[calc(100vw-2rem)] max-w-[340px] rounded-xl border border-brand/15 bg-card shadow-xl"
+            // ⚠️ CORREÇÃO: em tela estreita, "absolute right-0" ancorado no
+            // sino fazia o painel (quase largura total) esticar bastante
+            // pra esquerda, cobrindo o cabeçalho/logo. Em mobile (abaixo
+            // de sm), passa a ser "fixed" com margem igual dos dois lados
+            // da TELA (não do botão) — sempre centralizado, nunca cobre
+            // o cabeçalho. A partir de sm, volta a ser o dropdown ancorado
+            // no sino, que já cabe bem em tela maior.
+            className="fixed inset-x-4 top-16 z-50 flex max-h-[min(75vh,32rem)] flex-col overflow-hidden rounded-2xl border border-brand/15 bg-card shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-12 sm:w-[360px] sm:max-h-[min(80vh,32rem)]"
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-brand-peach/30 px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-brand-peach/30 bg-gradient-to-r from-brand-soft to-transparent px-4 py-3">
               <div className="flex items-center gap-2">
-                <Bell className="h-4 w-4 text-brand" />
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand/15">
+                  <Bell className="h-4 w-4 text-brand" />
+                </div>
                 <h3 className="text-sm font-semibold text-foreground">Notificações</h3>
-                <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand">
-                  {totalCount}
-                </span>
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="rounded-lg p-1 text-muted-foreground hover:text-foreground"
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Tabs — rolagem horizontal porque com Promoções/Novidades
-                juntas já são 5 abas, apertado demais pra dividir em partes
-                iguais (flex-1) num painel de 340px. */}
-            <div className="flex overflow-x-auto border-b border-brand-peach/30">
+                juntas já são 6 abas, apertado demais pra dividir em partes
+                iguais (flex-1) num painel deste tamanho. */}
+            <div className="scrollbar-hide flex shrink-0 gap-1 overflow-x-auto border-b border-brand-peach/30 px-2 py-1.5">
               {([
                 { key: "all" as const, label: "Tudo", count: totalCount },
                 { key: "sales" as const, label: "Vendas", count: filteredSalesCount },
@@ -193,22 +208,22 @@ export default function NotificationBell() {
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`shrink-0 px-3 py-2 text-xs font-medium transition-colors ${
+                  className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
                     activeTab === tab.key
-                      ? "border-b-2 border-brand text-brand"
-                      : "text-brand-rose/70 hover:text-foreground"
+                      ? "bg-brand text-white"
+                      : "text-brand-rose/70 hover:bg-brand-soft hover:text-foreground"
                   }`}
                 >
                   {tab.label}{" "}
                   {tab.count > 0 && (
-                    <span className="ml-1 opacity-60">({tab.count})</span>
+                    <span className={activeTab === tab.key ? "opacity-80" : "opacity-60"}>({tab.count})</span>
                   )}
                 </button>
               ))}
             </div>
 
             {/* Content */}
-            <div className="max-h-96 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto">
               {/* Assinatura vencendo/vencida — sempre no topo */}
               {subscriptionAlert && (
                 <SubscriptionAlertItem
@@ -307,6 +322,37 @@ export default function NotificationBell() {
                 ))}
 
               {/* Empty states */}
+              {activeTab === "all" &&
+                !subscriptionAlert &&
+                crmItens.length === 0 &&
+                filteredMilestones.length === 0 &&
+                !filteredWeekly &&
+                filteredExpiry.length === 0 && (
+                  <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-soft">
+                      <Bell className="h-5 w-5 text-brand" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Tudo em dia por aqui</p>
+                      <p className="mt-0.5 text-xs text-brand-rose/60">Nenhum alerta novo no momento</p>
+                    </div>
+                    {/* ⚠️ Não ter nada NOVO não significa não ter nada pra
+                        ver — Promoções, Novidades e Suporte guardam o
+                        histórico completo, sempre disponível mesmo sem
+                        item pendente. */}
+                    <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+                      <button onClick={() => setActiveTab("promocoes")} className="rounded-full border border-brand/20 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand-soft">
+                        Ver promoções
+                      </button>
+                      <button onClick={() => setActiveTab("novidades")} className="rounded-full border border-brand/20 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand-soft">
+                        Ver novidades
+                      </button>
+                      <button onClick={() => setActiveTab("suporte")} className="rounded-full border border-brand/20 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand-soft">
+                        Minhas conversas
+                      </button>
+                    </div>
+                  </div>
+                )}
               {activeTab === "sales" && filteredSalesCount === 0 && (
                 <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
                   Nenhuma notificação de vendas
@@ -347,6 +393,7 @@ export default function NotificationBell() {
               </button>
             </div>
           </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

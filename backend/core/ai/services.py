@@ -362,3 +362,104 @@ def query_database_with_llm(user_question: str, store, history: list = None) -> 
     except Exception:
         logger.exception("Erro no assistente de IA (query_database_with_llm)")
         return "Desculpe, tive um problema técnico ao processar sua pergunta."
+
+# ─────────────────────────────────────────────────────────────────────────
+# CAMADA DE AJUDA — a Amorinha entende a pergunta de verdade (sinônimo,
+# reformulação, várias perguntas juntas), mas SÓ PODE responder com base
+# no que está escrito na Central de Ajuda. Mesmo princípio do roteador
+# fechado acima: a IA nunca inventa fora do que foi dado a ela.
+# ─────────────────────────────────────────────────────────────────────────
+
+CENTRAL_DE_AJUDA_PROMPT = """Você é a Amorinha, assistente do Minha Amora — sistema de gestão de estoque para revendedoras de cosméticos.
+
+Abaixo está TODO o conteúdo publicado na Central de Ajuda do sistema. Sua tarefa é decidir se algum desses conteúdos responde à pergunta da consultora, e se sim, sintetizar uma resposta curta e direta.
+
+REGRAS OBRIGATÓRIAS:
+- Você SÓ PODE usar informação que está EXPLICITAMENTE nos conteúdos abaixo. NUNCA invente funcionalidade, NUNCA complete com conhecimento geral sobre outros sistemas de estoque, NUNCA suponha como algo "provavelmente" funciona.
+- Se a pergunta não for respondida por NENHUM conteúdo abaixo, retorne encontrado=false — não tente ser útil inventando uma resposta genérica.
+- ids_relacionados deve conter APENAS os IDs (o número entre colchetes) dos conteúdos que você realmente usou pra montar a resposta — no máximo 3.
+- resposta deve ser curta (2-4 frases), em tom direto e caloroso, como alguém explicando pra uma colega.
+- Responda SOMENTE com o JSON abaixo, sem nenhum texto antes ou depois:
+{{"encontrado": true ou false, "ids_relacionados": [int, ...], "resposta": "string ou null"}}
+
+CONTEÚDO DISPONÍVEL NA CENTRAL DE AJUDA:
+{conteudo}
+
+PERGUNTA DA CONSULTORA: {pergunta}
+"""
+
+
+def responder_com_central_de_ajuda(pergunta: str, store) -> dict:
+    """
+    Busca semântica de verdade na Central de Ajuda — a IA entende sinônimo,
+    reformulação e pergunta em linguagem natural (diferente da busca por
+    palavra-chave que existia antes), mas nunca responde fora do que está
+    escrito nos conteúdos publicados (mesmo princípio do roteador de
+    consulta de dados: lista fechada, nunca texto livre da IA sozinha).
+
+    Retorna um dict pronto pro chamador decidir o que fazer:
+        {'encontrou': True, 'resposta': str, 'fontes': [{'id', 'tipo', 'titulo', 'video_url'}, ...]}
+        {'encontrou': False}
+    """
+    from .models import HelpContent
+
+    conteudos = list(HelpContent.objects.filter(status='visivel'))
+    if not conteudos:
+        return {'encontrou': False}
+
+    # Monta o texto com TODO o conteúdo disponível — no volume atual (uma
+    # dúzia de itens), isso cabe tranquilo no orçamento de tokens. Se a
+    # Central de Ajuda crescer muito (centenas de itens), aí sim precisa
+    # de uma etapa de pré-seleção antes de mandar pro modelo.
+    blocos = []
+    for c in conteudos:
+        corpo = c.corpo or (f"(vídeo, sem descrição de texto — link: {c.video_url})" if c.video_url else "")
+        blocos.append(f"[{c.id}] {c.get_tipo_display()} — \"{c.titulo}\"\n{corpo}")
+    conteudo_formatado = "\n\n".join(blocos)
+
+    try:
+        prompt = CENTRAL_DE_AJUDA_PROMPT.format(conteudo=conteudo_formatado, pergunta=pergunta)
+        raw = _chamar_groq(prompt, temperature=0.1)
+        clean = _strip_llm_noise(raw)
+
+        try:
+            resultado = json.loads(clean)
+        except (json.JSONDecodeError, TypeError):
+            match = re.search(r"\{.*\}", clean, flags=re.DOTALL)
+            resultado = json.loads(match.group(0)) if match else {}
+
+        if not isinstance(resultado, dict) or not resultado.get('encontrado'):
+            return {'encontrou': False}
+
+        # ⚠️ VALIDAÇÃO CRÍTICA: nunca confia cegamente nos IDs que o modelo
+        # devolveu — filtra só pelos que REALMENTE existem no conjunto que
+        # foi oferecido a ele. Isso impede a IA de "citar" uma fonte que
+        # não existe (alucinação de referência), e também bloqueia
+        # qualquer ID de conteúdo que não estivesse na lista visível.
+        ids_oferecidos = {c.id for c in conteudos}
+        ids_citados = resultado.get('ids_relacionados') or []
+        ids_validos = [i for i in ids_citados if isinstance(i, int) and i in ids_oferecidos][:3]
+
+        resposta_texto = (resultado.get('resposta') or '').strip()
+        if not resposta_texto or not ids_validos:
+            # Disse que encontrou mas não citou fonte válida nem deu
+            # resposta de verdade — trata como não encontrado, não confia.
+            return {'encontrou': False}
+
+        mapa = {c.id: c for c in conteudos}
+        fontes = [
+            {'id': cid, 'tipo': mapa[cid].tipo, 'titulo': mapa[cid].titulo, 'video_url': mapa[cid].video_url}
+            for cid in ids_validos
+        ]
+
+        return {'encontrou': True, 'resposta': resposta_texto, 'fontes': fontes}
+
+    except RuntimeError:
+        logger.error("Amorinha (Central de Ajuda): GROQ_API_KEY não configurada")
+        return {'encontrou': False}
+    except GroqError:
+        logger.exception("Amorinha (Central de Ajuda): erro na chamada à API da Groq")
+        return {'encontrou': False}
+    except Exception:
+        logger.exception("Erro ao responder com Central de Ajuda")
+        return {'encontrou': False}
