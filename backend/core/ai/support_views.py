@@ -203,21 +203,41 @@ def ajuda_list(request):
 def _buscar_ou_escalar(query, store):
     """
     Núcleo compartilhado entre help_search (mantido por compatibilidade) e
-    chat_unified (novo) — busca em HelpContent, senão escala pra humano.
+    chat_unified — busca na Central de Ajuda, senão escala pra humano.
     Sempre loga em HelpSearchLog, ache ou não.
 
-    ⚠️ Busca por PALAVRAS-CHAVE, não pela frase inteira como substring — o
-    chat unificado manda a pergunta em linguagem natural completa (ex:
-    "como funciona a vitrine da minha loja"), e um icontains da FRASE
-    INTEIRA quase nunca bate contra um título curto como "Como funciona a
-    vitrine?" (o título não CONTÉM a pergunta completa). Em vez disso,
-    separa em palavras relevantes (ignora as muito curtas/comuns em
-    português) e busca conteúdo que contenha QUALQUER uma delas.
+    ⚠️ EVOLUÇÃO: antes era busca por PALAVRA-CHAVE (icontains) — não
+    entendia sinônimo nem reformulação ("removo um produto" não batia com
+    "baixa", por exemplo). Agora usa a IA pra entender de verdade a
+    pergunta, mas com uma trava rígida: ela só pode responder com base no
+    que está escrito na Central de Ajuda (ver responder_com_central_de_ajuda
+    em services.py — mesmo princípio do roteador de consulta de dados,
+    nunca texto livre da IA sozinha). A busca por palavra-chave antiga
+    fica como respaldo, só se a chamada à IA falhar por completo (Groq
+    fora do ar, por exemplo) — assim a consultora nunca fica sem resposta
+    nenhuma só porque um serviço externo caiu.
     """
     import re
     from django.db.models import Q
     from .models import HelpContent, HelpSearchLog
+    from .services import responder_com_central_de_ajuda
 
+    resultado_ia = responder_com_central_de_ajuda(query, store)
+
+    if resultado_ia.get('encontrou'):
+        primeira_fonte_id = resultado_ia['fontes'][0]['id']
+        HelpSearchLog.objects.create(
+            query=query[:300], matched_content_id=primeira_fonte_id, store=store,
+        )
+        return {
+            'encontrou': True,
+            'resposta': resultado_ia['resposta'],
+            'fontes': resultado_ia['fontes'],
+        }
+
+    # Respaldo — só entra aqui se a IA genuinamente não achou nada (ou
+    # falhou). Busca por palavra-chave, sem síntese, mostra os itens como
+    # cards em vez de resposta pronta.
     PALAVRAS_COMUNS = {
         'como', 'que', 'para', 'com', 'uma', 'um', 'de', 'da', 'do', 'das', 'dos',
         'no', 'na', 'nos', 'nas', 'os', 'as', 'meu', 'minha', 'meus', 'minhas',
@@ -229,7 +249,7 @@ def _buscar_ou_escalar(query, store):
     resultados = []
     if palavras:
         filtro = Q()
-        for palavra in palavras[:8]:  # limite pra não montar uma query gigante
+        for palavra in palavras[:8]:
             filtro |= Q(titulo__icontains=palavra) | Q(corpo__icontains=palavra)
         resultados = list(HelpContent.objects.filter(status='visivel').filter(filtro).distinct()[:3])
 
@@ -319,7 +339,14 @@ def chat_unified(request):
         if conv.status == 'ai_handling':
             resultado_busca = _buscar_ou_escalar(mensagem, store)
             if resultado_busca['encontrou']:
-                return Response({'tipo': 'ajuda_encontrada', 'resultados': resultado_busca['resultados'], 'conversation_id': str(conv.id)})
+                # ⚠️ _buscar_ou_escalar agora pode devolver dois formatos:
+                # {'resposta', 'fontes'} quando a IA entendeu e sintetizou
+                # (caminho novo), ou {'resultados'} quando caiu no respaldo
+                # por palavra-chave (Groq fora do ar, por exemplo). Repassa
+                # só as chaves que existirem.
+                payload = {'tipo': 'ajuda_encontrada', 'conversation_id': str(conv.id)}
+                payload.update({k: v for k, v in resultado_busca.items() if k in ('resposta', 'fontes', 'resultados')})
+                return Response(payload)
         return Response({
             'tipo': 'escalado', 'conversation_id': str(conv.id),
             'resposta': 'Recebido — a equipe te responde por aqui assim que possível 💜',
@@ -342,7 +369,9 @@ def chat_unified(request):
     # Não era sobre estoque/vendas da loja — tenta a Central de Ajuda.
     resultado = _buscar_ou_escalar(mensagem, store)
     if resultado['encontrou']:
-        return Response({'tipo': 'ajuda_encontrada', 'resultados': resultado['resultados']})
+        payload = {'tipo': 'ajuda_encontrada'}
+        payload.update({k: v for k, v in resultado.items() if k in ('resposta', 'fontes', 'resultados')})
+        return Response(payload)
 
     return Response({
         'tipo': 'escalado', 'conversation_id': resultado['conversation_id'],

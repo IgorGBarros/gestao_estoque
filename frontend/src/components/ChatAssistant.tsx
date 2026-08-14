@@ -185,7 +185,19 @@ export const ChatAssistant: React.FC = () => {
       if (dados.tipo === "consulta") {
         setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: dados.resposta, timestamp: new Date() }]);
       } else if (dados.tipo === "ajuda_encontrada") {
-        setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Encontrei isso que pode ajudar:", timestamp: new Date(), resultados: dados.resultados }]);
+        // ⚠️ Dois formatos possíveis: {resposta, fontes} quando a IA
+        // entendeu e sintetizou (caminho normal agora), ou {resultados}
+        // no respaldo por palavra-chave (só entra se a IA cair). No
+        // primeiro caso, a resposta JÁ é o texto — as fontes viram cards
+        // de "saiba mais", não a resposta em si.
+        if (dados.resposta) {
+          setMessages((prev) => [...prev, {
+            id: crypto.randomUUID(), role: "assistant", content: dados.resposta, timestamp: new Date(),
+            resultados: (dados.fontes || []).map((f: any) => ({ ...f, resumo: "Ver conteúdo completo" })),
+          }]);
+        } else {
+          setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Encontrei isso que pode ajudar:", timestamp: new Date(), resultados: dados.resultados }]);
+        }
       } else if (dados.tipo === "escalado") {
         setTicketId(dados.conversation_id);
         setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Encaminhei sua pergunta pra equipe — acompanhe a resposta no painel abaixo. 👇", timestamp: new Date() }]);
