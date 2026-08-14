@@ -115,17 +115,13 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  if (totalCount === 0) {
-    return (
-      <div
-        className="relative rounded-lg p-2 text-muted-foreground/60"
-        title="Nenhuma notificação no momento"
-        aria-label="Nenhuma notificação"
-      >
-        <Bell className="h-5 w-5" />
-      </div>
-    );
-  }
+  // ⚠️ CORREÇÃO: antes, com totalCount === 0, o componente retornava uma
+  // <div> sem onClick nenhum — nem botão de verdade. Isso deixava o sino
+  // completamente morto justo quando não tinha nada novo, impedindo até
+  // de abrir o painel pra ver o histórico (Promoções/Novidades/Suporte
+  // já mostram tudo, não só o que é novo — e o painel já tem um estado
+  // vazio próprio pra "Tudo em dia", com atalhos pra essas abas). O sino
+  // agora é sempre clicável, independente de ter algo novo ou não.
 
   const hasCritical = filteredCritical > 0 || subscriptionAlert?.expired === true;
 
@@ -136,17 +132,19 @@ export default function NotificationBell() {
         className="relative rounded-lg p-2 text-muted-foreground hover:bg-brand-soft hover:text-brand transition-colors"
       >
         <Bell className="h-5 w-5" />
-        <span
-          className={`absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
-            hasCritical
-              ? "bg-destructive"
-              : filteredMilestones.length > 0
-              ? "bg-brand"
-              : "bg-brand-rose"
-          }`}
-        >
-          {totalCount > 9 ? "9+" : totalCount}
-        </span>
+        {totalCount > 0 && (
+          <span
+            className={`absolute -right-0.5 -top-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
+              hasCritical
+                ? "bg-destructive"
+                : filteredMilestones.length > 0
+                ? "bg-brand"
+                : "bg-brand-rose"
+            }`}
+          >
+            {totalCount > 9 ? "9+" : totalCount}
+          </span>
+        )}
         {hasCritical && (
           <span className="absolute -right-0.5 -top-0.5 h-5 w-5 animate-ping rounded-full bg-destructive/40" />
         )}
