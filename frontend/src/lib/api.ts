@@ -562,6 +562,7 @@ export interface Profile {
   storefront_enabled: boolean;
   store_slug: string | null;
   plan: "free" | "pro";
+  onboarding_completed?: boolean;
   user?: { id: number; email: string; name?: string };
   stats?: {
     total_products: number;

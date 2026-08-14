@@ -200,24 +200,68 @@ def ajuda_list(request):
         for c in itens
     ])
 
+_FRASES_PEDE_HUMANO = [
+    'falar com atendente', 'falar com um atendente', 'falar com uma pessoa',
+    'falar com humano', 'falar com um humano', 'falar com alguém',
+    'atendimento humano', 'suporte humano', 'atendente humano',
+    'quero um humano', 'quero uma pessoa', 'quero falar com gente',
+    'pessoa de verdade', 'atendente de verdade', 'ser humano',
+    'não quero falar com robô', 'não quero falar com a ia',
+    'não quero falar com bot', 'não é a amorinha', 'chama o suporte',
+    'chamar o suporte', 'preciso de um atendente',
+]
+
+
+def _pede_humano_explicitamente(mensagem: str) -> bool:
+    """
+    Detecção rápida e determinística — de propósito NÃO usa IA aqui (seria
+    gastar uma chamada de LLM só pra reconhecer uma frase comum). Lista
+    fechada de expressões que só fazem sentido com essa intenção; evita
+    ficar genérico demais (ex: não reage a "atendente" sozinho, que
+    poderia aparecer numa pergunta sobre outra coisa).
+    """
+    texto = mensagem.lower()
+    return any(frase in texto for frase in _FRASES_PEDE_HUMANO)
+
+
 def _buscar_ou_escalar(query, store):
     """
     Núcleo compartilhado entre help_search (mantido por compatibilidade) e
-    chat_unified (novo) — busca em HelpContent, senão escala pra humano.
+    chat_unified — busca na Central de Ajuda, senão escala pra humano.
     Sempre loga em HelpSearchLog, ache ou não.
 
-    ⚠️ Busca por PALAVRAS-CHAVE, não pela frase inteira como substring — o
-    chat unificado manda a pergunta em linguagem natural completa (ex:
-    "como funciona a vitrine da minha loja"), e um icontains da FRASE
-    INTEIRA quase nunca bate contra um título curto como "Como funciona a
-    vitrine?" (o título não CONTÉM a pergunta completa). Em vez disso,
-    separa em palavras relevantes (ignora as muito curtas/comuns em
-    português) e busca conteúdo que contenha QUALQUER uma delas.
+    ⚠️ EVOLUÇÃO: antes era busca por PALAVRA-CHAVE (icontains) — não
+    entendia sinônimo nem reformulação ("removo um produto" não batia com
+    "baixa", por exemplo). Agora usa a IA pra entender de verdade a
+    pergunta, mas com uma trava rígida: ela só pode responder com base no
+    que está escrito na Central de Ajuda (ver responder_com_central_de_ajuda
+    em services.py — mesmo princípio do roteador de consulta de dados,
+    nunca texto livre da IA sozinha). A busca por palavra-chave antiga
+    fica como respaldo, só se a chamada à IA falhar por completo (Groq
+    fora do ar, por exemplo) — assim a consultora nunca fica sem resposta
+    nenhuma só porque um serviço externo caiu.
     """
     import re
     from django.db.models import Q
     from .models import HelpContent, HelpSearchLog
+    from .services import responder_com_central_de_ajuda
 
+    resultado_ia = responder_com_central_de_ajuda(query, store)
+
+    if resultado_ia.get('encontrou'):
+        primeira_fonte_id = resultado_ia['fontes'][0]['id']
+        HelpSearchLog.objects.create(
+            query=query[:300], matched_content_id=primeira_fonte_id, store=store,
+        )
+        return {
+            'encontrou': True,
+            'resposta': resultado_ia['resposta'],
+            'fontes': resultado_ia['fontes'],
+        }
+
+    # Respaldo — só entra aqui se a IA genuinamente não achou nada (ou
+    # falhou). Busca por palavra-chave, sem síntese, mostra os itens como
+    # cards em vez de resposta pronta.
     PALAVRAS_COMUNS = {
         'como', 'que', 'para', 'com', 'uma', 'um', 'de', 'da', 'do', 'das', 'dos',
         'no', 'na', 'nos', 'nas', 'os', 'as', 'meu', 'minha', 'meus', 'minhas',
@@ -229,7 +273,7 @@ def _buscar_ou_escalar(query, store):
     resultados = []
     if palavras:
         filtro = Q()
-        for palavra in palavras[:8]:  # limite pra não montar uma query gigante
+        for palavra in palavras[:8]:
             filtro |= Q(titulo__icontains=palavra) | Q(corpo__icontains=palavra)
         resultados = list(HelpContent.objects.filter(status='visivel').filter(filtro).distinct()[:3])
 
@@ -288,14 +332,19 @@ def chat_unified(request):
     O ÚNICO endpoint que o ChatAssistant.tsx chama agora — sem menu, sem a
     consultora escolher "consultar" ou "ajuda" antes. A ordem de decisão:
 
+    0. Se a mensagem pede humano EXPLICITAMENTE ("falar com atendente",
+       etc.), escala direto — sem tentar mais nada antes. Só a exceção
+       genuína (a IA não sabe responder) ou o pedido explícito escalam;
+       tudo o mais, a IA tenta responder de verdade.
     1. Se já existe conversation_id (a conversa já foi escalada nesta
        sessão), a mensagem vai direto pra ela — nunca tenta mais nada, a
        consultora já está falando com gente.
     2. Senão, tenta responder como CONSULTA de dados da própria loja
        (query_database_with_llm, o roteador de sempre da Amorinha).
     3. Se a resposta for EXATAMENTE FORA_DO_ESCOPO_MSG (o sinal de "isso
-       não é sobre estoque/vendas"), cai pro modo AJUDA: busca na Central
-       de Ajuda, e se não achar nada, escala pra humano automaticamente.
+       não é sobre estoque/vendas"), cai pro modo AJUDA: a IA tenta
+       responder com base na Central de Ajuda, e só escala pra humano se
+       genuinamente não achar nada (a exceção, não a regra).
     """
     from inventory.views import has_consent_for_purpose
     from .services import query_database_with_llm, FORA_DO_ESCOPO_MSG
@@ -309,6 +358,24 @@ def chat_unified(request):
         return Response({'error': 'message não pode ser vazia.'}, status=status.HTTP_400_BAD_REQUEST)
 
     conversation_id = request.data.get('conversation_id')
+
+    # ⚠️ NOVO: pedido EXPLÍCITO de humano — checado antes de qualquer outra
+    # coisa (não gasta chamada de IA pra reconhecer isso, é rápido e
+    # determinístico). Só entra aqui numa conversa NOVA (sem
+    # conversation_id ainda) — se já está escalada, a mensagem já vai
+    # direto pra lá de qualquer jeito, não precisa checar de novo.
+    if not conversation_id and _pede_humano_explicitamente(mensagem):
+        store = get_current_store(request.user)
+        if not store:
+            return Response({'error': 'Nenhuma loja associada a este usuário.'}, status=status.HTTP_400_BAD_REQUEST)
+        conv = SupportConversation.objects.create(
+            store=store, category='question', subject=mensagem[:200], status='escalated',
+        )
+        SupportMessage.objects.create(conversation=conv, sender='user', content=mensagem)
+        mensagem_escalada = 'Claro, já te encaminhei pra nossa equipe — elas te respondem por aqui 💜'
+        SupportMessage.objects.create(conversation=conv, sender='ai', content=mensagem_escalada)
+        return Response({'tipo': 'escalado', 'conversation_id': str(conv.id), 'resposta': mensagem_escalada})
+
     if conversation_id:
         conv = SupportConversation.objects.filter(id=conversation_id, store=store).first()
         if not conv:
@@ -319,7 +386,14 @@ def chat_unified(request):
         if conv.status == 'ai_handling':
             resultado_busca = _buscar_ou_escalar(mensagem, store)
             if resultado_busca['encontrou']:
-                return Response({'tipo': 'ajuda_encontrada', 'resultados': resultado_busca['resultados'], 'conversation_id': str(conv.id)})
+                # ⚠️ _buscar_ou_escalar agora pode devolver dois formatos:
+                # {'resposta', 'fontes'} quando a IA entendeu e sintetizou
+                # (caminho novo), ou {'resultados'} quando caiu no respaldo
+                # por palavra-chave (Groq fora do ar, por exemplo). Repassa
+                # só as chaves que existirem.
+                payload = {'tipo': 'ajuda_encontrada', 'conversation_id': str(conv.id)}
+                payload.update({k: v for k, v in resultado_busca.items() if k in ('resposta', 'fontes', 'resultados')})
+                return Response(payload)
         return Response({
             'tipo': 'escalado', 'conversation_id': str(conv.id),
             'resposta': 'Recebido — a equipe te responde por aqui assim que possível 💜',
@@ -342,7 +416,9 @@ def chat_unified(request):
     # Não era sobre estoque/vendas da loja — tenta a Central de Ajuda.
     resultado = _buscar_ou_escalar(mensagem, store)
     if resultado['encontrou']:
-        return Response({'tipo': 'ajuda_encontrada', 'resultados': resultado['resultados']})
+        payload = {'tipo': 'ajuda_encontrada'}
+        payload.update({k: v for k, v in resultado.items() if k in ('resposta', 'fontes', 'resultados')})
+        return Response(payload)
 
     return Response({
         'tipo': 'escalado', 'conversation_id': resultado['conversation_id'],
