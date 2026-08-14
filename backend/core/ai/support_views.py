@@ -200,6 +200,30 @@ def ajuda_list(request):
         for c in itens
     ])
 
+_FRASES_PEDE_HUMANO = [
+    'falar com atendente', 'falar com um atendente', 'falar com uma pessoa',
+    'falar com humano', 'falar com um humano', 'falar com alguém',
+    'atendimento humano', 'suporte humano', 'atendente humano',
+    'quero um humano', 'quero uma pessoa', 'quero falar com gente',
+    'pessoa de verdade', 'atendente de verdade', 'ser humano',
+    'não quero falar com robô', 'não quero falar com a ia',
+    'não quero falar com bot', 'não é a amorinha', 'chama o suporte',
+    'chamar o suporte', 'preciso de um atendente',
+]
+
+
+def _pede_humano_explicitamente(mensagem: str) -> bool:
+    """
+    Detecção rápida e determinística — de propósito NÃO usa IA aqui (seria
+    gastar uma chamada de LLM só pra reconhecer uma frase comum). Lista
+    fechada de expressões que só fazem sentido com essa intenção; evita
+    ficar genérico demais (ex: não reage a "atendente" sozinho, que
+    poderia aparecer numa pergunta sobre outra coisa).
+    """
+    texto = mensagem.lower()
+    return any(frase in texto for frase in _FRASES_PEDE_HUMANO)
+
+
 def _buscar_ou_escalar(query, store):
     """
     Núcleo compartilhado entre help_search (mantido por compatibilidade) e
@@ -308,14 +332,19 @@ def chat_unified(request):
     O ÚNICO endpoint que o ChatAssistant.tsx chama agora — sem menu, sem a
     consultora escolher "consultar" ou "ajuda" antes. A ordem de decisão:
 
+    0. Se a mensagem pede humano EXPLICITAMENTE ("falar com atendente",
+       etc.), escala direto — sem tentar mais nada antes. Só a exceção
+       genuína (a IA não sabe responder) ou o pedido explícito escalam;
+       tudo o mais, a IA tenta responder de verdade.
     1. Se já existe conversation_id (a conversa já foi escalada nesta
        sessão), a mensagem vai direto pra ela — nunca tenta mais nada, a
        consultora já está falando com gente.
     2. Senão, tenta responder como CONSULTA de dados da própria loja
        (query_database_with_llm, o roteador de sempre da Amorinha).
     3. Se a resposta for EXATAMENTE FORA_DO_ESCOPO_MSG (o sinal de "isso
-       não é sobre estoque/vendas"), cai pro modo AJUDA: busca na Central
-       de Ajuda, e se não achar nada, escala pra humano automaticamente.
+       não é sobre estoque/vendas"), cai pro modo AJUDA: a IA tenta
+       responder com base na Central de Ajuda, e só escala pra humano se
+       genuinamente não achar nada (a exceção, não a regra).
     """
     from inventory.views import has_consent_for_purpose
     from .services import query_database_with_llm, FORA_DO_ESCOPO_MSG
@@ -329,6 +358,24 @@ def chat_unified(request):
         return Response({'error': 'message não pode ser vazia.'}, status=status.HTTP_400_BAD_REQUEST)
 
     conversation_id = request.data.get('conversation_id')
+
+    # ⚠️ NOVO: pedido EXPLÍCITO de humano — checado antes de qualquer outra
+    # coisa (não gasta chamada de IA pra reconhecer isso, é rápido e
+    # determinístico). Só entra aqui numa conversa NOVA (sem
+    # conversation_id ainda) — se já está escalada, a mensagem já vai
+    # direto pra lá de qualquer jeito, não precisa checar de novo.
+    if not conversation_id and _pede_humano_explicitamente(mensagem):
+        store = get_current_store(request.user)
+        if not store:
+            return Response({'error': 'Nenhuma loja associada a este usuário.'}, status=status.HTTP_400_BAD_REQUEST)
+        conv = SupportConversation.objects.create(
+            store=store, category='question', subject=mensagem[:200], status='escalated',
+        )
+        SupportMessage.objects.create(conversation=conv, sender='user', content=mensagem)
+        mensagem_escalada = 'Claro, já te encaminhei pra nossa equipe — elas te respondem por aqui 💜'
+        SupportMessage.objects.create(conversation=conv, sender='ai', content=mensagem_escalada)
+        return Response({'tipo': 'escalado', 'conversation_id': str(conv.id), 'resposta': mensagem_escalada})
+
     if conversation_id:
         conv = SupportConversation.objects.filter(id=conversation_id, store=store).first()
         if not conv:
