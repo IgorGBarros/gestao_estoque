@@ -159,29 +159,28 @@ export default function NotificationBell() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.95 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-12 z-50 w-[calc(100vw-2rem)] max-w-[340px] rounded-xl border border-brand/15 bg-card shadow-xl"
+            className="absolute right-0 top-12 z-50 flex max-h-[min(80vh,32rem)] w-[calc(100vw-2rem)] max-w-[360px] flex-col overflow-hidden rounded-2xl border border-brand/15 bg-card shadow-2xl"
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-brand-peach/30 px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between border-b border-brand-peach/30 bg-gradient-to-r from-brand-soft to-transparent px-4 py-3">
               <div className="flex items-center gap-2">
-                <Bell className="h-4 w-4 text-brand" />
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand/15">
+                  <Bell className="h-4 w-4 text-brand" />
+                </div>
                 <h3 className="text-sm font-semibold text-foreground">Notificações</h3>
-                <span className="rounded-full bg-brand/10 px-2 py-0.5 text-[10px] font-bold text-brand">
-                  {totalCount}
-                </span>
               </div>
               <button
                 onClick={() => setOpen(false)}
-                className="rounded-lg p-1 text-muted-foreground hover:text-foreground"
+                className="rounded-lg p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Tabs — rolagem horizontal porque com Promoções/Novidades
-                juntas já são 5 abas, apertado demais pra dividir em partes
-                iguais (flex-1) num painel de 340px. */}
-            <div className="flex overflow-x-auto border-b border-brand-peach/30">
+                juntas já são 6 abas, apertado demais pra dividir em partes
+                iguais (flex-1) num painel deste tamanho. */}
+            <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-brand-peach/30 px-2 py-1.5">
               {([
                 { key: "all" as const, label: "Tudo", count: totalCount },
                 { key: "sales" as const, label: "Vendas", count: filteredSalesCount },
@@ -193,22 +192,22 @@ export default function NotificationBell() {
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`shrink-0 px-3 py-2 text-xs font-medium transition-colors ${
+                  className={`shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors ${
                     activeTab === tab.key
-                      ? "border-b-2 border-brand text-brand"
-                      : "text-brand-rose/70 hover:text-foreground"
+                      ? "bg-brand text-white"
+                      : "text-brand-rose/70 hover:bg-brand-soft hover:text-foreground"
                   }`}
                 >
                   {tab.label}{" "}
                   {tab.count > 0 && (
-                    <span className="ml-1 opacity-60">({tab.count})</span>
+                    <span className={activeTab === tab.key ? "opacity-80" : "opacity-60"}>({tab.count})</span>
                   )}
                 </button>
               ))}
             </div>
 
             {/* Content */}
-            <div className="max-h-96 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto">
               {/* Assinatura vencendo/vencida — sempre no topo */}
               {subscriptionAlert && (
                 <SubscriptionAlertItem
@@ -307,6 +306,37 @@ export default function NotificationBell() {
                 ))}
 
               {/* Empty states */}
+              {activeTab === "all" &&
+                !subscriptionAlert &&
+                crmItens.length === 0 &&
+                filteredMilestones.length === 0 &&
+                !filteredWeekly &&
+                filteredExpiry.length === 0 && (
+                  <div className="flex flex-col items-center gap-3 px-6 py-8 text-center">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-soft">
+                      <Bell className="h-5 w-5 text-brand" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Tudo em dia por aqui</p>
+                      <p className="mt-0.5 text-xs text-brand-rose/60">Nenhum alerta novo no momento</p>
+                    </div>
+                    {/* ⚠️ Não ter nada NOVO não significa não ter nada pra
+                        ver — Promoções, Novidades e Suporte guardam o
+                        histórico completo, sempre disponível mesmo sem
+                        item pendente. */}
+                    <div className="mt-1 flex flex-wrap justify-center gap-1.5">
+                      <button onClick={() => setActiveTab("promocoes")} className="rounded-full border border-brand/20 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand-soft">
+                        Ver promoções
+                      </button>
+                      <button onClick={() => setActiveTab("novidades")} className="rounded-full border border-brand/20 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand-soft">
+                        Ver novidades
+                      </button>
+                      <button onClick={() => setActiveTab("suporte")} className="rounded-full border border-brand/20 px-2.5 py-1 text-[11px] font-medium text-brand hover:bg-brand-soft">
+                        Minhas conversas
+                      </button>
+                    </div>
+                  </div>
+                )}
               {activeTab === "sales" && filteredSalesCount === 0 && (
                 <div className="px-4 py-8 text-center text-xs text-brand-rose/60">
                   Nenhuma notificação de vendas
