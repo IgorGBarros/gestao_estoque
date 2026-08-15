@@ -51,7 +51,14 @@ export function PlanProvider({ children }: { children: ReactNode }) {
     // repetidas dentro da janela não geram requisição de rede.
     profileApi.get().then((p) => {
       if (p) {
-        setPlan((p as any).plan === "pro" ? "pro" : "free");
+        // ⚠️ CORREÇÃO: checava (p as any).plan === "pro" direto — mesmo
+        // bug já corrigido em useFeatureGates.tsx. Uma usuária em teste
+        // grátis tem plan='free' (ainda não assinou) mas deveria contar
+        // como PRO enquanto o trial estiver ativo. subscription_status.
+        // has_pro_access já vem calculado certo do backend, considerando
+        // os dois casos (assinatura ativa OU trial ativo).
+        const temAcessoPro = (p as any).subscription_status?.has_pro_access === true || (p as any).plan === "pro";
+        setPlan(temAcessoPro ? "pro" : "free");
         const maxFromBackend = (p as any).current_limits?.max_products;
         if (typeof maxFromBackend === "number") setProductLimitState(maxFromBackend);
       }

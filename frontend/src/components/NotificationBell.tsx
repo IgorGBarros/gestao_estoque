@@ -283,7 +283,14 @@ export default function NotificationBell() {
                       alert={alert}
                       onNavigate={() => {
                         setOpen(false);
-                        navigate(`/products/${alert.id}/edit`);
+                        // ⚠️ CORREÇÃO: ia pra /products/{id}/edit — além de
+                        // não ser onde a pessoa espera ir (deveria cair no
+                        // Meu Estoque já mostrando o produto vencido, não
+                        // direto num formulário de edição), alert.id agora
+                        // é o ID do LOTE (correção do bug de alerta de
+                        // validade que nunca funcionava), não do produto —
+                        // essa rota nem carregaria o produto certo.
+                        navigate(`/products?search=${encodeURIComponent(alert.product_name)}`);
                       }}
                     />
                   ))}
@@ -452,7 +459,7 @@ function WeeklyInsightItem({
       </div>
       <div className="space-y-1.5">
         {insight.products.map((p, i) => (
-          <div key={p.barcode} className="flex items-center gap-2">
+          <div key={`${p.product_name}-${i}`} className="flex items-center gap-2">
             <span
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
                 i === 0

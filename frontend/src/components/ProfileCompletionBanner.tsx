@@ -12,8 +12,11 @@ export default function ProfileCompletionBanner() {
 
   useEffect(() => {
     if (!user) return;
-    // Don't show for demo user
-    if (user.id === "demo") return;
+    // ⚠️ CORREÇÃO: comparava user.id (number) com a string "demo" — essa
+    // comparação nunca podia ser verdadeira (tipos incompatíveis), então
+    // o banner nunca era escondido pra usuária demo de verdade. O ID real
+    // do usuário demo é 999 (ver signInDemo em useAuth.tsx).
+    if (user.id === 999) return;
 
     const dismissedAt = localStorage.getItem("profile_banner_dismissed");
     if (dismissedAt) {

@@ -13,7 +13,6 @@ export interface SalesMilestone {
 
 export interface TopProduct {
   product_name: string;
-  barcode: string;
   totalQty: number;
   totalRevenue: number;
 }
@@ -64,20 +63,26 @@ export function useSalesNotifications() {
   }, [user]);
 
   const { milestones, weeklyInsight, topProducts, totalSalesMonth, totalSalesWeek } = useMemo(() => {
-    const sales = movements.filter((m) => m.movement_type === "saida" && m.sale_type === "venda");
+    // ⚠️ CORREÇÃO: filtrava por m.movement_type === "saida" && m.sale_type
+    // === "venda" — NENHUM dos dois campos existe no Movement retornado
+    // pela API (o serializer real usa "transaction_type", com valores
+    // MAIÚSCULOS: "VENDA", "PRESENTE", etc). Isso fazia o filtro retornar
+    // SEMPRE vazio — a notificação de meta de venda nunca aparecia, não
+    // importa quanto a consultora vendesse.
+    const sales = movements.filter((m) => m.transaction_type === "VENDA");
 
-    // Monthly sales total
+    // ⚠️ CORREÇÃO: quantity é armazenado NEGATIVO numa saída (confirmado no
+    // backend: quantity=-batch_info['quantity_used']) — sem Math.abs, os
+    // totais de venda vinham negativos.
     const monthStart = getMonthStart();
     const monthlySales = sales.filter((m) => new Date(m.created_at) >= monthStart);
-    const totalSalesMonth = monthlySales.reduce((sum, m) => sum + (m.unit_price || 0) * m.quantity, 0);
+    const totalSalesMonth = monthlySales.reduce((sum, m) => sum + (m.unit_price || 0) * Math.abs(m.quantity), 0);
 
-    // Weekly sales
     const weekStart = getWeekStart();
     const weeklySales = sales.filter((m) => new Date(m.created_at) >= weekStart);
-    const totalSalesWeek = weeklySales.reduce((sum, m) => sum + (m.unit_price || 0) * m.quantity, 0);
+    const totalSalesWeek = weeklySales.reduce((sum, m) => sum + (m.unit_price || 0) * Math.abs(m.quantity), 0);
 
-    // All-time total for milestones
-    const allTimeSales = sales.reduce((sum, m) => sum + (m.unit_price || 0) * m.quantity, 0);
+    const allTimeSales = sales.reduce((sum, m) => sum + (m.unit_price || 0) * Math.abs(m.quantity), 0);
 
     // Dismissed milestones
     const dismissed = JSON.parse(localStorage.getItem("dismissed_milestones") || "[]") as number[];
@@ -94,24 +99,32 @@ export function useSalesNotifications() {
         icon: m.icon,
       }));
 
-    // Weekly top products (all exits this week, not just sales)
+    // ⚠️ CORREÇÃO: mesma causa — m.movement_type nunca existe. "Saída" de
+    // qualquer tipo (venda, presente, brinde, perda, uso próprio) sempre
+    // tem quantity negativo — é um jeito confiável de identificar saída
+    // sem depender de um campo que a API nunca manda.
     const weeklyExits = movements.filter(
-      (m) => m.movement_type === "saida" && new Date(m.created_at) >= weekStart
+      (m) => m.quantity < 0 && new Date(m.created_at) >= weekStart
     );
 
     const productMap = new Map<string, TopProduct>();
     for (const m of weeklyExits) {
-      const key = m.barcode || m.product_name;
+      // ⚠️ CORREÇÃO: usava m.barcode, que também não existe — sempre
+      // undefined, fazendo produtos diferentes colidirem na mesma chave
+      // do Map (e depois virarem key={p.barcode} duplicada no React, na
+      // tela do sino). Nome do produto é o único identificador real
+      // disponível nesse dado.
+      const key = m.product_name;
       const existing = productMap.get(key);
+      const qtd = Math.abs(m.quantity);
       if (existing) {
-        existing.totalQty += m.quantity;
-        existing.totalRevenue += (m.unit_price || 0) * m.quantity;
+        existing.totalQty += qtd;
+        existing.totalRevenue += (m.unit_price || 0) * qtd;
       } else {
         productMap.set(key, {
           product_name: m.product_name,
-          barcode: m.barcode,
-          totalQty: m.quantity,
-          totalRevenue: (m.unit_price || 0) * m.quantity,
+          totalQty: qtd,
+          totalRevenue: (m.unit_price || 0) * qtd,
         });
       }
     }

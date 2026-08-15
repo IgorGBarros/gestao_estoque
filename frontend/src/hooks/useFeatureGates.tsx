@@ -94,14 +94,21 @@ export function FeatureGatesProvider({ children }: { children: ReactNode }) {
     // Se não encontrou a gate, retorna false (seguro por padrão)
     if (!gate) return false;
     
-    // Se requer PRO, verifica plano do usuário
-    if (gate.requires_pro && user?.plan !== "pro") {
+    // ⚠️ CORREÇÃO: comparava user?.plan !== "pro" direto — isso ignora
+    // completamente o período de TESTE GRÁTIS. Uma usuária em trial tem
+    // plan='free' (ainda não assinou), mas deveria ter acesso PRO
+    // temporário mesmo assim. O backend já calcula isso corretamente em
+    // subscription_status.has_pro_access (leva em conta assinatura ativa
+    // E trial ativo) — só não estava sendo usado aqui. Essa mesma
+    // correção já tinha sido documentada como feita bem no início do
+    // projeto, mas não estava presente no código.
+    if (gate.requires_pro && !user?.subscription_status?.has_pro_access) {
       return false;
     }
     
     // Se tem flag enabled explícita, usa ela; senão, assume true
     return gate.enabled ?? true;
-  }, [gates, user?.plan]);
+  }, [gates, user?.subscription_status?.has_pro_access]);
 
   // ✅ Refresh manual
   const refresh = useCallback(async () => {

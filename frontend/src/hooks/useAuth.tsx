@@ -54,6 +54,24 @@ const optimizedProfileApi = {
 // ==========================================
 // ✅ INTERFACES
 // ==========================================
+// ⚠️ RESTAURADO: existia documentado como já feito bem no início do
+// projeto, mas não estava presente no código real — useFeatureGates.tsx
+// dependia deste campo pra saber se uma usuária em TESTE GRÁTIS (que
+// ainda não tem plan='pro', mas tem acesso PRO temporário) deveria ser
+// tratada como PRO ou não. Sem isso, toda usuária em trial ficava
+// bloqueada de recurso PRO durante o próprio período de teste.
+export interface SubscriptionStatus {
+  access_status?: "trial" | "trial_expired" | "subscribed" | "no_trial";
+  is_in_trial: boolean;
+  trial_days_left?: number;
+  trial_ends_at?: string | null;
+  has_pro_access: boolean;
+  status?: string;
+  days_until_expiry?: number;
+  is_active?: boolean;
+  expires_at?: string | null;
+}
+
 export interface User {
   id: number;
   email: string;
@@ -68,6 +86,7 @@ export interface User {
   can_add_products?: boolean;
   is_staff?: boolean;
   onboarding_completed?: boolean;
+  subscription_status?: SubscriptionStatus;
 }
 
 interface AuthContextData {
