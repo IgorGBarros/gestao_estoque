@@ -1,10 +1,11 @@
 // components/AdminThemeTab.tsx
 
 import { useState, useEffect } from 'react';
-import { Palette, Save, RotateCcw, Loader2, Eye } from 'lucide-react';
+import { Palette, Save, RotateCcw, Eye } from 'lucide-react';
 import { adminThemeApi, ThemeConfig } from '../lib/api';
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { useTheme } from '../contexts/ThemeContext';
+import { LoadingSpinner } from "./ui/loading-spinner";
 
 interface ColorField {
   key: keyof ThemeConfig;
@@ -86,7 +87,7 @@ export default function AdminThemeTab() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <LoadingSpinner size="page" color="muted" />
       </div>
     );
   }
@@ -115,7 +116,7 @@ export default function AdminThemeTab() {
             disabled={saving}
             className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 disabled:opacity-50"
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {saving ? <LoadingSpinner /> : <Save className="h-4 w-4" />}
             Salvar Tema
           </button>
         </div>

@@ -1,11 +1,12 @@
 // components/ProductSearchModal.tsx — VERSÃO REFATORADA COM PALETA DA MARCA
 import { useState, useEffect } from "react";
 import {
-  Search, X, Loader2, ChevronRight, Package, ImageOff,
+  Search, X, ChevronRight, Package, ImageOff,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { formatMoney } from "../lib/api";
 import { productService } from "../lib/productService";
+import { LoadingSpinner } from "./ui/loading-spinner";
 
 interface Product {
   id?: number;
@@ -134,7 +135,7 @@ export default function ProductSearchModal({ isOpen, onClose, onSelect }: Props)
           <div className="flex-1 overflow-y-auto p-2 space-y-2">
             {loading ? (
               <div className="py-10 flex justify-center text-brand">
-                <Loader2 className="animate-spin" />
+                <LoadingSpinner />
               </div>
             ) : error ? (
               <div className="py-10 text-center text-destructive text-sm">{error}</div>

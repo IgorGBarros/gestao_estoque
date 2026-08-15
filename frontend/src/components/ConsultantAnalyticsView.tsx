@@ -1,11 +1,12 @@
 import { useState } from "react";
 import {
   TrendingUp, TrendingDown, Package, ShoppingCart, AlertTriangle,
-  Activity, Star, Loader2, Brain, ChevronRight, BarChart3,
+  Activity, Star, Brain, ChevronRight, BarChart3,
   Skull, Clock, Zap, Target, Award,
 } from "lucide-react";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
+import { LoadingSpinner } from "./ui/loading-spinner";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
@@ -322,7 +323,7 @@ export default function ConsultantAnalyticsView({
           {insightsLoading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <Brain className="h-10 w-10 text-primary animate-pulse" />
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              <LoadingSpinner color="muted" />
               <p className="text-sm text-muted-foreground">A IA está analisando o comportamento...</p>
             </div>
           ) : insights ? (

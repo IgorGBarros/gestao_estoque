@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Package, BarChart3, Store, ScanBarcode, Shield, Sparkles,
   Check, X, ArrowRight, Star, TrendingDown, Bell, Bot, Crown, 
-  Zap, Users, CreditCard, Loader2,
+  Zap, Users, CreditCard,
 } from "lucide-react";
 import { api } from "../services/api"; 
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
@@ -12,6 +12,7 @@ import logoMinhaAmora from "../assets/logo-minhaamora.png";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
 import appPreview1 from "../assets/app-preview-1.png";
 import appPreview2 from "../assets/app-preview-2.png";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 const fadeUp = {
   hidden: { opacity: 0, y: 32 },
   visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.1, duration: 0.55, ease: [0.25, 0.46, 0.45, 0.94] as const } }),
@@ -24,15 +25,18 @@ const BRAND_COLORS = {
   text: '#2D292E'
 };
 
-const FREE_FEATURES = [
-  { text: "Até 20 produtos", ok: true },
+// ⚠️ CORREÇÃO: dizia "Até 20 produtos" e scanner liberado pro Free — não
+// é mais verdade. O plano free hoje representa "teste de 14 dias
+// acabou, sem assinar" (0 produtos, tudo travado) — quem está testando
+// tem acesso TOTAL durante os 14 dias, não um plano limitado permanente.
+// A mensagem certa é vender o teste completo, não um "free" pela metade.
+const TRIAL_FEATURES = [
+  { text: "Acesso completo por 14 dias", ok: true },
+  { text: "Produtos ilimitados durante o teste", ok: true },
   { text: "Scanner de código de barras", ok: true },
-  { text: "Controle básico de estoque", ok: true },
-  { text: "Vitrine digital personalizada", ok: false },
-  { text: "Scanner de validade (OCR)", ok: false },
-  { text: "Alertas inteligentes", ok: false },
-  { text: "Analytics avançado", ok: false },
-  { text: "Assistente Amorinha (IA)", ok: false },
+  { text: "Vitrine digital personalizada", ok: true },
+  { text: "Assistente Amorinha (IA)", ok: true },
+  { text: "Sem cartão de crédito", ok: true },
 ];
 
 const PRO_FEATURES = [
@@ -237,7 +241,7 @@ function CheckoutModal({ open, onClose }: CheckoutModalProps) {
           disabled={loading || !email} 
           className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#871745] py-3.5 text-sm font-bold text-white shadow-md shadow-[#871745]/20 hover:bg-[#871745]/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+          {loading ? <LoadingSpinner /> : <CreditCard className="h-4 w-4" />}
           {loading ? "Processando..." : "Ir para pagamento"}
         </button>
         
@@ -351,7 +355,7 @@ export default function LandingPage() {
               Começar grátis agora
               <ArrowRight className="h-4 w-4" />
             </button>
-            <p className="text-sm text-muted-foreground">Sem cartão de crédito · 100% gratuito</p>
+            <p className="text-sm text-muted-foreground">Sem cartão de crédito · 14 dias grátis</p>
           </motion.div>
           
           <motion.div 
@@ -600,7 +604,10 @@ export default function LandingPage() {
             </p>
           </motion.div>
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 max-w-2xl mx-auto">
-            {/* FREE */}
+            {/* TESTE GRÁTIS — 14 dias de acesso completo, não um plano
+                limitado permanente. O card antigo ("Free", R$0/mês,
+                lista de recursos pela metade) prometia algo que não
+                existe mais desde que o plano free virou "teste acabou". */}
             <motion.div 
               initial="hidden" 
               whileInView="visible" 
@@ -610,21 +617,21 @@ export default function LandingPage() {
               className="rounded-2xl border border-border bg-card p-6 space-y-5 hover:border-[#871745]/50 transition-colors"
             >
               <div>
-                <h3 className="font-display text-xl font-bold text-foreground">Free</h3>
-                <p className="text-xs text-muted-foreground mt-1">Para quem está começando</p>
+                <h3 className="font-display text-xl font-bold text-foreground">Teste Grátis</h3>
+                <p className="text-xs text-muted-foreground mt-1">14 dias, acesso completo</p>
               </div>
               <div className="flex items-baseline gap-1">
                 <span className="text-4xl font-display font-bold text-foreground">R$ 0</span>
-              <span className="text-sm text-muted-foreground">/mês</span>
+              <span className="text-sm text-muted-foreground">nos primeiros 14 dias</span>
               </div>
               <button 
                 onClick={() => navigate("/auth")} 
                 className="w-full rounded-xl border border-border py-3 text-sm font-semibold text-foreground hover:bg-[#FDF2F7] transition-colors"
               >
-                Criar Conta Grátis
+                Começar Teste Grátis
               </button>
               <ul className="space-y-2.5">
-                {FREE_FEATURES.map((f) => (
+                {TRIAL_FEATURES.map((f) => (
                   <li key={f.text} className="flex items-center gap-2 text-sm">
                     {f.ok ? (
                       <Check className="h-4 w-4 text-[#871745] shrink-0" />
@@ -637,6 +644,9 @@ export default function LandingPage() {
                   </li>
                 ))}
               </ul>
+              <p className="text-[11px] text-muted-foreground">
+                Depois dos 14 dias, assine o PRO pra continuar usando.
+              </p>
             </motion.div>
             
             {/* PRO */}

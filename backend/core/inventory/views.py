@@ -17,7 +17,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, action, authentication_classes
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, APIException
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -363,6 +363,41 @@ def get_current_store(user):
         return None
 
 
+class TrialExpiradoException(APIException):
+    """
+    Versão da trava de acesso PRO que pode ser LEVANTADA (raise) em vez de
+    retornada — necessária dentro de perform_create() e outros pontos do
+    ciclo de vida do DRF onde retornar uma Response direto não é possível
+    (o valor de retorno desses métodos é ignorado pelo framework).
+    """
+    status_code = 402  # Payment Required
+    default_detail = 'Seu período de teste acabou — assine o plano PRO pra continuar.'
+    default_code = 'TRIAL_EXPIRADO'
+
+
+def bloquear_sem_acesso_pro(store, acao: str):
+    """
+    Trava as ações de escrita "que fazem crescer o negócio" (cadastrar
+    produto, registrar venda) pra quem não tem acesso PRO — assinante
+    pago ou em teste ativo. Sem isso, o teste grátis nunca acaba de
+    verdade: a consultora continuaria usando o sistema no dia a dia sem
+    nunca precisar assinar.
+
+    Modelo somente-leitura (igual 1Password, Bluebeam, Sage quando a
+    assinatura vence): o histórico continua 100% visível — Meu Estoque,
+    Dashboard, Extrato nunca são bloqueados, só a criação de coisa nova.
+
+    Retorna uma Response de erro se deve bloquear, ou None se pode seguir.
+    """
+    if store.has_pro_access:
+        return None
+    return Response({
+        'error': 'TRIAL_EXPIRADO',
+        'message': f'Seu período de teste acabou — assine o plano PRO pra continuar {acao}.',
+        'action_blocked': acao,
+    }, status=402)  # 402 Payment Required — o código HTTP feito pra isso
+
+
 def ensure_user_has_store(user):
     """
     ✅ Garante que o usuário tenha uma loja, lançando erro se falhar
@@ -412,41 +447,21 @@ class TenantModelMixin:
     def perform_create(self, serializer):
         store = self.get_store()
 
+        # ⚠️ NOVO: TenantModelMixin é herdado por StockTransactionViewSet —
+        # o endpoint real (POST /transactions/) que WithdrawProduct.tsx usa
+        # pra registrar venda/baixa. SaleCheckoutView (que parecia ser o
+        # endpoint de venda) nunca chegou a ser registrada em rota
+        # nenhuma — código morto. Este é o ponto de verdade.
+        if not store.has_pro_access:
+            raise TrialExpiradoException(
+                detail='Seu período de teste acabou — assine o plano PRO pra continuar registrando movimentação.'
+            )
 
-        
         # VALIDAÇÃO DE LIMITE (novo)
         if hasattr(self, 'check_plan_limits'):
             self.check_plan_limits(store)
         
         serializer.save(store=store)
-    
-    def check_plan_limits(self, store):
-        """Valida limites do plano antes de criar"""
-        if not store.can_add_products:
-            from rest_framework.exceptions import ValidationError
-            
-            config = store.plan_config
-            limit = config.max_products if config else 20
-            
-            raise ValidationError({
-                'error': 'PLAN_LIMIT_REACHED',
-                'message': f'Você atingiu o limite de {limit} produtos do plano {store.plan.upper()}.',
-                'current_plan': store.plan,
-                'current_count': store.product_count,
-                'limit': limit
-            })
-
-# Usar no ViewSet de produtos:
-class InventoryItemViewSet(TenantModelMixin, viewsets.ModelViewSet):
-    # ... seu código atual ...
-    
-    def create(self, request, *args, **kwargs):
-        """Override para validar limites"""
-        store = self.get_store()
-        self.check_plan_limits(store)  # Valida antes de criar
-        
-        return super().create(request, *args, **kwargs)
-
 
 # ==========================================
 # 1. VIEWSETS BASE (CRUD)
@@ -876,7 +891,17 @@ class StockEntryView(APIView):
                 "error": "Usuário não possui loja vinculada.",
                 "details": str(e)
             }, status=403)
-        
+
+        # ⚠️ NOVO: cadastro de produto era a ação que menos fazia sentido
+        # deixar sem trava — é justamente o que faz o teste grátis nunca
+        # acabar de verdade. StockEntryView é o endpoint real que
+        # AddProduct.tsx chama; a checagem que existia antes (em
+        # views.py, InventoryItemViewSet) nunca chegava a rodar de
+        # verdade, presa numa classe que nunca foi conectada.
+        bloqueio = bloquear_sem_acesso_pro(store, 'cadastrando produto novo')
+        if bloqueio:
+            return bloqueio
+
         # ✅ 2. Validar dados COM store no contexto (automático)
         serializer = StockEntrySerializer(
             data=request.data,
@@ -1083,6 +1108,17 @@ class SaleCheckoutView(APIView):
             
         data = serializer.validated_data
         store = get_current_store(request.user)
+
+        # ⚠️ NOVO: registrar venda era a outra ação sem trava nenhuma — e é
+        # a mais importante das duas, porque mesmo com cadastro de produto
+        # bloqueado, a consultora ainda conseguiria usar o sistema no dia
+        # a dia só vendendo o que já tinha cadastrado antes do teste
+        # acabar. Sem bloquear isso também, o teste grátis nunca termina
+        # de verdade na prática.
+        bloqueio = bloquear_sem_acesso_pro(store, 'registrando uma venda')
+        if bloqueio:
+            return bloqueio
+
         total_sale = 0
         
         try:
@@ -2626,7 +2662,15 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             store = ensure_user_has_store(request.user)
             if not store:
                 return Response({'error': 'Loja não encontrada para o usuário'}, status=400)
-            
+
+            # ⚠️ NOVO: este é o create() DE VERDADE usado por
+            # WithdrawProduct.tsx (POST /api/transactions/) — StockTransactionViewSet
+            # sobrescreve create() diretamente, então a checagem em
+            # TenantModelMixin.perform_create() nunca era alcançada aqui.
+            bloqueio = bloquear_sem_acesso_pro(store, 'registrando uma venda')
+            if bloqueio:
+                return bloqueio
+
             data = request.data.copy()
             print(f"🔄 CREATE - Dados recebidos: {data}")
             

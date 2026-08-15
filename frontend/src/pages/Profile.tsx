@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, User, Mail, Phone, Store, Crown, Calendar,
-  CreditCard, Save, Loader2, CheckCircle2, AlertTriangle, Copy, Check, ExternalLink,
+  CreditCard, Save, CheckCircle2, AlertTriangle, Copy, Check, ExternalLink,
   PlayCircle, BookOpen,
 } from "lucide-react";
 import { profileApi, Profile as ProfileType } from "../lib/api";
@@ -12,6 +12,7 @@ import { useAuth } from "../hooks/useAuth";
 import { usePlan } from "../hooks/usePlan";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { Badge } from "../components/ui/badge";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 // Extrai só o ID do vídeo (pra thumbnail) e a URL de embed (pra tocar).
 function youtubeId(url: string): string | null {
@@ -104,7 +105,7 @@ export default function Profile() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-brand" />
+        <LoadingSpinner size="page" color="brand" />
       </div>
     );
   }
@@ -424,7 +425,7 @@ export default function Profile() {
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <LoadingSpinner />
           ) : (
             <Save className="h-4 w-4" />
           )}

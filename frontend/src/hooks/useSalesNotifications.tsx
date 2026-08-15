@@ -84,12 +84,15 @@ export function useSalesNotifications() {
 
     const allTimeSales = sales.reduce((sum, m) => sum + (m.unit_price || 0) * Math.abs(m.quantity), 0);
 
-    // Dismissed milestones
-    const dismissed = JSON.parse(localStorage.getItem("dismissed_milestones") || "[]") as number[];
-
-    // Check milestones
+    // ⚠️ CORREÇÃO: antes filtrava aqui dentro por "dismissed_milestones"
+    // (localStorage próprio, separado) — isso REMOVIA o marco da lista
+    // pra sempre assim que dispensado, diferente do padrão "marca como
+    // lido" que promoções/novidades já usavam (mantém visível, só sai do
+    // contador). Agora devolve todos os marcos atingidos; quem decide
+    // "visto" ou não é o NotificationBell, com o mesmo mecanismo unificado
+    // usado pros outros tipos de notificação.
     const milestones: SalesMilestone[] = MILESTONES
-      .filter((m) => allTimeSales >= m.threshold && !dismissed.includes(m.threshold))
+      .filter((m) => allTimeSales >= m.threshold)
       .map((m) => ({
         id: `milestone-${m.threshold}`,
         type: "milestone" as const,
@@ -146,12 +149,6 @@ export function useSalesNotifications() {
     return { milestones, weeklyInsight, topProducts, totalSalesMonth, totalSalesWeek };
   }, [movements]);
 
-  const dismissMilestone = (threshold: number) => {
-    const dismissed = JSON.parse(localStorage.getItem("dismissed_milestones") || "[]") as number[];
-    dismissed.push(threshold);
-    localStorage.setItem("dismissed_milestones", JSON.stringify(dismissed));
-  };
-
   return {
     milestones,
     weeklyInsight,
@@ -159,7 +156,6 @@ export function useSalesNotifications() {
     totalSalesMonth,
     totalSalesWeek,
     loading,
-    dismissMilestone,
     notificationCount: milestones.length + (weeklyInsight ? 1 : 0),
   };
 }

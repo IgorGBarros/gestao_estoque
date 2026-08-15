@@ -1,11 +1,12 @@
 // src/components/admin/AdminSupportTab.tsx
 import { useState, useEffect } from "react";
-import { MessageCircle, Video, RefreshCw, Send, Loader2, Plus, Trash2, Pencil, User, ShieldCheck, Sparkles, X, BookOpen, HelpCircle, Newspaper, Search, AlertTriangle, Bot, CheckCircle2, Archive } from "lucide-react";
+import { MessageCircle, Video, RefreshCw, Send, Plus, Trash2, Pencil, User, ShieldCheck, Sparkles, X, BookOpen, HelpCircle, Newspaper, Search, AlertTriangle, Bot, CheckCircle2, Archive } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
 import { adminApi } from "../../lib/api";
+import { LoadingSpinner } from "../ui/loading-spinner";
 
 interface Conversa {
   id: string;
@@ -231,7 +232,7 @@ function ConversationsPanel({ toast }: Props) {
 
           <div className="flex-1 overflow-y-auto">
             {loading ? (
-              <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+              <div className="flex justify-center py-8"><LoadingSpinner color="brand" /></div>
             ) : conversasFiltradas.length === 0 ? (
               <p className="px-3 py-8 text-center text-sm text-muted-foreground">Nenhuma conversa aqui.</p>
             ) : (
@@ -273,7 +274,7 @@ function ConversationsPanel({ toast }: Props) {
               Selecione uma conversa pra ver os detalhes
             </div>
           ) : carregandoDetalhe || !ativa ? (
-            <div className="flex flex-1 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+            <div className="flex flex-1 items-center justify-center"><LoadingSpinner color="brand" /></div>
           ) : (
             <>
               <div className="flex items-center justify-between border-b border-border p-3">
@@ -324,7 +325,7 @@ function ConversationsPanel({ toast }: Props) {
                     className="flex-1 rounded-lg border border-input px-3 py-2 text-sm outline-none focus:border-primary"
                   />
                   <Button onClick={responder} disabled={enviando || !resposta.trim()} size="sm">
-                    {enviando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    {enviando ? <LoadingSpinner /> : <Send className="h-4 w-4" />}
                   </Button>
                 </div>
               )}
@@ -454,7 +455,7 @@ function HelpContentPanel({ toast }: Props) {
         )}
 
         {loading ? (
-          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          <div className="flex justify-center py-8"><LoadingSpinner color="brand" /></div>
         ) : itens.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">Nenhum conteúdo aqui ainda.</p>
         ) : (
@@ -612,7 +613,7 @@ function HelpContentForm({ item, toast, onSalvo, onCancelar }: {
       </div>
 
       <Button onClick={salvar} disabled={salvando} size="sm" className="w-full">
-        {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : (item ? "Salvar alterações" : "Criar conteúdo")}
+        {salvando ? <LoadingSpinner /> : (item ? "Salvar alterações" : "Criar conteúdo")}
       </Button>
     </div>
   );

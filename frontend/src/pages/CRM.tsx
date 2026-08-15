@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Search, Download, MessageCircle, Trash2, Loader2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag, QrCode, CreditCard, Check, Sparkles } from "lucide-react";
+import { ArrowLeft, Search, Download, MessageCircle, Trash2, Users, CheckCircle2, XCircle, Eye, X, Package, ShoppingBag, QrCode, CreditCard, Check, Sparkles } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner";
 import { listLeads, getLead, deleteLead, exportLeadsCsv, downloadCsv, updateCartPayment, deleteCart, suggestMessage, MessageSuggestion, Lead, Purchase } from "../lib/leads";
 import { WA_TEMPLATES, WaTemplateKey, buildWaLink, renderTemplate } from "@/lib/whatsapp";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 export default function CRM() {
   const navigate = useNavigate();
@@ -373,7 +374,7 @@ export default function CRM() {
 
         {/* Table */}
         {loading ? (
-          <div className="flex justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+          <div className="flex justify-center py-20"><LoadingSpinner size="page" color="brand" /></div>
         ) : filtered.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border py-20 text-center text-sm text-muted-foreground">
             Nenhum lead encontrado.
@@ -470,7 +471,7 @@ export default function CRM() {
                           onClick={() => handleSugerirIA(l)}
                           className="h-8 w-8 text-brand"
                         >
-                          {carregandoSugestao === l.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                          {carregandoSugestao === l.id ? <LoadingSpinner /> : <Sparkles className="h-4 w-4" />}
                         </Button>
                         <Button
                           size="icon"
@@ -565,7 +566,7 @@ export default function CRM() {
 
             {carregandoDetalhe ? (
               <div className="flex justify-center py-8">
-                <Loader2 className="h-5 w-5 animate-spin text-brand" />
+                <LoadingSpinner color="brand" />
               </div>
             ) : !detalheAberto.purchase_history || detalheAberto.purchase_history.length === 0 ? (
               <div className="rounded-xl border border-border bg-card px-4 py-8 text-center">
@@ -689,7 +690,7 @@ export default function CRM() {
               disabled={excluindoPedido}
               onClick={confirmarExclusaoPedido}
             >
-              {excluindoPedido ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
+              {excluindoPedido ? <LoadingSpinner /> : "Excluir"}
             </Button>
           </div>
         </div>
@@ -723,7 +724,7 @@ export default function CRM() {
               disabled={excluindoCliente}
               onClick={confirmarExclusaoCliente}
             >
-              {excluindoCliente ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
+              {excluindoCliente ? <LoadingSpinner /> : "Excluir"}
             </Button>
           </div>
         </div>

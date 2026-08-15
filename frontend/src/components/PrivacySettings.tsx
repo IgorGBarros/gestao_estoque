@@ -4,7 +4,8 @@
 // e revogar (desmarcar) — com um aviso de consequências antes de revogar,
 // como exige a boa prática e o direito de revogação do art. 18, IX da LGPD.
 import { useState } from "react";
-import { Shield, Loader2 } from "lucide-react";
+import { Shield } from "lucide-react";
+import { LoadingSpinner } from "./ui/loading-spinner";
 import {
   useConsent,
   type Purpose,
@@ -97,7 +98,7 @@ export default function PrivacySettings() {
 
       {!initialized || loading ? (
         <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Carregando preferências...
+          <LoadingSpinner size="sm" /> Carregando preferências...
         </div>
       ) : (
         <div className="space-y-3">

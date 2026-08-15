@@ -62,8 +62,8 @@ function formatDate(dateStr: string): string {
 
 export default function NotificationBell() {
   const navigate = useNavigate();
-  const { alerts: expiryAlerts, totalCount: expiryCount, criticalCount } = useExpiryAlerts();
-  const { milestones, weeklyInsight, notificationCount: salesCount, dismissMilestone } = useSalesNotifications();
+  const { alerts: expiryAlerts } = useExpiryAlerts();
+  const { milestones, weeklyInsight, notificationCount: salesCount } = useSalesNotifications();
   const { subscriptionAlert } = useSubscriptionAlert();
   const { crmItens } = useCrmNotifications();
 
@@ -92,11 +92,22 @@ export default function NotificationBell() {
   const filteredMilestones = salesMilestonesEnabled ? milestones : [];
   const filteredWeekly = weeklyInsightsEnabled ? weeklyInsight : null;
   const filteredExpiry = expiryEnabled ? expiryAlerts : [];
-  const filteredExpiryCount = expiryEnabled ? expiryCount : 0;
-  const filteredCritical = expiryEnabled ? criticalCount : 0;
-  const filteredSalesCount = filteredMilestones.length + (filteredWeekly ? 1 : 0);
+
+  // ⚠️ NOVO: mesmo mecanismo que promoções/novidades já usavam, agora
+  // estendido pra marcos de venda, alerta de validade e resumo semanal —
+  // o contador (badge do sino) só soma o que ainda NÃO foi visto, mas a
+  // LISTA continua mostrando tudo (só com aparência diferente pro que já
+  // foi visto) — a notificação nunca some sozinha, só "desmarca".
+  const milestonesNaoVistos = filteredMilestones.filter((m) => !jaFoiVisto(m.id));
+  const expiryNaoVistos = filteredExpiry.filter((a) => !jaFoiVisto(`expiry-${a.id}`));
+  const weeklyNaoVisto = filteredWeekly && !jaFoiVisto(`weekly-${filteredWeekly.id}`) ? filteredWeekly : null;
+  const crmNaoVistos = crmItens.filter((item) => !jaFoiVisto(`crm-${item.key}`));
+
+  const filteredExpiryCount = expiryNaoVistos.length;
+  const filteredCritical = expiryNaoVistos.filter((a) => a.severity === "critical").length;
+  const filteredSalesCount = milestonesNaoVistos.length + (weeklyNaoVisto ? 1 : 0);
   const subCount = subscriptionAlert ? 1 : 0;
-  const totalCount = filteredExpiryCount + filteredSalesCount + subCount + crmItens.length + promocoesNaoVistas.length + novidadesNaoVistas.length + ticketsComRespostaNova.length;
+  const totalCount = filteredExpiryCount + filteredSalesCount + subCount + crmNaoVistos.length + promocoesNaoVistas.length + novidadesNaoVistas.length + ticketsComRespostaNova.length;
 
   // Ao abrir o painel, tudo que está em "Promoções"/"Novidades" nesse
   // momento vira "visto" — mesmo padrão de qualquer central de
@@ -241,21 +252,30 @@ export default function NotificationBell() {
                 <CrmNotificationItem
                   key={item.key}
                   item={item}
+                  visto={jaFoiVisto(`crm-${item.key}`)}
                   onNavigate={() => {
+                    marcarComoVisto([`crm-${item.key}`]);
                     setOpen(false);
                     navigate("/crm");
                   }}
+                  onDismiss={() => marcarComoVisto([`crm-${item.key}`])}
                 />
               ))}
 
-              {/* Milestones */}
+              {/* Milestones — "visto" e "dispensar" viram a mesma ação
+                  (marcar como visto): clicar pra ver OU fechar no X faz o
+                  marco sair do contador, mas ele continua na lista,
+                  visualmente mais apagado — não some pra sempre como
+                  antes (dismissMilestone excluía de vez). */}
               {(activeTab === "all" || activeTab === "sales") &&
                 filteredMilestones.map((m) => (
                   <MilestoneItem
                     key={m.id}
                     milestone={m}
-                    onDismiss={() => dismissMilestone(m.value)}
+                    visto={jaFoiVisto(m.id)}
+                    onDismiss={() => marcarComoVisto([m.id])}
                     onNavigate={() => {
+                      marcarComoVisto([m.id]);
                       setOpen(false);
                       navigate("/dashboard");
                     }}
@@ -266,10 +286,13 @@ export default function NotificationBell() {
               {(activeTab === "all" || activeTab === "sales") && filteredWeekly && (
                 <WeeklyInsightItem
                   insight={filteredWeekly}
+                  visto={jaFoiVisto(`weekly-${filteredWeekly.id}`)}
                   onNavigate={() => {
+                    marcarComoVisto([`weekly-${filteredWeekly.id}`]);
                     setOpen(false);
                     navigate("/dashboard");
                   }}
+                  onDismiss={() => marcarComoVisto([`weekly-${filteredWeekly.id}`])}
                 />
               )}
 
@@ -281,7 +304,9 @@ export default function NotificationBell() {
                     <ExpiryAlertItem
                       key={alert.id}
                       alert={alert}
+                      visto={jaFoiVisto(`expiry-${alert.id}`)}
                       onNavigate={() => {
+                        marcarComoVisto([`expiry-${alert.id}`]);
                         setOpen(false);
                         // ⚠️ CORREÇÃO: ia pra /products/{id}/edit — além de
                         // não ser onde a pessoa espera ir (deveria cair no
@@ -292,11 +317,12 @@ export default function NotificationBell() {
                         // essa rota nem carregaria o produto certo.
                         navigate(`/products?search=${encodeURIComponent(alert.product_name)}`);
                       }}
+                      onDismiss={() => marcarComoVisto([`expiry-${alert.id}`])}
                     />
                   ))}
 
               {/* Promoções — só na aba própria, "Tudo" não mistura (já
-                  existe o PromotionBanner pra dar destaque na tela
+                  existe o NoveltyCarouselModal pra dar destaque na tela
                   principal; aqui é o histórico completo). */}
               {activeTab === "promocoes" &&
                 promocoes.map((p) => <PromocaoItem key={p.id} promocao={p} />)}
@@ -410,10 +436,12 @@ export default function NotificationBell() {
 // ── Milestone Item ──
 function MilestoneItem({
   milestone,
+  visto,
   onDismiss,
   onNavigate,
 }: {
   milestone: SalesMilestone;
+  visto: boolean;
   onDismiss: () => void;
   onNavigate: () => void;
 }) {
@@ -421,7 +449,7 @@ function MilestoneItem({
   const Icon = IconMap[milestone.icon];
 
   return (
-    <div className="flex items-center gap-3 bg-brand-soft px-4 py-3 border-b border-brand-peach/30">
+    <div className={`flex items-center gap-3 bg-brand-soft px-4 py-3 border-b border-brand-peach/30 transition-colors ${visto ? "opacity-50" : ""}`}>
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10">
         <Icon className="h-5 w-5 text-brand" />
       </div>
@@ -429,13 +457,15 @@ function MilestoneItem({
         <p className="text-sm font-semibold text-foreground">{milestone.title}</p>
         <p className="text-[11px] text-brand-rose/70">{milestone.description}</p>
       </button>
-      <button
-        onClick={onDismiss}
-        className="shrink-0 rounded-lg p-1 text-brand-rose/50 hover:text-foreground"
-        title="Dispensar"
-      >
-        <X className="h-3.5 w-3.5" />
-      </button>
+      {!visto && (
+        <button
+          onClick={onDismiss}
+          className="shrink-0 rounded-lg p-1 text-brand-rose/50 hover:text-foreground"
+          title="Marcar como visto"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -443,16 +473,18 @@ function MilestoneItem({
 // ── Weekly Insight Item ──
 function WeeklyInsightItem({
   insight,
+  visto,
   onNavigate,
+  onDismiss,
 }: {
   insight: WeeklyInsight;
+  visto: boolean;
   onNavigate: () => void;
+  onDismiss: () => void;
 }) {
   return (
-    <button
-      onClick={onNavigate}
-      className="w-full border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50"
-    >
+    <div className={`flex w-full items-start gap-2 border-b border-brand-peach/30 px-4 py-3 transition-colors ${visto ? "opacity-50" : ""}`}>
+      <button onClick={onNavigate} className="min-w-0 flex-1 text-left hover:opacity-80">
       <div className="flex items-center gap-2 mb-2">
         <TrendingUp className="h-4 w-4 text-brand" />
         <span className="text-sm font-semibold text-foreground">{insight.title}</span>
@@ -483,32 +515,43 @@ function WeeklyInsightItem({
           </div>
         ))}
       </div>
-    </button>
+      </button>
+      {!visto && (
+        <button onClick={onDismiss} className="shrink-0 rounded-lg p-1 text-muted-foreground/50 hover:text-foreground" title="Marcar como visto">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
   );
 }
 
 // ── Expiry Alert Item ──
 function CrmNotificationItem({
-  item, onNavigate,
+  item, visto, onNavigate, onDismiss,
 }: {
   item: { tipo: string; titulo: string; descricao: string };
+  visto: boolean;
   onNavigate: () => void;
+  onDismiss: () => void;
 }) {
   const Icone = item.tipo === "novo_lead" ? Users
     : item.tipo === "aniversario" ? Cake
     : ShoppingBag;
   return (
-    <button
-      onClick={onNavigate}
-      className="flex w-full items-center gap-3 border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50"
-    >
-      <Icone className="h-4 w-4 shrink-0 text-brand" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">{item.titulo}</p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.descricao}</p>
-      </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-    </button>
+    <div className={`flex w-full items-center gap-3 border-b border-brand-peach/30 px-4 py-3 transition-colors ${visto ? "opacity-50" : ""}`}>
+      <button onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-3 text-left hover:opacity-80">
+        <Icone className="h-4 w-4 shrink-0 text-brand" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">{item.titulo}</p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.descricao}</p>
+        </div>
+      </button>
+      {!visto && (
+        <button onClick={onDismiss} className="shrink-0 rounded-lg p-1 text-muted-foreground/50 hover:text-foreground" title="Marcar como visto">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -560,52 +603,62 @@ function SubscriptionAlertItem({
 
 function ExpiryAlertItem({
   alert,
+  visto,
   onNavigate,
+  onDismiss,
 }: {
   alert: ExpiryAlert;
+  visto: boolean;
   onNavigate: () => void;
+  onDismiss: () => void;
 }) {
   const isCritical = alert.severity === "critical";
 
   return (
-    <button
-      onClick={onNavigate}
-      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50 ${
+    <div
+      className={`flex w-full items-center gap-3 px-4 py-3 transition-colors ${
         isCritical ? "bg-destructive/5" : "bg-brand-peach/20"
-      }`}
+      } ${visto ? "opacity-50" : ""}`}
     >
-      <div className="shrink-0">
-        {isCritical ? (
-          <AlertTriangle className="h-4 w-4 text-destructive" />
-        ) : (
-          <Clock className="h-4 w-4 text-brand-rose" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">
-          {alert.product_name}
-        </p>
-        <div className="mt-0.5 flex items-center gap-2">
-          <span
-            className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
-              isCritical
-                ? "bg-destructive/10 text-destructive border-destructive/20"
-                : "bg-brand-peach/40 text-brand-rose border-brand-peach"
-            }`}
-          >
-            {formatDaysLeft(alert.daysLeft)}
-          </span>
-          <span className="text-[10px] text-brand-rose/60">
-            {formatDate(alert.expiry_date)}
-          </span>
+      <button onClick={onNavigate} className="flex min-w-0 flex-1 items-center gap-3 text-left hover:opacity-80">
+        <div className="shrink-0">
+          {isCritical ? (
+            <AlertTriangle className="h-4 w-4 text-destructive" />
+          ) : (
+            <Clock className="h-4 w-4 text-brand-rose" />
+          )}
         </div>
-      </div>
-      <ChevronRight className="h-4 w-4 shrink-0 text-brand-rose/40" />
-    </button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {alert.product_name}
+          </p>
+          <div className="mt-0.5 flex items-center gap-2">
+            <span
+              className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
+                isCritical
+                  ? "bg-destructive/10 text-destructive border-destructive/20"
+                  : "bg-brand-peach/40 text-brand-rose border-brand-peach"
+              }`}
+            >
+              {formatDaysLeft(alert.daysLeft)}
+            </span>
+            <span className="text-[10px] text-brand-rose/60">
+              {formatDate(alert.expiry_date)}
+            </span>
+          </div>
+        </div>
+      </button>
+      {!visto && (
+        <button onClick={onDismiss} className="shrink-0 rounded-lg p-1 text-brand-rose/50 hover:text-foreground" title="Marcar como visto">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
   );
 }
 // ── Promoção Item ──
 function PromocaoItem({ promocao }: { promocao: Promocao }) {
+  const visto = jaFoiVisto(`promo-${promocao.id}`);
   const desconto =
     promocao.discount_percent > 0
       ? `${promocao.discount_percent}% OFF`
@@ -614,7 +667,7 @@ function PromocaoItem({ promocao }: { promocao: Promocao }) {
       : null;
 
   return (
-    <div className="flex items-start gap-3 border-b border-brand-peach/30 bg-brand-peach/10 px-4 py-3">
+    <div className={`flex items-start gap-3 border-b border-brand-peach/30 bg-brand-peach/10 px-4 py-3 transition-colors ${visto ? "opacity-50" : ""}`}>
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10">
         <Percent className="h-5 w-5 text-brand" />
       </div>
@@ -633,8 +686,9 @@ function PromocaoItem({ promocao }: { promocao: Promocao }) {
 
 // ── Novidade Item ──
 function NovidadeItem({ novidade, onNavigate }: { novidade: Novidade; onNavigate: () => void }) {
+  const visto = jaFoiVisto(`novidade-${novidade.id}`);
   return (
-    <button onClick={onNavigate} className="flex w-full items-start gap-3 border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50">
+    <button onClick={onNavigate} className={`flex w-full items-start gap-3 border-b border-brand-peach/30 px-4 py-3 text-left transition-colors hover:bg-brand-soft/50 ${visto ? "opacity-50" : ""}`}>
       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand/10">
         <Sparkles className="h-5 w-5 text-brand" />
       </div>

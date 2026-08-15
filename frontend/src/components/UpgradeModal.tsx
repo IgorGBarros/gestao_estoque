@@ -4,10 +4,11 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Lock, Zap, X, ScanBarcode, Camera, Store, MessageCircle,
-  BarChart3, Package, Loader2, ShieldCheck,
+  BarChart3, Package, ShieldCheck,
 } from "lucide-react";
 import { paymentsApi, plansApi } from "../lib/api";
 import { useToast } from "./ui/use-toast";
+import { LoadingSpinner } from "./ui/loading-spinner";
 
 interface UpgradeModalProps {
   isOpen: boolean;
@@ -152,7 +153,7 @@ export default function UpgradeModal({ isOpen, onClose, feature, description }: 
               >
                 {processing ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <LoadingSpinner />
                     Abrindo pagamento...
                   </>
                 ) : (

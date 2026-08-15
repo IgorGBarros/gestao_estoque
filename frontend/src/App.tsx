@@ -14,8 +14,8 @@ import { ThemeProvider } from "./hooks/useTheme";
 // Components
 import ProtectedRoute from "./components/ProtectedRoute";
 import ImpersonationBanner from "./components/ImpersonationBanner";
-import { TrialBanner } from "./components/TrailBanner";
-import { PromotionBanner } from "./components/PromotionBanner";
+import { TrialBanner, TrialExpiredScreen } from "./components/TrailBanner";
+import { NoveltyCarouselModal } from "./components/NoveltyCarouselModal";
 import { MaintenanceBanner } from "./components/MaintenanceBanner";
 // ✅ ErrorBoundary REMOVIDO
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
@@ -81,10 +81,6 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
     {/* Aviso de manutenção — vem antes da promoção de propósito: um alerta
         de possível instabilidade é mais importante que uma oferta. */}
     <MaintenanceBanner />
-    {/* Promoção ativa pra esta loja — segmento amplo ou selecionada
-        especificamente pelo admin. Sem isto, nenhuma promoção criada no
-        admin-panel jamais chegava até a consultora. */}
-    <PromotionBanner />
     <main className="flex-1">{children}</main>
   </div>
 );
@@ -134,6 +130,38 @@ function AuthConsentWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ⚠️ NOVO: escuta o evento 'trial-expired' (disparado pelo interceptor em
+// services/api.ts sempre que o backend recusa uma ação com 402
+// TRIAL_EXPIRADO — cadastrar produto ou registrar venda sem acesso PRO).
+// Mostra a tela dedicada (TrialExpiredScreen, já existia pronta, só
+// nunca tinha sido conectada em lugar nenhum) como modal, em vez da
+// consultora ver só um erro cru na tela onde estava.
+function TrialExpiredListener() {
+  const [aberto, setAberto] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setAberto(true);
+    window.addEventListener('trial-expired', handler);
+    return () => window.removeEventListener('trial-expired', handler);
+  }, []);
+
+  if (!aberto) return null;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4">
+      <div className="relative w-full max-w-md rounded-2xl bg-card shadow-2xl">
+        <button
+          onClick={() => setAberto(false)}
+          className="absolute right-3 top-3 rounded-lg p-1.5 text-muted-foreground hover:bg-secondary"
+        >
+          ✕
+        </button>
+        <TrialExpiredScreen />
+      </div>
+    </div>
+  );
+}
+
 const App = () => {
   return (
     // ✅ ErrorBoundary REMOVIDO - erros agora vão para o console/global handler
@@ -141,6 +169,7 @@ const App = () => {
       <ThemeProvider>
         <TooltipProvider>
           <Toaster />
+          <TrialExpiredListener />
           
           {/* ✅ BrowserRouter DEVE envolver AuthProvider para useNavigate funcionar */}
           <BrowserRouter>
@@ -149,6 +178,10 @@ const App = () => {
             
             <AuthProvider>
              <ConsentProvider>
+              {/* Carrossel de promoções/novidades — precisa de useAuth(),
+                  por isso mora aqui dentro, não lá em cima com o resto
+                  dos componentes globais que não dependem de sessão. */}
+              <NoveltyCarouselModal />
               {/* ✅ 2. Wrapper que só renderiza modal discreto APÓS auth em rotas protegidas */}
               <AuthConsentWrapper>
                 <PlanProvider>

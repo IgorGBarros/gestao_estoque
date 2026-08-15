@@ -2,12 +2,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Save, Loader2, LogOut, Sun, Moon, Monitor, Bell, } from "lucide-react";
-import { inventoryApi, movementsApi, InventoryItem, Movement } from "../lib/api";
+  ArrowLeft, Save, LogOut, Sun, Moon, Monitor, Bell, } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import PrivacySettings from "../components/PrivacySettings";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -28,7 +28,6 @@ export default function Settings() {
   const [notifPrefs, setNotifPrefs] = useState(() => ({
     sales_milestones: localStorage.getItem("notif_sales_milestones") !== "false",
     weekly_insights: localStorage.getItem("notif_weekly_insights") !== "false",
-    low_stock: localStorage.getItem("notif_low_stock") !== "false",
     expiry_alerts: localStorage.getItem("expiry_alert_enabled") !== "false",
   }));
 
@@ -60,18 +59,10 @@ export default function Settings() {
   };
 
   // ── Export CSV ──
-
-  const downloadFile = (content: string, filename: string) => {
-    const blob = new Blob(["\uFEFF" + content], {
-      type: "text/csv;charset=utf-8;",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  // ⚠️ CORREÇÃO: downloadFile existia mas nunca era chamada em lugar
+  // nenhum — resto de uma exportação CSV que nunca foi finalizada. Sem
+  // efeito nenhum na tela, só código morto. Removida (se quiser essa
+  // funcionalidade de verdade, é uma feature nova, não um bug).
 
   const themeOptions = [
     { value: "light" as const, icon: Sun, label: "Claro" },
@@ -152,11 +143,6 @@ export default function Settings() {
               desc: "Produtos mais vendidos da semana",
             },
             {
-              key: "low_stock" as const,
-              label: "Estoque Baixo",
-              desc: "Alerta quando produtos atingem quantidade mínima",
-            },
-            {
               key: "expiry_alerts" as const,
               label: "Validade Próxima",
               desc: "Destaque produtos próximos do vencimento",
@@ -225,7 +211,7 @@ export default function Settings() {
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50 transition-all active:scale-95"
         >
           {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <LoadingSpinner />
           ) : (
             <Save className="h-4 w-4" />
           )}

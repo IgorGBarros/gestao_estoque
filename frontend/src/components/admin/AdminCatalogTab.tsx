@@ -5,11 +5,12 @@
 // aplicar sozinho (só "muito alta" vira bar_code automaticamente — ver
 // admin_views.py). Aqui o admin confirma ou recusa cada um, rápido.
 import { useState, useEffect } from "react";
-import { Barcode, Check, X, RefreshCw, Loader2 } from "lucide-react";
+import { Barcode, Check, X, RefreshCw } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { adminApi } from "../../lib/api";
+import { LoadingSpinner } from "../ui/loading-spinner";
 
 interface Props {
   toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
@@ -128,7 +129,7 @@ export default function AdminCatalogTab({ toast }: Props) {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-primary" /></div>
+          <div className="flex justify-center py-8"><LoadingSpinner color="brand" /></div>
         ) : candidatos.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             Nenhum candidato esperando revisão — a fila está vazia.
@@ -167,7 +168,7 @@ export default function AdminCatalogTab({ toast }: Props) {
                     className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-300 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
                     title="Aprovar e aplicar no produto"
                   >
-                    {processando === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    {processando === c.id ? <LoadingSpinner /> : <Check className="h-4 w-4" />}
                   </button>
                 </div>
               </div>

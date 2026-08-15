@@ -11,8 +11,9 @@
 // endpoint nem inclui esses campos na resposta); o aviso aqui é para quem
 // olhar a tela entender o porquê, não para "esconder" algo que existe.
 import { useState, useEffect } from "react";
-import { Loader2, Users, ShieldCheck, TrendingUp, Repeat } from "lucide-react";
+import { Users, ShieldCheck, TrendingUp, Repeat } from "lucide-react";
 import { adminHealthApi } from "../../lib/api";
+import { LoadingSpinner } from "../ui/loading-spinner";
 
 const dinheiro = (v: number) =>
   (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -33,7 +34,7 @@ export default function CrmOverviewTab() {
   if (carregando) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-brand" />
+        <LoadingSpinner size="page" color="brand" />
       </div>
     );
   }

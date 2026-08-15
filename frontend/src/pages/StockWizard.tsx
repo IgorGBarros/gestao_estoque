@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ScanBarcode, Camera, Hash, DollarSign, ChevronRight, ChevronLeft,
-  Check, Loader2, X, Package,
+  Check, X, Package,
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
 import FuzzyMatchModal from "../components/FuzzyMatchModal";
@@ -15,6 +15,7 @@ import {
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from '../components/ui/use-toast';
 import { useStockEntry } from "../hooks/useStockEntry";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 const STEPS = [
   { id: "scan", label: "Escanear", icon: ScanBarcode },
@@ -329,7 +330,7 @@ export default function StockWizard() {
 
                   {lookupLoading && (
                     <div className="flex items-center justify-center gap-2 rounded-lg bg-brand/5 py-4 text-sm text-brand">
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <LoadingSpinner />
                       <span>Buscando produto...</span>
                     </div>
                   )}
@@ -493,7 +494,7 @@ export default function StockWizard() {
                     />
                     {ocrLoading && (
                       <div className="flex items-center justify-center gap-2 text-sm text-brand">
-                        <Loader2 className="h-4 w-4 animate-spin" /> Analisando
+                        <LoadingSpinner /> Analisando
                         imagem...
                       </div>
                     )}
@@ -803,7 +804,7 @@ export default function StockWizard() {
                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50"
               >
                 {loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <LoadingSpinner />
                 ) : (
                   <Check className="h-4 w-4" />
                 )}

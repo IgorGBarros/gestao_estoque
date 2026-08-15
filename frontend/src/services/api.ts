@@ -208,7 +208,19 @@ api.interceptors.response.use(
         window.dispatchEvent(new CustomEvent('consent-required'));
       }
     }
-    
+
+    // ⚠️ NOVO: 402 = ação bloqueada por teste expirado (StockEntryView e
+    // StockTransactionViewSet devolvem isso ao tentar cadastrar produto
+    // ou registrar venda sem acesso PRO). Sem isso, a consultora via só
+    // um erro cru na tela onde estava — agora mostra a tela dedicada
+    // (TrialExpiredScreen), com o caminho claro pra assinar.
+    if (status === 402) {
+      const data = error.response?.data as any;
+      if (data?.error === 'TRIAL_EXPIRADO') {
+        window.dispatchEvent(new CustomEvent('trial-expired', { detail: data }));
+      }
+    }
+
     // ✅ Tratamento de erro 404
     if (status === 404 && import.meta.env.DEV) {
       console.warn(`⚠️ Endpoint não encontrado: ${url}`);

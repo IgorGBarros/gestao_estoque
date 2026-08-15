@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ScanBarcode, Camera, DollarSign, ChevronRight, ChevronLeft,
-  Check, Loader2, X, Package, Search, Lock, ImageIcon, Clock,
+  Check, X, Package, Search, Lock, ImageIcon, Clock,
   CreditCard, AlertTriangle, Crown, RotateCcw, Home
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
@@ -17,6 +17,7 @@ import { useAuth } from "../hooks/useAuth";
 import { useFeatureGates } from "../hooks/useFeatureGates";
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import { useStockEntry } from "../hooks/useStockEntry";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 // ══════════════════════════════════════════
 // CONSTANTES
@@ -414,7 +415,7 @@ export default function AddProduct() {
         <div className="flex items-center gap-1.5">
           {limitsLoading ? (
             <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
-              <Loader2 size={10} className="animate-spin" />
+              <LoadingSpinner size="sm" />
               ...
             </span>
           ) : planLimits ? (
@@ -541,7 +542,7 @@ export default function AddProduct() {
                     />
                     {(lookupLoading || limitsLoading) && (
                       <p className="text-xs text-brand mt-1 animate-pulse flex items-center gap-1">
-                        <Loader2 size={12} className="animate-spin" />
+                        <LoadingSpinner size="sm" />
                         {limitsLoading ? "Verificando limites..." : "Buscando informações..."}
                       </p>
                     )}
@@ -602,7 +603,7 @@ export default function AddProduct() {
                         }`}
                       >
                         {limitsLoading ? (
-                          <Loader2 size={20} className="animate-spin" />
+                          <LoadingSpinner className="h-5 w-5" />
                         ) : !isLocked("barcode_scanner") ? (
                           <ScanBarcode size={20} />
                         ) : (
@@ -701,7 +702,7 @@ export default function AddProduct() {
 
                 {ocrLoading && (
                   <div className="flex items-center justify-center gap-2 text-sm text-brand">
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <LoadingSpinner />
                     Analisando imagem...
                   </div>
                 )}
@@ -987,7 +988,7 @@ export default function AddProduct() {
                 disabled={loading}
                 className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50 transition-all active:scale-95"
               >
-                {loading ? <Loader2 className="animate-spin" /> : <Check />} Confirmar
+                {loading ? <LoadingSpinner /> : <Check />} Confirmar
               </button>
             )}
           </div>

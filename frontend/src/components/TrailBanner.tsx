@@ -10,9 +10,33 @@ import { consentApi } from "../lib/api";
 
 export function TrialBanner() {
   const navigate = useNavigate();
-  const { isTrialing, isEnding, daysLeft, loading } = useTrial();
+  const { isTrialing, isExpired, isEnding, daysLeft, loading } = useTrial();
 
-  if (loading || !isTrialing) return null;
+  if (loading || (!isTrialing && !isExpired)) return null;
+
+  // ⚠️ NOVO: antes só mostrava a contagem regressiva ENQUANTO o teste
+  // estava ativo — quando acabava, o banner simplesmente sumia (isTrialing
+  // vira false) e não sobrava nenhum aviso visível de que o acesso ficou
+  // travado. Agora mostra um aviso persistente, mais forte, quando
+  // isExpired é true — igual ao padrão de mercado (1Password, Bluebeam):
+  // nunca deixa a pessoa "descobrir sozinha" tentando usar algo e
+  // tomando erro, sempre com um aviso ambiente primeiro.
+  if (isExpired) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-xs">
+        <span className="flex items-center gap-1.5 font-medium text-foreground">
+          <Lock className="h-3.5 w-3.5 shrink-0 text-destructive" />
+          Seu teste de 14 dias acabou — assine pra continuar cadastrando produto e vendendo
+        </span>
+        <button
+          onClick={() => navigate("/plans")}
+          className="shrink-0 rounded-lg bg-destructive px-3 py-1 font-semibold text-white hover:opacity-90"
+        >
+          Assinar agora
+        </button>
+      </div>
+    );
+  }
 
   const texto =
     daysLeft <= 1 ? "Seu teste termina hoje" : `Faltam ${daysLeft} dias de teste`;
