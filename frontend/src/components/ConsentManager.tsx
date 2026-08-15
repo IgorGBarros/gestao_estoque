@@ -28,6 +28,16 @@ const LABELS: Record<Purpose, { title: string; desc: string }> = {
     title: "Entrega do serviço",
     desc: "Processar seus dados de estoque, vendas e operação.",
   },
+  // ⚠️ CORREÇÃO: faltava esta entrada — desde que "legal_compliance" foi
+  // adicionada às finalidades essenciais (correção do bug de consentimento
+  // reaparecendo), este componente quebrava ao tentar montar a tela: ele
+  // percorre ESSENTIAL_PURPOSES e busca LABELS[finalidade] pra cada uma,
+  // e sem esta entrada o acesso batia em undefined.title, derrubando a
+  // tela de consentimento pra qualquer usuária nova.
+  legal_compliance: {
+    title: "Conformidade legal e fiscal",
+    desc: "Cumprir obrigações legais e fiscais aplicáveis ao seu negócio.",
+  },
   analytics: {
     title: "Análise de uso e melhorias",
     desc: "Métricas anônimas para evoluirmos o produto.",

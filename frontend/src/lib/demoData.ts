@@ -84,42 +84,42 @@ export const DEMO_INVENTORY: InventoryItem[] = [
 // ── Movements ──
 export const DEMO_MOVEMENTS: Movement[] = [
   // Entradas (últimos meses)
-  { id: "m1", product_id: "d1", batch_id: null, product_name: "Kaiak Tradicional Masculino 100ml", barcode: "7891033784561", movement_type: "entrada", quantity: 10, unit_price: 78.90, sale_type: null, notes: "Pedido ciclo 01/2026", profit: null, created_at: "2026-01-05T10:00:00Z" },
-  { id: "m2", product_id: "d2", batch_id: null, product_name: "Luna Intenso Feminino 50ml", barcode: "7891033619283", movement_type: "entrada", quantity: 5, unit_price: 115.00, sale_type: null, notes: "Pedido ciclo 01/2026", profit: null, created_at: "2026-01-05T10:05:00Z" },
-  { id: "m3", product_id: "d5", batch_id: null, product_name: "Lumina Shampoo Cabelos Lisos 300ml", barcode: "7891033047210", movement_type: "entrada", quantity: 15, unit_price: 18.00, sale_type: null, notes: "Pedido ciclo 02/2026", profit: null, created_at: "2026-02-03T09:00:00Z" },
-  { id: "m4", product_id: "d7", batch_id: null, product_name: "Ekos Castanha Sabonete Líquido 250ml", barcode: "7891033102301", movement_type: "entrada", quantity: 20, unit_price: 15.90, sale_type: null, notes: "Reposição", profit: null, created_at: "2026-02-10T11:00:00Z" },
-  { id: "m5", product_id: "d10", batch_id: null, product_name: "Natura Homem Desodorante Spray 100ml", barcode: "7891033065432", movement_type: "entrada", quantity: 30, unit_price: 14.00, sale_type: null, notes: "Pedido ciclo 03/2026", profit: null, created_at: "2026-03-01T08:30:00Z" },
-  { id: "m6", product_id: "d1", batch_id: null, product_name: "Kaiak Tradicional Masculino 100ml", barcode: "7891033784561", movement_type: "entrada", quantity: 5, unit_price: 78.90, sale_type: null, notes: "Reposição", profit: null, created_at: "2026-02-15T14:00:00Z" },
+  { id: "m1", product_name: "Kaiak Tradicional Masculino 100ml", transaction_type: "ENTRADA", quantity: 10, unit_price: 78.90, notes: "Pedido ciclo 01/2026", created_at: "2026-01-05T10:00:00Z" },
+  { id: "m2", product_name: "Luna Intenso Feminino 50ml", transaction_type: "ENTRADA", quantity: 5, unit_price: 115.00, notes: "Pedido ciclo 01/2026", created_at: "2026-01-05T10:05:00Z" },
+  { id: "m3", product_name: "Lumina Shampoo Cabelos Lisos 300ml", transaction_type: "ENTRADA", quantity: 15, unit_price: 18.00, notes: "Pedido ciclo 02/2026", created_at: "2026-02-03T09:00:00Z" },
+  { id: "m4", product_name: "Ekos Castanha Sabonete Líquido 250ml", transaction_type: "ENTRADA", quantity: 20, unit_price: 15.90, notes: "Reposição", created_at: "2026-02-10T11:00:00Z" },
+  { id: "m5", product_name: "Natura Homem Desodorante Spray 100ml", transaction_type: "ENTRADA", quantity: 30, unit_price: 14.00, notes: "Pedido ciclo 03/2026", created_at: "2026-03-01T08:30:00Z" },
+  { id: "m6", product_name: "Kaiak Tradicional Masculino 100ml", transaction_type: "ENTRADA", quantity: 5, unit_price: 78.90, notes: "Reposição", created_at: "2026-02-15T14:00:00Z" },
 
   // Saídas — vendas
-  { id: "m10", product_id: "d1", batch_id: null, product_name: "Kaiak Tradicional Masculino 100ml", barcode: "7891033784561", movement_type: "saida", quantity: 3, unit_price: 134.90, sale_type: "venda", notes: "Cliente Maria", profit: 168.00, created_at: "2026-01-20T16:00:00Z" },
-  { id: "m11", product_id: "d2", batch_id: null, product_name: "Luna Intenso Feminino 50ml", barcode: "7891033619283", movement_type: "saida", quantity: 2, unit_price: 189.90, sale_type: "venda", notes: "Cliente Ana", profit: 149.80, created_at: "2026-01-25T18:00:00Z" },
-  { id: "m12", product_id: "d5", batch_id: null, product_name: "Lumina Shampoo Cabelos Lisos 300ml", barcode: "7891033047210", movement_type: "saida", quantity: 3, unit_price: 32.90, sale_type: "venda", notes: null, profit: 44.70, created_at: "2026-02-14T10:00:00Z" },
-  { id: "m13", product_id: "d7", batch_id: null, product_name: "Ekos Castanha Sabonete Líquido 250ml", barcode: "7891033102301", movement_type: "saida", quantity: 5, unit_price: 28.90, sale_type: "venda", notes: "Kit presente", profit: 65.00, created_at: "2026-02-20T15:00:00Z" },
-  { id: "m14", product_id: "d10", batch_id: null, product_name: "Natura Homem Desodorante Spray 100ml", barcode: "7891033065432", movement_type: "saida", quantity: 5, unit_price: 24.90, sale_type: "venda", notes: null, profit: 54.50, created_at: "2026-03-05T12:00:00Z" },
-  { id: "m15", product_id: "d8", batch_id: null, product_name: "Essencial Exclusivo Masculino 100ml", barcode: "7891033088901", movement_type: "saida", quantity: 1, unit_price: 159.90, sale_type: "venda", notes: "Cliente João", profit: 64.90, created_at: "2026-03-03T17:00:00Z" },
+  { id: "m10", product_name: "Kaiak Tradicional Masculino 100ml", transaction_type: "VENDA", quantity: -3, unit_price: 134.90, notes: "Cliente Maria", created_at: "2026-01-20T16:00:00Z" },
+  { id: "m11", product_name: "Luna Intenso Feminino 50ml", transaction_type: "VENDA", quantity: -2, unit_price: 189.90, notes: "Cliente Ana", created_at: "2026-01-25T18:00:00Z" },
+  { id: "m12", product_name: "Lumina Shampoo Cabelos Lisos 300ml", transaction_type: "VENDA", quantity: -3, unit_price: 32.90, notes: null, created_at: "2026-02-14T10:00:00Z" },
+  { id: "m13", product_name: "Ekos Castanha Sabonete Líquido 250ml", transaction_type: "VENDA", quantity: -5, unit_price: 28.90, notes: "Kit presente", created_at: "2026-02-20T15:00:00Z" },
+  { id: "m14", product_name: "Natura Homem Desodorante Spray 100ml", transaction_type: "VENDA", quantity: -5, unit_price: 24.90, notes: null, created_at: "2026-03-05T12:00:00Z" },
+  { id: "m15", product_name: "Essencial Exclusivo Masculino 100ml", transaction_type: "VENDA", quantity: -1, unit_price: 159.90, notes: "Cliente João", created_at: "2026-03-03T17:00:00Z" },
 
   // Vendas esta semana (2-8 março 2026) para milestone + top semanal
-  { id: "m16", product_id: "d1", batch_id: null, product_name: "Kaiak Tradicional Masculino 100ml", barcode: "7891033784561", movement_type: "saida", quantity: 2, unit_price: 134.90, sale_type: "venda", notes: "Cliente Pedro", profit: 112.00, created_at: "2026-03-06T10:00:00Z" },
-  { id: "m17", product_id: "d2", batch_id: null, product_name: "Luna Intenso Feminino 50ml", barcode: "7891033619283", movement_type: "saida", quantity: 1, unit_price: 189.90, sale_type: "venda", notes: "Cliente Carla", profit: 74.90, created_at: "2026-03-06T15:00:00Z" },
-  { id: "m18", product_id: "d4", batch_id: null, product_name: "Chronos Antissinais 30+ 30ml", barcode: "7891033032891", movement_type: "saida", quantity: 3, unit_price: 94.90, sale_type: "venda", notes: "Kit skincare", profit: 119.70, created_at: "2026-03-07T09:30:00Z" },
-  { id: "m19", product_id: "d12", batch_id: null, product_name: "Ekos Maracujá Óleo Trifásico 150ml", barcode: "7891033043210", movement_type: "saida", quantity: 2, unit_price: 54.90, sale_type: "venda", notes: null, profit: 45.80, created_at: "2026-03-07T14:00:00Z" },
-  { id: "m24", product_id: "d11", batch_id: null, product_name: "Aquarela Shine Gloss Labial 5ml", barcode: "7891033054321", movement_type: "saida", quantity: 4, unit_price: 29.90, sale_type: "venda", notes: "Revenda loja", profit: 55.60, created_at: "2026-03-08T08:00:00Z" },
-  { id: "m25", product_id: "d7", batch_id: null, product_name: "Ekos Castanha Sabonete Líquido 250ml", barcode: "7891033102301", movement_type: "saida", quantity: 3, unit_price: 28.90, sale_type: "venda", notes: null, profit: 39.00, created_at: "2026-03-08T11:00:00Z" },
+  { id: "m16", product_name: "Kaiak Tradicional Masculino 100ml", transaction_type: "VENDA", quantity: -2, unit_price: 134.90, notes: "Cliente Pedro", created_at: "2026-03-06T10:00:00Z" },
+  { id: "m17", product_name: "Luna Intenso Feminino 50ml", transaction_type: "VENDA", quantity: -1, unit_price: 189.90, notes: "Cliente Carla", created_at: "2026-03-06T15:00:00Z" },
+  { id: "m18", product_name: "Chronos Antissinais 30+ 30ml", transaction_type: "VENDA", quantity: -3, unit_price: 94.90, notes: "Kit skincare", created_at: "2026-03-07T09:30:00Z" },
+  { id: "m19", product_name: "Ekos Maracujá Óleo Trifásico 150ml", transaction_type: "VENDA", quantity: -2, unit_price: 54.90, notes: null, created_at: "2026-03-07T14:00:00Z" },
+  { id: "m24", product_name: "Aquarela Shine Gloss Labial 5ml", transaction_type: "VENDA", quantity: -4, unit_price: 29.90, notes: "Revenda loja", created_at: "2026-03-08T08:00:00Z" },
+  { id: "m25", product_name: "Ekos Castanha Sabonete Líquido 250ml", transaction_type: "VENDA", quantity: -3, unit_price: 28.90, notes: null, created_at: "2026-03-08T11:00:00Z" },
 
   // Saídas — outros tipos
-  { id: "m20", product_id: "d3", batch_id: null, product_name: "Tododia Cereja e Avelã 400ml", barcode: "7891033055012", movement_type: "saida", quantity: 2, unit_price: null, sale_type: "presente", notes: "Presente mãe", profit: null, created_at: "2026-02-08T09:00:00Z" },
-  { id: "m21", product_id: "d6", batch_id: null, product_name: "Faces Batom Hidratante Rosa Natural", barcode: "7891033091205", movement_type: "saida", quantity: 1, unit_price: null, sale_type: "brinde", notes: "Brinde cliente fiel", profit: null, created_at: "2026-01-30T14:00:00Z" },
-  { id: "m22", product_id: "d9", batch_id: null, product_name: "Plant Gel de Limpeza Facial 150ml", barcode: "7891033076543", movement_type: "saida", quantity: 1, unit_price: null, sale_type: "uso_proprio", notes: null, profit: null, created_at: "2026-02-22T08:00:00Z" },
-  { id: "m23", product_id: "d11", batch_id: null, product_name: "Aquarela Shine Gloss Labial 5ml", barcode: "7891033054321", movement_type: "saida", quantity: 1, unit_price: null, sale_type: "perda", notes: "Produto danificado", profit: null, created_at: "2026-03-01T11:00:00Z" },
+  { id: "m20", product_name: "Tododia Cereja e Avelã 400ml", transaction_type: "PRESENTE", quantity: -2, unit_price: null, notes: "Presente mãe", created_at: "2026-02-08T09:00:00Z" },
+  { id: "m21", product_name: "Faces Batom Hidratante Rosa Natural", transaction_type: "BRINDE", quantity: -1, unit_price: null, notes: "Brinde cliente fiel", created_at: "2026-01-30T14:00:00Z" },
+  { id: "m22", product_name: "Plant Gel de Limpeza Facial 150ml", transaction_type: "USO_PROPRIO", quantity: -1, unit_price: null, notes: null, created_at: "2026-02-22T08:00:00Z" },
+  { id: "m23", product_name: "Aquarela Shine Gloss Labial 5ml", transaction_type: "PERDA", quantity: -1, unit_price: null, notes: "Produto danificado", created_at: "2026-03-01T11:00:00Z" },
 
   // Entradas mais antigas para gráfico de timeline
-  { id: "m30", product_id: "d3", batch_id: null, product_name: "Tododia Cereja e Avelã 400ml", barcode: "7891033055012", movement_type: "entrada", quantity: 10, unit_price: 22.50, sale_type: null, notes: "Pedido ciclo 10/2025", profit: null, created_at: "2025-10-15T08:00:00Z" },
-  { id: "m31", product_id: "d4", batch_id: null, product_name: "Chronos Antissinais 30+ 30ml", barcode: "7891033032891", movement_type: "entrada", quantity: 8, unit_price: 55.00, sale_type: null, notes: "Pedido ciclo 11/2025", profit: null, created_at: "2025-11-20T07:00:00Z" },
-  { id: "m32", product_id: "d6", batch_id: null, product_name: "Faces Batom Hidratante Rosa Natural", barcode: "7891033091205", movement_type: "entrada", quantity: 6, unit_price: 12.50, sale_type: null, notes: null, profit: null, created_at: "2025-09-08T11:00:00Z" },
-  { id: "m33", product_id: "d12", batch_id: null, product_name: "Ekos Maracujá Óleo Trifásico 150ml", barcode: "7891033043210", movement_type: "entrada", quantity: 10, unit_price: 32.00, sale_type: null, notes: "Pedido ciclo 12/2025", profit: null, created_at: "2025-12-01T10:00:00Z" },
-  { id: "m34", product_id: "d4", batch_id: null, product_name: "Chronos Antissinais 30+ 30ml", barcode: "7891033032891", movement_type: "saida", quantity: 2, unit_price: 94.90, sale_type: "venda", notes: null, profit: 79.80, created_at: "2025-12-20T16:00:00Z" },
-  { id: "m35", product_id: "d12", batch_id: null, product_name: "Ekos Maracujá Óleo Trifásico 150ml", barcode: "7891033043210", movement_type: "saida", quantity: 3, unit_price: 54.90, sale_type: "venda", notes: "Cliente Paula", profit: 68.70, created_at: "2026-01-15T13:00:00Z" },
+  { id: "m30", product_name: "Tododia Cereja e Avelã 400ml", transaction_type: "ENTRADA", quantity: 10, unit_price: 22.50, notes: "Pedido ciclo 10/2025", created_at: "2025-10-15T08:00:00Z" },
+  { id: "m31", product_name: "Chronos Antissinais 30+ 30ml", transaction_type: "ENTRADA", quantity: 8, unit_price: 55.00, notes: "Pedido ciclo 11/2025", created_at: "2025-11-20T07:00:00Z" },
+  { id: "m32", product_name: "Faces Batom Hidratante Rosa Natural", transaction_type: "ENTRADA", quantity: 6, unit_price: 12.50, notes: null, created_at: "2025-09-08T11:00:00Z" },
+  { id: "m33", product_name: "Ekos Maracujá Óleo Trifásico 150ml", transaction_type: "ENTRADA", quantity: 10, unit_price: 32.00, notes: "Pedido ciclo 12/2025", created_at: "2025-12-01T10:00:00Z" },
+  { id: "m34", product_name: "Chronos Antissinais 30+ 30ml", transaction_type: "VENDA", quantity: -2, unit_price: 94.90, notes: null, created_at: "2025-12-20T16:00:00Z" },
+  { id: "m35", product_name: "Ekos Maracujá Óleo Trifásico 150ml", transaction_type: "VENDA", quantity: -3, unit_price: 54.90, notes: "Cliente Paula", created_at: "2026-01-15T13:00:00Z" },
 ];
 
 // ── Profile ──
@@ -135,14 +135,14 @@ export const DEMO_PROFILE: Profile = {
 // ── Batches ──
 export const DEMO_BATCHES: Record<string, InventoryBatch[]> = {
   d1: [
-    { id: "b1", inventory_item_id: "d1", quantity: 7, cost_price: 78.90, expiry_date: "2026-08-15", expiry_photo_url: null, created_at: "2026-01-05T10:00:00Z" },
-    { id: "b2", inventory_item_id: "d1", quantity: 5, cost_price: 78.90, expiry_date: "2026-11-20", expiry_photo_url: null, created_at: "2026-02-15T14:00:00Z" },
+    { id: "b1", batch_code: "LOTE-B1", quantity: 7, cost_price: 78.90, expiration_date: "2026-08-15", created_at: "2026-01-05T10:00:00Z" },
+    { id: "b2", batch_code: "LOTE-B2", quantity: 5, cost_price: 78.90, expiration_date: "2026-11-20", created_at: "2026-02-15T14:00:00Z" },
   ],
   d2: [
-    { id: "b3", inventory_item_id: "d2", quantity: 8, cost_price: 115.00, expiry_date: "2027-01-10", expiry_photo_url: null, created_at: "2025-12-05T09:30:00Z" },
+    { id: "b3", batch_code: "LOTE-B3", quantity: 8, cost_price: 115.00, expiration_date: "2027-01-10", created_at: "2025-12-05T09:30:00Z" },
   ],
   d8: [
-    { id: "b4", inventory_item_id: "d8", quantity: 4, cost_price: 95.00, expiry_date: "2027-06-01", expiry_photo_url: null, created_at: "2025-12-12T15:00:00Z" },
+    { id: "b4", batch_code: "LOTE-B4", quantity: 4, cost_price: 95.00, expiration_date: "2027-06-01", created_at: "2025-12-12T15:00:00Z" },
   ],
 };
 

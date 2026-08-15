@@ -452,7 +452,7 @@ function WeeklyInsightItem({
       </div>
       <div className="space-y-1.5">
         {insight.products.map((p, i) => (
-          <div key={p.barcode} className="flex items-center gap-2">
+          <div key={`${p.product_name}-${i}`} className="flex items-center gap-2">
             <span
               className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
                 i === 0
