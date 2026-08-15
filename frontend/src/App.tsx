@@ -15,7 +15,7 @@ import { ThemeProvider } from "./hooks/useTheme";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ImpersonationBanner from "./components/ImpersonationBanner";
 import { TrialBanner, TrialExpiredScreen } from "./components/TrailBanner";
-import { PromotionBanner } from "./components/PromotionBanner";
+import { NoveltyCarouselModal } from "./components/NoveltyCarouselModal";
 import { MaintenanceBanner } from "./components/MaintenanceBanner";
 // ✅ ErrorBoundary REMOVIDO
 import { CookieConsentBanner } from "./components/CookieConsentBanner";
@@ -81,10 +81,6 @@ const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
     {/* Aviso de manutenção — vem antes da promoção de propósito: um alerta
         de possível instabilidade é mais importante que uma oferta. */}
     <MaintenanceBanner />
-    {/* Promoção ativa pra esta loja — segmento amplo ou selecionada
-        especificamente pelo admin. Sem isto, nenhuma promoção criada no
-        admin-panel jamais chegava até a consultora. */}
-    <PromotionBanner />
     <main className="flex-1">{children}</main>
   </div>
 );
@@ -182,6 +178,10 @@ const App = () => {
             
             <AuthProvider>
              <ConsentProvider>
+              {/* Carrossel de promoções/novidades — precisa de useAuth(),
+                  por isso mora aqui dentro, não lá em cima com o resto
+                  dos componentes globais que não dependem de sessão. */}
+              <NoveltyCarouselModal />
               {/* ✅ 2. Wrapper que só renderiza modal discreto APÓS auth em rotas protegidas */}
               <AuthConsentWrapper>
                 <PlanProvider>

@@ -1263,7 +1263,7 @@ export default function AdminPanel() {
           {/* ⚠️ Rolagem horizontal, não grid de colunas fixas — com 10
               abas agora, um número fixo de colunas sempre acaba quebrando
               de novo a cada aba nova adicionada. */}
-          <TabsList className="flex w-full gap-1 overflow-x-auto">
+          <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
             <TabsTrigger value="dashboard" className="flex shrink-0 items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Dashboard
