@@ -1,6 +1,6 @@
 // pages/ProductList.tsx — VERSÃO FINAL COM PALETA COMPLETA MINHA AMORA
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Plus, Search, Edit2, Package, ArrowLeft, Scale, Loader2,
   AlertTriangle, Clock, ChevronDown, ChevronUp, X, BookOpen, ZoomIn, Calendar,
@@ -94,10 +94,15 @@ export default function ProductList() {
   };
 
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
   const [inventory, setInventory] = useState<any[]>([]);
-  const [search, setSearch] = useState("");
+  // ⚠️ NOVO: lê ?search=... da URL — permite que outra tela (ex: clicar
+  // num alerta de validade no sino) chegue aqui já filtrado no produto
+  // certo, em vez de cair numa lista genérica que a pessoa tem que
+  // procurar manualmente.
+  const [search, setSearch] = useState(() => searchParams.get("search") || "");
   const [filterStock, setFilterStock] = useState<StockFilter>("COM_ESTOQUE");
   const [loading, setLoading] = useState(true);
 

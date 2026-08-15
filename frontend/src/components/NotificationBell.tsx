@@ -283,7 +283,14 @@ export default function NotificationBell() {
                       alert={alert}
                       onNavigate={() => {
                         setOpen(false);
-                        navigate(`/products/${alert.id}/edit`);
+                        // ⚠️ CORREÇÃO: ia pra /products/{id}/edit — além de
+                        // não ser onde a pessoa espera ir (deveria cair no
+                        // Meu Estoque já mostrando o produto vencido, não
+                        // direto num formulário de edição), alert.id agora
+                        // é o ID do LOTE (correção do bug de alerta de
+                        // validade que nunca funcionava), não do produto —
+                        // essa rota nem carregaria o produto certo.
+                        navigate(`/products?search=${encodeURIComponent(alert.product_name)}`);
                       }}
                     />
                   ))}
