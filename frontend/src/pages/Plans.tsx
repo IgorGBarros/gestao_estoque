@@ -17,14 +17,18 @@ type BillingCycle = "monthly" | "yearly";
 const DEFAULT_MONTHLY_PRICE = 39.9;
 const DEFAULT_YEARLY_PRICE = 399.0;
 
+// ⚠️ CORREÇÃO: dizia "Até 50 produtos" com scanner/relatórios liberados —
+// não é mais verdade. O plano free hoje é o estado "teste de 14 dias
+// acabou, sem assinar": praticamente tudo trava, só o histórico
+// continua visível. É importante mostrar isso honestamente aqui — quem
+// está vendo esta tela pode estar decidindo se assina exatamente agora.
 const FREE_FEATURES = [
-  { text: "Até 50 produtos", included: true },
-  { text: "Cadastro e baixa de estoque", included: true },
-  { text: "Relatórios básicos", included: true },
+  { text: "Ver histórico (estoque, vendas, extrato)", included: true },
+  { text: "Cadastrar produto novo", included: false },
+  { text: "Registrar venda", included: false },
   { text: "Vitrine online", included: false },
-  { text: "Scanner de validade (OCR)", included: false },
+  { text: "Scanner de código de barras", included: false },
   { text: "Alertas de vencimento", included: false },
-  { text: "Histórico completo", included: false },
   { text: "Analytics avançado", included: false },
   { text: "Assistente IA", included: false },
 ];
@@ -181,12 +185,14 @@ export default function Plans() {
             PLANS GRID
             ══════════════════════════════════════════ */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* FREE Plan */}
+          {/* FREE Plan — na prática, é o estado "teste acabou", não um
+              plano que alguém escolhe. A cópia precisa deixar isso claro
+              pra quem está vendo essa tela justamente por causa disso. */}
           <div className="rounded-2xl border border-border bg-card p-6 space-y-5">
             <div>
-              <h2 className="font-display text-xl font-bold text-foreground">Free</h2>
+              <h2 className="font-display text-xl font-bold text-foreground">Sem assinatura</h2>
               <p className="text-xs text-muted-foreground mt-1">
-                Para começar a organizar seu estoque
+                O que fica disponível sem o plano PRO
               </p>
             </div>
             <div className="flex items-baseline gap-1">
@@ -360,8 +366,8 @@ export default function Plans() {
               a: "Assim que o pagamento é confirmado, o PRO é liberado automaticamente. Pix e cartão costumam confirmar na hora; boleto leva de 1 a 3 dias úteis para compensar.",
             },
             {
-              q: "E se eu ultrapassar 50 produtos no Free?",
-              a: "Você precisará remover produtos ou fazer upgrade para o PRO para adicionar novos.",
+              q: "O que acontece quando meu teste de 14 dias acaba?",
+              a: "Seus produtos, vendas e histórico continuam salvos — nada é apagado. Mas cadastrar produto novo e registrar venda ficam bloqueados até você assinar o PRO.",
             },
           ].map((faq) => (
             <div key={faq.q} className="rounded-xl border border-border bg-card p-4">
