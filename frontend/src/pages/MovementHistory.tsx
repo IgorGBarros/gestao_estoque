@@ -3,13 +3,14 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowUpCircle, ArrowDownCircle, Search, Package,
-  ChevronDown, ChevronUp, Calendar, Calculator, Download, Loader2,
+  ChevronDown, ChevronUp, Calendar, Calculator, Download,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { movementsApi, formatMoney, movementsReportApi } from "../lib/api";
 import { formatDateLocal } from "../lib/dateUtils";
 import { btn } from "../lib/ui";
 import { useAuth } from "../hooks/useAuth";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 const TYPE_LABELS: Record<string, { label: string; emoji: string }> = {
   VENDA: { label: "Venda", emoji: "💰" },
@@ -130,7 +131,7 @@ export default function MovementHistory() {
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-brand" />
+        <LoadingSpinner size="page" color="brand" />
       </div>
     );
   }
@@ -162,7 +163,7 @@ export default function MovementHistory() {
             title="Baixar relatório de movimentação"
           >
             {baixandoRel ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <LoadingSpinner size="sm" />
             ) : (
               <Download className="h-3.5 w-3.5" />
             )}

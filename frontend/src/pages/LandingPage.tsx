@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Package, BarChart3, Store, ScanBarcode, Shield, Sparkles,
   Check, X, ArrowRight, Star, TrendingDown, Bell, Bot, Crown, 
-  Zap, Users, CreditCard, Loader2,
+  Zap, Users, CreditCard,
 } from "lucide-react";
 import { api } from "../services/api"; 
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
@@ -12,6 +12,7 @@ import logoMinhaAmora from "../assets/logo-minhaamora.png";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
 import appPreview1 from "../assets/app-preview-1.png";
 import appPreview2 from "../assets/app-preview-2.png";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 const fadeUp = {
   hidden: { opacity: 0, y: 32 },
   visible: (i = 0) => ({ opacity: 1, y: 0, transition: { delay: i * 0.1, duration: 0.55, ease: [0.25, 0.46, 0.45, 0.94] as const } }),
@@ -240,7 +241,7 @@ function CheckoutModal({ open, onClose }: CheckoutModalProps) {
           disabled={loading || !email} 
           className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#871745] py-3.5 text-sm font-bold text-white shadow-md shadow-[#871745]/20 hover:bg-[#871745]/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+          {loading ? <LoadingSpinner /> : <CreditCard className="h-4 w-4" />}
           {loading ? "Processando..." : "Ir para pagamento"}
         </button>
         

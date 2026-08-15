@@ -1,11 +1,12 @@
 // pages/Auth.tsx — VERSÃO COM LGPD E SEGURANÇA
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Mail, Lock, User, Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { Mail, Lock, User, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { useConsent, PURPOSES } from "../hooks/useConsent"; // ✅ Import correto
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 // Versão do termo de consentimento (mudar quando atualizar a política)
 const CONSENT_VERSION = "v1.0_2026-05";
@@ -154,7 +155,7 @@ export default function Auth() {
           className="flex w-full items-center justify-center gap-3 rounded-xl border border-border bg-card py-3 text-sm font-medium text-foreground shadow-sm transition-all hover:shadow-md active:scale-[0.98] disabled:opacity-50"
         >
           {googleLoading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <LoadingSpinner />
           ) : (
             <svg className="h-5 w-5" viewBox="0 0 24 24">
               <path
@@ -315,7 +316,7 @@ export default function Auth() {
             disabled={loading || (!isLogin && !consentAccepted)} // ✅ Desabilita se não aceitou
             className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-bold text-white shadow-lg shadow-brand/25 transition-all hover:opacity-90 hover:shadow-brand/40 active:scale-[0.98] disabled:opacity-50"
           >
-            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+            {loading && <LoadingSpinner />}
             {isLogin ? "Entrar" : "Criar Conta"}
           </button>
         </form>

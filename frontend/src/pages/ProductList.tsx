@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Plus, Search, Edit2, Package, ArrowLeft, Scale, Loader2,
+  Plus, Search, Edit2, Package, ArrowLeft, Scale,
   AlertTriangle, Clock, ChevronDown, ChevronUp, X, BookOpen, ZoomIn, Calendar,
   TrendingUp, TrendingDown, Download } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -12,6 +12,7 @@ import { btn } from "../lib/ui";
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import StockAdjustmentModal from "../components/StockAdjustmentModal";
 import ProductSearchModal from "../components/ProductSearchModal";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 function getStockStatus(qty: number, min: number): { label: string; color: string } {
   if (qty <= 0)
@@ -222,7 +223,7 @@ export default function ProductList() {
               title="Baixar relatório de estoque"
             >
               {baixandoRel ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <LoadingSpinner />
               ) : (
                 <Download className="h-4 w-4" />
               )}
@@ -299,7 +300,7 @@ export default function ProductList() {
         <div className="space-y-3">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 text-brand">
-              <Loader2 className="animate-spin w-8 h-8 mb-4" />
+              <LoadingSpinner size="page" className="mb-4" />
               <p className="text-sm font-medium text-brand-rose">Carregando estoque...</p>
             </div>
           ) : filtered.length === 0 ? (

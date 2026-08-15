@@ -10,7 +10,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  TrendingUp, TrendingDown, Wallet, Crown, Loader2, AlertTriangle, ArrowLeft,
+  TrendingUp, TrendingDown, Wallet, Crown, AlertTriangle, ArrowLeft,
   ArrowDownRight, ArrowUpRight, Trophy, Package, BarChart3, Receipt,
   ChevronDown, ChevronUp,
 } from "lucide-react";
@@ -25,6 +25,7 @@ import PeriodoSelect from "../components/PeriodoSelect";
 import type { PeriodoRelatorio, IntervaloDatas } from "../lib/api";
 import { btn } from "../lib/ui";
 import { queryPeriodo } from "../lib/api";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 type Aba = "relatorios" | "mei";
 
@@ -95,7 +96,7 @@ export default function Dashboard() {
   if (gatesLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-brand" />
+        <LoadingSpinner size="page" color="brand" />
       </div>
     );
   }
@@ -178,7 +179,7 @@ export default function Dashboard() {
 
           {carregando ? (
             <div className="flex justify-center py-16">
-              <Loader2 className="h-6 w-6 animate-spin text-brand" />
+              <LoadingSpinner size="page" color="brand" />
             </div>
           ) : !dados ? (
             <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">

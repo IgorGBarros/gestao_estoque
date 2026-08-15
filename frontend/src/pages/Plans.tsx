@@ -3,12 +3,13 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Crown, Check, X, Sparkles,
-  CreditCard, QrCode, Barcode, ShieldCheck, Loader2,
+  CreditCard, QrCode, Barcode, ShieldCheck,
 } from "lucide-react";
 import { usePlan } from "../hooks/usePlan";
 import { useAuth } from "../hooks/useAuth";
 import { plansApi, paymentsApi } from "../lib/api";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 type BillingCycle = "monthly" | "yearly";
 
@@ -289,7 +290,7 @@ export default function Plans() {
             >
               {processing ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <LoadingSpinner />
                   Abrindo pagamento...
                 </>
               ) : (

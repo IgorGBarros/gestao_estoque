@@ -6,11 +6,12 @@
 // estoque gera saída. Isso elimina o erro de "esqueci de lançar" e mantém a
 // tela compreensível para quem não é da área contábil.
 import { useState, useEffect } from "react";
-import { TrendingUp, TrendingDown, Wallet, Download, AlertTriangle, Loader2 } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, Download, AlertTriangle } from "lucide-react";
 import { meiApi, type MeiSummary, type PeriodoRelatorio, type IntervaloDatas } from "../lib/api";
 import { btn } from "../lib/ui";
 import PeriodoSelect from "./PeriodoSelect";
 import { useToast } from "./ui/use-toast";
+import { LoadingSpinner } from "./ui/loading-spinner";
 
 const dinheiro = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -58,7 +59,7 @@ export default function MeiCashFlow() {
   if (carregando) {
     return (
       <div className="flex items-center justify-center rounded-xl border border-border bg-card py-10">
-        <Loader2 className="h-5 w-5 animate-spin text-brand" />
+        <LoadingSpinner color="brand" />
       </div>
     );
   }
@@ -181,7 +182,7 @@ export default function MeiCashFlow() {
       >
         {baixando ? (
           <>
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <LoadingSpinner />
             Gerando...
           </>
         ) : (

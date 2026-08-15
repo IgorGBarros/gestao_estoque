@@ -4,10 +4,11 @@ import { useToast } from "@/components/ui/use-toast"
 import { adminApi } from "../../lib/api";
 import {
   AlertTriangle, Bell, Check, CheckCircle, CreditCard, ExternalLink,
-  Globe, Key, Loader2, Plus, RefreshCw, Save, Settings2, Shield,
+  Globe, Key, Plus, RefreshCw, Save, Settings2, Shield,
   ToggleLeft, ToggleRight, Trash2, Wifi, WifiOff, XCircle, Copy, Zap,
 } from "lucide-react";
 import { Badge } from "../ui/badge";
+import { LoadingSpinner } from "../ui/loading-spinner";
 
 // ==========================================
 // INTERFACES
@@ -361,7 +362,7 @@ export default function PaymentGatewaysTab() {
                 </Badge>
               ) : connectionTest.status === "testing" ? (
                 <Badge variant="secondary">
-                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  <LoadingSpinner size="sm" className="mr-1" />
                   Testando...
                 </Badge>
               ) : (
@@ -526,7 +527,7 @@ export default function PaymentGatewaysTab() {
               className="flex items-center gap-2 bg-primary text-white px-5 py-2.5 rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {testingConnection ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <LoadingSpinner />
               ) : (
                 <Wifi className="h-4 w-4" />
               )}

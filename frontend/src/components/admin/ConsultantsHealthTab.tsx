@@ -7,9 +7,10 @@
 // estão vendendo, quais estão paradas e quais precisam de ajuda.
 import { useState, useEffect } from "react";
 import {
-  Loader2, TrendingUp, Users, AlertTriangle, Wallet, ArrowUpDown,
+  TrendingUp, Users, AlertTriangle, Wallet, ArrowUpDown,
 } from "lucide-react";
 import { adminHealthApi, type ConsultantHealth } from "../../lib/api";
+import { LoadingSpinner } from "../ui/loading-spinner";
 
 const dinheiro = (v: number) =>
   (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -36,7 +37,7 @@ export default function ConsultantsHealthTab() {
   if (carregando) {
     return (
       <div className="flex justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-brand" />
+        <LoadingSpinner size="page" color="brand" />
       </div>
     );
   }

@@ -2,11 +2,12 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Save, Loader2, LogOut, Sun, Moon, Monitor, Bell, } from "lucide-react";
+  ArrowLeft, Save, LogOut, Sun, Moon, Monitor, Bell, } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "../hooks/useTheme";
 import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
 import PrivacySettings from "../components/PrivacySettings";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 export default function Settings() {
   const navigate = useNavigate();
@@ -210,7 +211,7 @@ export default function Settings() {
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-50 transition-all active:scale-95"
         >
           {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <LoadingSpinner />
           ) : (
             <Save className="h-4 w-4" />
           )}

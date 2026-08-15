@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, ScanBarcode, Save, Loader2, Search, Calendar,
+  ArrowLeft, ScanBarcode, Save, Search, Calendar,
   Package, ImageIcon, ChevronDown, ChevronUp, Info, Layers,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
@@ -12,6 +12,7 @@ import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast o
 import { inventoryApi } from "../lib/api";
 import { useStockEntry } from "../hooks/useStockEntry";
 import { api } from "../services/api";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 const CATEGORIES = [
   "Perfumaria", "Corpo", "Rosto", "Cabelos",
@@ -378,9 +379,9 @@ export default function ProductForm() {
                   <span className="hidden sm:block">Scan</span>
                 </button>
                 {searching && (
-                  <Loader2
-                    className="absolute right-24 top-3 animate-spin text-muted-foreground"
-                    size={18}
+                  <LoadingSpinner
+                    color="muted"
+                    className="absolute right-24 top-3 h-[18px] w-[18px]"
                   />
                 )}
               </div>
@@ -584,7 +585,7 @@ export default function ProductForm() {
             className="w-full bg-brand text-white font-bold py-4 rounded-xl shadow-lg hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
           >
             {loading ? (
-              <Loader2 className="animate-spin h-5 w-5" />
+              <LoadingSpinner />
             ) : (
               <Save className="h-5 w-5" />
             )}

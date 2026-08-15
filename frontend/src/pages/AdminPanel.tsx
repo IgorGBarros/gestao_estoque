@@ -2,7 +2,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Shield, Crown, User, Loader2, Check, Search, Users, ChevronUp, ChevronDown,
+  ArrowLeft, Shield, Crown, User, Check, Search, Users, ChevronUp, ChevronDown,
   ExternalLink, RefreshCw, AlertTriangle, Package, Calendar, Phone, Store, Mail, BarChart3,
   Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
   Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
@@ -23,6 +23,7 @@ import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
 import ApiManagementTab from "../components/admin/ApiManagementTab";
 import AdminCatalogTab from "../components/admin/AdminCatalogTab";
 import AdminSupportTab from "../components/admin/AdminSupportTab";
+import { LoadingSpinner } from "../components/ui/loading-spinner";
 
 // Acesso ao painel é por email autorizado (is_staff, definido pelo backend
 // via ADMIN_EMAILS). Não há mais senha no frontend.
@@ -1595,7 +1596,7 @@ export default function AdminPanel() {
                                 }`}
                               >
                                 {updatingId === u.id ? (
-                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  <LoadingSpinner size="sm" />
                                 ) : (
                                   u.plan === 'pro' ? 'Rebaixar' : 'Virar PRO'
                                 )}
@@ -2618,7 +2619,7 @@ export default function AdminPanel() {
                     disabled={subSaving}
                     className="flex-1 bg-primary text-white py-2 px-4 rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50"
                   >
-                    {subSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Salvar'}
+                    {subSaving ? <LoadingSpinner /> : 'Salvar'}
                   </button>
                   <button
                     onClick={() => setShowSubForm(false)}
