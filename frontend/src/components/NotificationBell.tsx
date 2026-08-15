@@ -322,7 +322,7 @@ export default function NotificationBell() {
                   ))}
 
               {/* Promoções — só na aba própria, "Tudo" não mistura (já
-                  existe o PromotionBanner pra dar destaque na tela
+                  existe o NoveltyCarouselModal pra dar destaque na tela
                   principal; aqui é o histórico completo). */}
               {activeTab === "promocoes" &&
                 promocoes.map((p) => <PromocaoItem key={p.id} promocao={p} />)}
