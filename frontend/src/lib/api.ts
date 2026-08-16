@@ -519,6 +519,16 @@ export const adminApi = {
     apiRequest<any>(`/admin/barcode-candidates/${id}/approve/`, { method: "POST" }),
   rejectBarcodeCandidate: (id: number) =>
     apiRequest<any>(`/admin/barcode-candidates/${id}/reject/`, { method: "POST" }),
+
+  // 🎁 Códigos de indicação — individuais, não é programa aberto
+  listReferralCodes: () => apiRequest<any[]>("/admin/referral-codes/"),
+  createReferralCode: (data: {
+    nome: string; indicado_por_email?: string;
+    dias_teste: number; dias_bonus_indicadora: number; limite_usos: number;
+  }) => apiRequest<any>("/admin/referral-codes/", { method: "POST", body: JSON.stringify(data) }),
+  toggleReferralCode: (id: number) =>
+    apiRequest<any>(`/admin/referral-codes/${id}/toggle/`, { method: "POST" }),
+
   createPromotion: (data: Record<string, unknown>) =>
     apiRequest<any>("/admin/promotions/create/", {
       method: "POST",

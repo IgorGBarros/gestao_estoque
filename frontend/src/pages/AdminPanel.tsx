@@ -22,6 +22,7 @@ import React from "react";
 import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
 import ApiManagementTab from "../components/admin/ApiManagementTab";
 import AdminCatalogTab from "../components/admin/AdminCatalogTab";
+import AdminReferralTab from "../components/admin/AdminReferralTab";
 import AdminSupportTab from "../components/admin/AdminSupportTab";
 import { LoadingSpinner } from "../components/ui/loading-spinner";
 
@@ -1305,6 +1306,10 @@ export default function AdminPanel() {
               <Barcode className="h-4 w-4" />
               Catálogo
             </TabsTrigger>
+            <TabsTrigger value="referrals" className="flex shrink-0 items-center gap-2">
+              <Gift className="h-4 w-4" />
+              Indicações
+            </TabsTrigger>
           </TabsList>
 
           {/* ==========================================
@@ -2547,6 +2552,13 @@ export default function AdminPanel() {
               ========================================== */}
           <TabsContent value="catalog" className="space-y-6">
             <AdminCatalogTab toast={toast} />
+          </TabsContent>
+
+          {/* ==========================================
+              TAB: INDICAÇÕES (Códigos de indicação individuais)
+              ========================================== */}
+          <TabsContent value="referrals" className="space-y-6">
+            <AdminReferralTab toast={toast} />
           </TabsContent>
 
         </Tabs>

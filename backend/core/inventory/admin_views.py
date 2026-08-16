@@ -1565,3 +1565,111 @@ def admin_barcode_candidate_reject(request, candidate_id):
     candidato.matched = False
     candidato.save(update_fields=['matched'])
     return Response({'recusado': True})
+
+# ─────────────────────────────────────────────────────────────
+# 🎁 CÓDIGOS DE INDICAÇÃO — não é programa aberto ao público, é
+# individual: cada código é gerado pra uma pessoa específica que foi
+# convidada pessoalmente (ex: uma líder de grupo). Essa tela substitui
+# rodar o comando `criar_codigo_indicacao` direto no terminal.
+# ─────────────────────────────────────────────────────────────
+
+def _gerar_codigo_legivel(nome: str) -> str:
+    import secrets, string, unicodedata
+    # ⚠️ Remove acento antes de gerar — nome como "José" ou "Simões" não
+    # pode virar um código com acento, difícil de digitar certo depois.
+    nome_sem_acento = unicodedata.normalize('NFKD', nome).encode('ascii', 'ignore').decode('ascii')
+    base = "".join(c for c in nome_sem_acento.upper() if c.isalpha())[:6] or "AMIGA"
+    sufixo = "".join(secrets.choice(string.digits) for _ in range(3))
+    return f"{base}{sufixo}"
+
+
+def _serialize_referral_code(ref):
+    return {
+        'id': ref.id,
+        'code': ref.code,
+        'label': ref.label,
+        'referrer_store_id': ref.referrer_store_id,
+        'referrer_store_name': ref.referrer_store.name if ref.referrer_store else None,
+        'referrer_store_email': ref.referrer_store.owner.email if ref.referrer_store else None,
+        'bonus_trial_days': ref.bonus_trial_days,
+        'referrer_bonus_days': ref.referrer_bonus_days,
+        'max_uses': ref.max_uses,
+        'times_used': ref.times_used,
+        'esgotado': ref.esgotado,
+        'active': ref.active,
+        'created_at': ref.created_at.isoformat(),
+    }
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAdminUser])
+def admin_referral_codes(request):
+    """
+    GET  /api/admin/referral-codes/  — lista todos os códigos, com uso.
+    POST /api/admin/referral-codes/  — cria um código novo, mesma lógica
+    do comando `criar_codigo_indicacao`, só que pela tela.
+
+    Corpo esperado no POST:
+        {
+            "nome": "Maria Líder",
+            "indicado_por_email": "esposa@exemplo.com",  (opcional)
+            "dias_teste": 30,
+            "dias_bonus_indicadora": 7,
+            "limite_usos": 1
+        }
+    """
+    from inventory.models import ReferralCode, Store
+
+    if request.method == 'GET':
+        codigos = ReferralCode.objects.select_related('referrer_store', 'referrer_store__owner').order_by('-created_at')
+        return Response([_serialize_referral_code(r) for r in codigos])
+
+    # POST
+    nome = (request.data.get('nome') or '').strip()
+    if not nome:
+        return Response({'error': 'Nome é obrigatório.'}, status=400)
+
+    email_indicadora = (request.data.get('indicado_por_email') or '').strip()
+    loja_indicadora = None
+    if email_indicadora:
+        loja_indicadora = Store.objects.filter(owner__email__iexact=email_indicadora).first()
+        if not loja_indicadora:
+            return Response({'error': f'Nenhuma loja encontrada com o e-mail "{email_indicadora}".'}, status=400)
+
+    dias_teste = int(request.data.get('dias_teste') or 30)
+    dias_bonus = int(request.data.get('dias_bonus_indicadora') or 7)
+    limite_usos = request.data.get('limite_usos')
+    limite_usos = int(limite_usos) if limite_usos not in (None, '') else 1
+
+    codigo = _gerar_codigo_legivel(nome)
+    while ReferralCode.objects.filter(code=codigo).exists():
+        codigo = _gerar_codigo_legivel(nome)
+
+    ref = ReferralCode.objects.create(
+        code=codigo,
+        label=nome,
+        referrer_store=loja_indicadora,
+        bonus_trial_days=dias_teste,
+        referrer_bonus_days=dias_bonus,
+        max_uses=limite_usos,
+    )
+    return Response(_serialize_referral_code(ref), status=201)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_referral_code_toggle(request, code_id):
+    """
+    POST /api/admin/referral-codes/<id>/toggle/
+    Ativa/desativa um código — em vez de apagar (mantém o histórico de
+    uso intacto, só impede novos usos).
+    """
+    from inventory.models import ReferralCode
+
+    ref = ReferralCode.objects.filter(id=code_id).first()
+    if not ref:
+        return Response({'error': 'Código não encontrado.'}, status=404)
+
+    ref.active = not ref.active
+    ref.save(update_fields=['active'])
+    return Response(_serialize_referral_code(ref))

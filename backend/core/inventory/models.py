@@ -1332,3 +1332,61 @@ class CrawledUrl(models.Model):
 
     def __str__(self):
         return f"{self.url} (última vez: {self.last_crawled_at})"
+
+class ReferralCode(models.Model):
+    """
+    Código de indicação CONTROLADO — não é um programa aberto ao público,
+    é gerado especificamente pra quem a líder/dona do negócio escolhe
+    convidar pessoalmente (outra líder de grupo, por exemplo). Quem usa o
+    código ganha um teste mais longo que o padrão; quem indicou ganha
+    dias extras de acesso PRO como agradecimento.
+    """
+    code = models.CharField(max_length=30, unique=True, db_index=True)
+    label = models.CharField(
+        max_length=200, blank=True,
+        help_text="Anotação livre pra identificar quem é — ex: 'Líder Maria, grupo de 40'",
+    )
+    referrer_store = models.ForeignKey(
+        'Store', null=True, blank=True, on_delete=models.SET_NULL,
+        related_name='referral_codes_owned',
+        help_text="Quem criou/está indicando — recebe o bônus de dias quando o código é usado.",
+    )
+    bonus_trial_days = models.PositiveIntegerField(
+        default=30, help_text="Dias de teste que quem USA o código ganha (em vez do padrão)."
+    )
+    referrer_bonus_days = models.PositiveIntegerField(
+        default=7, help_text="Dias extras que quem INDICOU ganha quando o código é usado."
+    )
+    max_uses = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Limite de usos. Vazio = sem limite."
+    )
+    times_used = models.PositiveIntegerField(default=0)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'referral_code'
+        verbose_name = 'Código de Indicação'
+        verbose_name_plural = 'Códigos de Indicação'
+
+    def __str__(self):
+        return f"{self.code} ({self.label or 'sem rótulo'})"
+
+    @property
+    def esgotado(self):
+        return self.max_uses is not None and self.times_used >= self.max_uses
+
+
+class ReferralUse(models.Model):
+    """Um uso específico de um código — pra relatório de quem veio de onde."""
+    code = models.ForeignKey(ReferralCode, on_delete=models.CASCADE, related_name='usos')
+    referred_store = models.OneToOneField(
+        'Store', on_delete=models.CASCADE, related_name='referral_use'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'referral_use'
+
+    def __str__(self):
+        return f"{self.referred_store} veio de {self.code.code}"

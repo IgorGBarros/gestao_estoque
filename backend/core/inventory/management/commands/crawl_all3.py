@@ -402,6 +402,23 @@ class Command(BaseCommand):
                             
                             smart_category = detect_category(d_name)
                             
+                            # ⚠️ NOVO: produto Mary Kay não tem código de barras
+                            # físico — o SKU descoberto no site é o único
+                            # identificador que existe pra essa marca. Usar
+                            # o mesmo valor como bar_code (em vez de deixar
+                            # None) faz o produto ser encontrado tanto por
+                            # SKU quanto por "código de barras" na consulta,
+                            # sem depender só do OR entre os dois campos.
+                            # Protegido contra colisão (bar_code é único no
+                            # banco) — na prática seria uma coincidência
+                            # rara, mas não pode derrubar o crawler inteiro
+                            # se acontecer.
+                            bar_code_inicial = None
+                            if brand == "Mary Kay":
+                                colide = Product.objects.filter(bar_code=str(d_sku)).exclude(natura_sku=str(d_sku)).exists()
+                                if not colide:
+                                    bar_code_inicial = str(d_sku)
+
                             product, created = Product.objects.get_or_create(
                                 natura_sku=str(d_sku),
                                 defaults={
@@ -409,7 +426,7 @@ class Command(BaseCommand):
                                     'brand': brand,                 
                                     'category': smart_category,     
                                     'official_price': d_price,
-                                    'bar_code': None, 
+                                    'bar_code': bar_code_inicial, 
                                     'image_url': d_image,
                                     'description': d_desc or f"Descoberto no site {brand}",
                                     'last_checked_at': timezone.now(),
@@ -417,13 +434,6 @@ class Command(BaseCommand):
                                 }
                             )
                             
-                            if not created:
-                                product.name = d_name[:255]
-                                product.brand = brand               
-                                product.category = smart_category   
-                                product.official_price = d_price
-                                product.last_checked_at = timezone.now()
-                                product.last_checked_price = d_price
                             if not created:
                                 # ⚠️ CORREÇÃO: capturado ANTES de sobrescrever
                                 # official_price, pra poder comparar depois e
@@ -435,6 +445,13 @@ class Command(BaseCommand):
                                 product.official_price = d_price
                                 product.last_checked_at = timezone.now()
                                 product.last_checked_price = d_price
+                                # ⚠️ Backfill pra produto Mary Kay já crawleado
+                                # antes desta correção (bar_code ainda None).
+                                # Nunca sobrescreve se já tiver um valor —
+                                # pode ter sido preenchido por outra fonte
+                                # (cosmos_barcode_finder, aprovação manual).
+                                if brand == "Mary Kay" and not product.bar_code and bar_code_inicial:
+                                    product.bar_code = bar_code_inicial
                                 if d_image: product.image_url = d_image
                                 if d_desc: product.description = d_desc
                                 product.save()
