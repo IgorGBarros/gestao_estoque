@@ -3,6 +3,7 @@ import hashlib
 import uuid
 from decimal import Decimal
 from django.db import models
+from django.contrib.postgres.indexes import GinIndex
 from django.utils import timezone
 from django.utils.text import slugify
 from django.conf import settings
@@ -108,6 +109,13 @@ class Product(models.Model):
             models.Index(fields=['bar_code']),
             models.Index(fields=['natura_sku']),
             models.Index(fields=['category']),
+            # ⚠️ NOVO: name__icontains (busca por nome do produto ao
+            # cadastrar) fazia varredura completa da tabela toda vez —
+            # um LIKE '%...%' não consegue usar índice B-tree comum
+            # (só ajuda busca por PREFIXO, não por trecho no meio do
+            # texto). GIN + trigram é o jeito certo do Postgres pra
+            # isso — fica rápido mesmo com o catálogo crescendo.
+            GinIndex(fields=['name'], name='product_name_trgm_idx', opclasses=['gin_trgm_ops']),
         ]
 
     def __str__(self):

@@ -1263,11 +1263,14 @@ def lookup_product(request):
     if not query.isdigit():
         print(f"   ↳ Busca Textual detectada. Procurando no Catálogo Global...")
         
-        # Faz uma busca case-insensitive no catálogo global (Product)
-        candidates = Product.objects.filter(name__icontains=query).order_by('name')[:10]
+        # ⚠️ CORREÇÃO: antes chamava .exists(), depois .count() e por fim
+        # serializava — 3 disparos de consulta separados pro mesmo
+        # queryset fatiado (querysets são preguiçosos, não reaproveitam
+        # entre chamadas diferentes assim). list() materializa uma vez só.
+        candidates = list(Product.objects.filter(name__icontains=query).order_by('name')[:10])
         
-        if candidates.exists():
-            print(f"   ✅ Retornando {candidates.count()} candidatos.")
+        if candidates:
+            print(f"   ✅ Retornando {len(candidates)} candidatos.")
             return Response({
                 "found": True,
                 "source": "suggestion",

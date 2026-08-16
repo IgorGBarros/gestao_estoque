@@ -104,6 +104,12 @@ class Command(BaseCommand):
         self.stdout.write(self.style.WARNING("🕷️ Iniciando Super Crawler Intercalado (Anti-Bloqueio)..."))
         
         empty_pages = {store["brand"]: 0 for store in STORES}
+        # ⚠️ NOVO: contador de bloqueio consecutivo por marca — sem isso,
+        # depois de bloqueado uma vez, o crawler continuava tentando a
+        # cada poucos segundos pelo resto do orçamento inteiro (3h no
+        # caso relatado), o que só mantém martelando um site que já
+        # decidiu te bloquear, sem ajudar a desbloquear.
+        blocked_count = {store["brand"]: 0 for store in STORES}
         
         MAX_PAGES = 10
         with SB(uc=True, headless=True, page_load_strategy="eager") as sb:
@@ -129,6 +135,12 @@ class Command(BaseCommand):
                 for store in STORES:
                     if empty_pages[store['brand']] >= 3:
                         continue
+                    # ⚠️ NOVO: 3 bloqueios seguidos na mesma marca — para de
+                    # tentar ela por esta execução inteira. Continuar
+                    # batendo não desbloqueia mais rápido, só desperdiça o
+                    # orçamento de tempo que podia ir pras outras marcas.
+                    if blocked_count[store['brand']] >= 3:
+                        continue
                     
                     urls_to_visit = store.get('list_urls') or [store.get('list_url')]
                     
@@ -152,7 +164,18 @@ class Command(BaseCommand):
                             sb.sleep(2)
                             
                             if "Access Denied" in sb.get_page_title():
-                                self.stdout.write(self.style.ERROR(f"⛔ Bloqueio na {store['brand']}! Pulando..."))
+                                blocked_count[store['brand']] += 1
+                                # ⚠️ NOVO: pausa progressiva — 60s no primeiro
+                                # bloqueio, 120s no segundo, 180s no terceiro
+                                # (e aí para de tentar essa marca, ver acima).
+                                # Sem essa pausa, o próximo laço tentava de
+                                # novo em segundos, o que só reforça pro
+                                # site que é bot batendo sem parar.
+                                pausa = 60 * blocked_count[store['brand']]
+                                self.stdout.write(self.style.ERROR(
+                                    f"⛔ Bloqueio na {store['brand']}! Pausando {pausa}s antes de continuar..."
+                                ))
+                                time.sleep(pausa)
                                 continue
                                 
                             soup = BeautifulSoup(sb.get_page_source(), 'html.parser')
@@ -213,6 +236,12 @@ class Command(BaseCommand):
                                 empty_pages[store['brand']] += 1
                             else:
                                 empty_pages[store['brand']] = 0
+                                # Página funcionou de novo -- zera o contador
+                                # de bloqueio também. Um bloqueio temporário
+                                # não deveria desativar a marca pro resto de
+                                # uma execução longa, se o site liberou de
+                                # novo depois da pausa.
+                                blocked_count[store['brand']] = 0
                                 # ⚠️ Filtro de "já visto recentemente" aplicado
                                 # AQUI, depois da contagem de página vazia —
                                 # não antes. Filtrar antes faria uma página
