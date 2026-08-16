@@ -82,10 +82,14 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 # ==========================================
 class CustomUserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=6)
+    # ⚠️ NOVO: opcional, de propósito — não é um programa aberto, é só pra
+    # quem recebeu um código específico (ex: líder convidada pessoalmente).
+    # Quem não tem código, cadastra normal, sem diferença nenhuma.
+    referral_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
     
     class Meta:
         model = User
-        fields = ['id', 'email', 'name', 'password']
+        fields = ['id', 'email', 'name', 'password', 'referral_code']
         
     def validate_email(self, value):
         """Validação de email único"""
@@ -95,6 +99,8 @@ class CustomUserSerializer(serializers.ModelSerializer):
         
     def create(self, validated_data):
         """Cria usuário e Store automaticamente"""
+        codigo_indicacao = validated_data.pop('referral_code', '').strip()
+
         user = User.objects.create_user(
             email=validated_data.get('email', ''),
             password=validated_data['password'],
@@ -108,8 +114,51 @@ class CustomUserSerializer(serializers.ModelSerializer):
         except Exception as e:
             # Fallback: loga o erro mas não falha o cadastro (melhor UX)
             logger.error(f"Erro ao criar loja para usuário {user.id}: {e}")
+
+        # ⚠️ NOVO: aplica o bônus do código de indicação, se um foi
+        # informado e é válido. Nunca falha o cadastro por causa disso —
+        # código errado/inválido só é ignorado silenciosamente, não é
+        # motivo pra travar quem está se cadastrando.
+        if codigo_indicacao:
+            try:
+                self._aplicar_codigo_indicacao(user, codigo_indicacao)
+            except Exception as e:
+                logger.warning(f"Código de indicação '{codigo_indicacao}' não aplicado para {user.id}: {e}")
             
         return user
+
+    def _aplicar_codigo_indicacao(self, user, codigo):
+        from .models import ReferralCode, ReferralUse
+        from django.utils import timezone
+        from datetime import timedelta
+
+        store = getattr(user, 'store', None)
+        if not store:
+            return
+
+        ref = ReferralCode.objects.filter(code__iexact=codigo, active=True).first()
+        if not ref or ref.esgotado:
+            return
+
+        # Quem usou o código ganha o teste estendido (substitui o padrão).
+        store.trial_ends_at = timezone.now() + timedelta(days=ref.bonus_trial_days)
+        store.save(update_fields=['trial_ends_at'])
+
+        # Quem indicou ganha dias extras — estende o que já tiver (trial
+        # ativo OU assinatura paga, o que fizer sentido pra loja dela).
+        if ref.referrer_store:
+            loja_indicadora = ref.referrer_store
+            bonus = timedelta(days=ref.referrer_bonus_days)
+            if loja_indicadora.subscription_expires_at:
+                loja_indicadora.subscription_expires_at += bonus
+                loja_indicadora.save(update_fields=['subscription_expires_at'])
+            elif loja_indicadora.trial_ends_at:
+                loja_indicadora.trial_ends_at += bonus
+                loja_indicadora.save(update_fields=['trial_ends_at'])
+
+        ref.times_used += 1
+        ref.save(update_fields=['times_used'])
+        ReferralUse.objects.create(code=ref, referred_store=store)
 
 
 # ==========================================

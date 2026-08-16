@@ -94,7 +94,7 @@ interface AuthContextData {
   loading: boolean;
   authLoading?: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, name: string) => Promise<void>;
+  signUp: (email: string, password: string, name: string, referralCode?: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInDemo: () => void;
   signOut: () => Promise<void>;
@@ -355,10 +355,10 @@ useEffect(() => {
     }
   };
 
-  const signUp = async (email: string, password: string, name: string) => {
+  const signUp = async (email: string, password: string, name: string, referralCode?: string) => {
     setAuthLoading(true);
     try {
-      await api.post("/auth/register/", { email, password, name });
+      await api.post("/auth/register/", { email, password, name, referral_code: referralCode || "" });
     } finally {
       setAuthLoading(false);
     }

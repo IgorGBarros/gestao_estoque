@@ -19,6 +19,10 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // ⚠️ NOVO: campo opcional pra quem recebeu um código de indicação
+  // pessoal — não é programa aberto, fica escondido por padrão.
+  const [showReferralField, setShowReferralField] = useState(false);
+  const [referralCode, setReferralCode] = useState("");
 
   // ✅ Estados LGPD - UNIFICADOS (removido duplicado)
   const [consentAccepted, setConsentAccepted] = useState(false);
@@ -68,7 +72,7 @@ export default function Auth() {
         navigate("/");
       } else {
         // 1. Criar usuário
-        await signUp(email, password, name);
+        await signUp(email, password, name, referralCode.trim() || undefined);
         
         // 2. ✅ Registrar consentimento LGPD via API (após cadastro bem-sucedido)
         const consentSuccess = await recordConsent(
@@ -248,6 +252,36 @@ export default function Auth() {
               </p>
             )}
           </div>
+
+          {/* ⚠️ NOVO: código de indicação — discreto de propósito, não é
+              um programa aberto ao público, é só pra quem recebeu um
+              código pessoal de alguém (ex: a líder do grupo dela). */}
+          {!isLogin && (
+            <div>
+              {!showReferralField ? (
+                <button
+                  type="button"
+                  onClick={() => setShowReferralField(true)}
+                  className="text-xs text-muted-foreground hover:text-brand underline"
+                >
+                  Tenho um código de indicação
+                </button>
+              ) : (
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Código de indicação (opcional)
+                  </label>
+                  <input
+                    type="text"
+                    value={referralCode}
+                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                    placeholder="Ex: MARIA123"
+                    className="mt-1 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-mono outline-none focus:border-brand"
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ✅ CHECKBOX LGPD - Apenas no cadastro */}
           {!isLogin && (
