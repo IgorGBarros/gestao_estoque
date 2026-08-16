@@ -19,9 +19,7 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  // ⚠️ NOVO: campo opcional pra quem recebeu um código de indicação
-  // pessoal — não é programa aberto, fica escondido por padrão.
-  const [showReferralField, setShowReferralField] = useState(false);
+  // ⚠️ código de indicação — sempre visível em modo Cadastro, ver campo abaixo
   const [referralCode, setReferralCode] = useState("");
 
   // ✅ Estados LGPD - UNIFICADOS (removido duplicado)
@@ -253,33 +251,25 @@ export default function Auth() {
             )}
           </div>
 
-          {/* ⚠️ NOVO: código de indicação — discreto de propósito, não é
-              um programa aberto ao público, é só pra quem recebeu um
-              código pessoal de alguém (ex: a líder do grupo dela). */}
+          {/* ⚠️ CORREÇÃO: antes ficava escondido atrás de um link cinza
+              pequeno ("Tenho um código de indicação") — fácil de não
+              perceber mesmo estando na tela certa (modo Cadastro). Agora
+              sempre visível quando em modo Cadastro, com rótulo claro de
+              que é opcional — continua discreto (não é obrigatório, não
+              é um programa aberto), só não depende de ninguém "achar"
+              um link escondido pra saber que existe. */}
           {!isLogin && (
             <div>
-              {!showReferralField ? (
-                <button
-                  type="button"
-                  onClick={() => setShowReferralField(true)}
-                  className="text-xs text-muted-foreground hover:text-brand underline"
-                >
-                  Tenho um código de indicação
-                </button>
-              ) : (
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Código de indicação (opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={referralCode}
-                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
-                    placeholder="Ex: MARIA123"
-                    className="mt-1 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-mono outline-none focus:border-brand"
-                  />
-                </div>
-              )}
+              <label className="text-xs font-medium text-muted-foreground">
+                Código de indicação <span className="font-normal">(opcional)</span>
+              </label>
+              <input
+                type="text"
+                value={referralCode}
+                onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                placeholder="Se alguém te indicou, digite o código aqui"
+                className="mt-1 w-full rounded-xl border border-input bg-background px-4 py-2.5 text-sm font-mono outline-none focus:border-brand"
+              />
             </div>
           )}
 
