@@ -131,6 +131,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.postgres',  # ⚠️ NOVO: precisa pra índice GIN/trigram (busca por nome rápida)
     'drf_spectacular',
     'corsheaders',
     'rest_framework',

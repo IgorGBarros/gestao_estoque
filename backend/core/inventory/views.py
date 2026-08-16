@@ -969,6 +969,13 @@ class StockEntryView(APIView):
                         if data.get('image_url') and not getattr(product, 'image_url', ''):
                             product.image_url = data['image_url']
                             updated = True
+
+                        # ⚠️ NOVO: mesmo padrão dos campos acima — só
+                        # preenche se o produto local ainda não tiver
+                        # marca definida, nunca sobrescreve o que já existe.
+                        if data.get('brand') and not getattr(product, 'brand', ''):
+                            product.brand = data['brand']
+                            updated = True
                         
                         if updated:
                             product.save()
@@ -980,6 +987,7 @@ class StockEntryView(APIView):
                         natura_sku=sku_input,
                         name=name_input,
                         category=category_input,
+                        brand=data.get('brand') or None,
                         official_price=data.get('sale_price', 0),
                         image_url=data.get('image_url', ''),
                         last_checked_at=timezone.now()
@@ -1263,11 +1271,14 @@ def lookup_product(request):
     if not query.isdigit():
         print(f"   ↳ Busca Textual detectada. Procurando no Catálogo Global...")
         
-        # Faz uma busca case-insensitive no catálogo global (Product)
-        candidates = Product.objects.filter(name__icontains=query).order_by('name')[:10]
+        # ⚠️ CORREÇÃO: antes chamava .exists(), depois .count() e por fim
+        # serializava — 3 disparos de consulta separados pro mesmo
+        # queryset fatiado (querysets são preguiçosos, não reaproveitam
+        # entre chamadas diferentes assim). list() materializa uma vez só.
+        candidates = list(Product.objects.filter(name__icontains=query).order_by('name')[:10])
         
-        if candidates.exists():
-            print(f"   ✅ Retornando {candidates.count()} candidatos.")
+        if candidates:
+            print(f"   ✅ Retornando {len(candidates)} candidatos.")
             return Response({
                 "found": True,
                 "source": "suggestion",

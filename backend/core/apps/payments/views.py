@@ -39,7 +39,15 @@ def asaas_create_checkout(request):
     if not store:
         return Response({'error': 'Loja não encontrada'}, status=status.HTTP_404_NOT_FOUND)
 
-    if store.plan == 'pro':
+    # ⚠️ CORREÇÃO: bloqueava checkout pra qualquer loja com plan='pro' —
+    # isso inclui quem ganhou PRO manualmente pelo botão do admin-panel
+    # (trial estendido, cortesia), não só quem já paga de verdade. Uma
+    # consultora nessa situação que decidisse assinar de verdade batia
+    # em "Loja já possui plano PRO" e ficava impedida de pagar. Agora só
+    # bloqueia quem já tem uma assinatura Asaas confirmada (o webhook é
+    # que marca payment_provider='asaas' — nunca o botão manual).
+    ja_paga_de_verdade = store.plan == 'pro' and store.payment_provider == 'asaas'
+    if ja_paga_de_verdade:
         return Response({'error': 'Loja já possui plano PRO'}, status=status.HTTP_400_BAD_REQUEST)
 
     billing_cycle = request.data.get('billing_cycle', 'monthly')
