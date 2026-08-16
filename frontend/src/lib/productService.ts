@@ -6,6 +6,7 @@ export interface Product {
   name: string;
   bar_code: string;
   natura_sku?: string;
+  brand?: string;
   category: string;
   price: number;
   sale_price?: number;

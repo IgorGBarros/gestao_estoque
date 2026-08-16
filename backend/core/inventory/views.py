@@ -969,6 +969,13 @@ class StockEntryView(APIView):
                         if data.get('image_url') and not getattr(product, 'image_url', ''):
                             product.image_url = data['image_url']
                             updated = True
+
+                        # ⚠️ NOVO: mesmo padrão dos campos acima — só
+                        # preenche se o produto local ainda não tiver
+                        # marca definida, nunca sobrescreve o que já existe.
+                        if data.get('brand') and not getattr(product, 'brand', ''):
+                            product.brand = data['brand']
+                            updated = True
                         
                         if updated:
                             product.save()
@@ -980,6 +987,7 @@ class StockEntryView(APIView):
                         natura_sku=sku_input,
                         name=name_input,
                         category=category_input,
+                        brand=data.get('brand') or None,
                         official_price=data.get('sale_price', 0),
                         image_url=data.get('image_url', ''),
                         last_checked_at=timezone.now()

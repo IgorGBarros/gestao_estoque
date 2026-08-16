@@ -19,10 +19,18 @@ const CATEGORIES = [
   "Maquiagem", "Infantil", "Casa", "Outro",
 ];
 
+// ⚠️ NOVO: mesmas 6 marcas que o crawler (crawl_all3) já suporta — select
+// em vez de texto livre, pra evitar "avon"/"Avon"/"AVON" quebrando a
+// correspondência de marca em outros lugares do sistema depois.
+const BRANDS = [
+  "Natura", "Avon", "O Boticário", "Eudora", "Mary Kay", "Quem Disse Berenice", "Outra",
+];
+
 const emptyProduct: Product = {
   name: "",
   bar_code: "",
   natura_sku: "",
+  brand: "",
   category: "Perfumaria",
   price: 0,
   sale_price: 0,
@@ -110,6 +118,7 @@ export default function ProductForm() {
       name: suggestion.name,
       price: suggestion.official_price || prev.price,
       natura_sku: suggestion.natura_sku,
+      brand: suggestion.brand || prev.brand,
       description: suggestion.description,
       image_url: suggestion.image_url,
     }));
@@ -151,6 +160,7 @@ export default function ProductForm() {
             name: remote?.name || data?.name || prev.name,
             price: remote?.sale_price || data?.sale_price || prev.price,
             natura_sku: remote?.natura_sku || data?.natura_sku || prev.natura_sku,
+            brand: remote?.brand || data?.brand || prev.brand,
             description: remote?.description || data?.description || prev.description,
             image_url: remote?.image_url || data?.image_url || prev.image_url,
             bar_code: ean,
@@ -203,6 +213,7 @@ export default function ProductForm() {
               name: form.name,
               bar_code: form.bar_code,
               natura_sku: form.natura_sku,
+              brand: form.brand,
               category: form.category,
               image_url: form.image_url,
             })
@@ -225,6 +236,7 @@ export default function ProductForm() {
           name: form.name,
           category: form.category,
           natura_sku: form.natura_sku,
+          brand: form.brand,
           quantity: form.quantity,
           cost_price: form.cost_price,
           sale_price: form.price,
@@ -513,16 +525,38 @@ export default function ProductForm() {
                 </select>
               </div>
               <div>
+                {/* ⚠️ NOVO: faltava esse campo por completo — nem no tipo
+                    Product, nem no estado do formulário, nem no
+                    autopreenchimento. Select (não texto livre) pra manter
+                    consistente com o que o crawler/backfill esperam. */}
                 <label className="text-sm font-medium text-foreground">
-                  URL Imagem
+                  Marca
                 </label>
-                <input
-                  value={form.image_url || ""}
-                  onChange={(e) => handleChange("image_url", e.target.value)}
-                  className="w-full border border-input rounded-lg px-3 py-2.5 mt-1.5 bg-background outline-none focus:border-brand text-xs"
-                  placeholder="https://..."
-                />
+                <select
+                  value={form.brand || ""}
+                  onChange={(e) => handleChange("brand", e.target.value)}
+                  className="w-full border border-input rounded-lg px-3 py-2.5 mt-1.5 bg-background outline-none focus:border-brand"
+                >
+                  <option value="">Selecione...</option>
+                  {BRANDS.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
               </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-foreground">
+                URL Imagem
+              </label>
+              <input
+                value={form.image_url || ""}
+                onChange={(e) => handleChange("image_url", e.target.value)}
+                className="w-full border border-input rounded-lg px-3 py-2.5 mt-1.5 bg-background outline-none focus:border-brand text-xs"
+                placeholder="https://..."
+              />
             </div>
           </div>
 

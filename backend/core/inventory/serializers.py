@@ -334,6 +334,11 @@ class StockEntrySerializer(serializers.Serializer):
     category = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     natura_sku = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     image_url = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    # ⚠️ NOVO: faltava — o frontend (ProductForm.tsx/useStockEntry.ts) já
+    # mandava esse campo, mas por nunca ter sido declarado aqui, o DRF
+    # descartava silenciosamente durante a validação, antes mesmo de
+    # chegar na lógica de salvar. Nenhum erro aparecia, só o campo sumia.
+    brand = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     
     def validate(self, attrs):
         """✅ VALIDAÇÃO AUTOMÁTICA DE LIMITES POR TENANT"""
