@@ -427,6 +427,12 @@ export default function StockWizard() {
                     <p className="mt-1 text-xs text-muted-foreground">
                       Digite e pressione Enter ou clique fora do campo
                     </p>
+                    {/* ⚠️ NOVO: produto Mary Kay não tem código de barras
+                        físico — sem essa dica, a consultora fica sem saber
+                        o que digitar nesse caso específico. */}
+                    <p className="mt-1 text-xs text-brand-rose/70">
+                      Produto Mary Kay não tem código de barras — digite o código SKU no lugar
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-3">
