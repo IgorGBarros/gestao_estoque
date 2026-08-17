@@ -294,9 +294,24 @@ def list_users(request):
             'days_until_expiry': days_left,
             'can_add_products': store.can_add_products,  # property do model
             'total_value': float(total_revenue),
-            'last_activity': last_activity.isoformat()
+            'last_activity': last_activity.isoformat(),
+            # ⚠️ NOVO: status de contato — reaproveita a mesma lógica já
+            # usada no comando de terminal, pra mostrar direto no painel
+            # expandido de cada usuária, sem precisar de endpoint separado.
+            'email_enviado': list(store.emails_enviados.values_list('template', flat=True)),
+            'whatsapp_marcado': list(store.whatsapp_marcados.values_list('template', flat=True)),
+            'campos_faltando': _campos_faltando_lista(store),
         })
     return Response(data)
+
+
+def _campos_faltando_lista(store):
+    faltando = []
+    if not store.name:
+        faltando.append("Nome")
+    if not store.whatsapp:
+        faltando.append("WhatsApp")
+    return faltando
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1673,3 +1688,116 @@ def admin_referral_code_toggle(request, code_id):
     ref.active = not ref.active
     ref.save(update_fields=['active'])
     return Response(_serialize_referral_code(ref))
+
+# ─────────────────────────────────────────────────────────────
+# 📬 CONTATO — e-mail (envio real) e WhatsApp (link pronto, envio
+# manual). Não é plataforma de disparo em massa automatizada — é uma
+# ferramenta pra Igor contatar as usuárias atuais sem precisar caçar
+# número/e-mail um por um nem digitar a mensagem toda vez.
+# ─────────────────────────────────────────────────────────────
+
+def _status_contato(store):
+    from inventory.models import EmailEnviado, WhatsappContatoMarcado
+    emails_enviados = set(EmailEnviado.objects.filter(store=store).values_list('template', flat=True))
+    whats_marcados = set(WhatsappContatoMarcado.objects.filter(store=store).values_list('template', flat=True))
+    return {'email_enviado': list(emails_enviados), 'whatsapp_marcado': list(whats_marcados)}
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_contatos_enviar_email(request):
+    """
+    POST /api/admin/contatos/enviar-email/
+    Manda o e-mail de verdade (não é dry-run — a tela já confirma antes
+    de chamar isso). Corpo esperado: {"store_id": N, "template": "checkin"}
+    """
+    from django.core.mail import send_mail
+    from django.conf import settings as django_settings
+    from inventory.models import Store, EmailEnviado
+    from inventory.email_templates import TEMPLATES
+    from inventory.contato_utils import campos_faltando, nome_para_saudacao
+
+    store_id = request.data.get('store_id')
+    template_key = request.data.get('template')
+
+    if template_key not in TEMPLATES:
+        return Response({'error': f'Roteiro "{template_key}" não existe.'}, status=400)
+
+    store = Store.objects.filter(id=store_id, owner__isnull=False).select_related('owner').first()
+    if not store:
+        return Response({'error': 'Loja não encontrada.'}, status=404)
+
+    if EmailEnviado.objects.filter(store=store, template=template_key).exists():
+        return Response({'error': 'Esse roteiro já foi mandado pra essa loja antes.'}, status=400)
+
+    template = TEMPLATES[template_key]
+    nome = nome_para_saudacao(store)
+    extras = {"campos": " e ".join(campos_faltando(store))} if template_key == "completar_perfil" else {}
+
+    send_mail(
+        subject=template['assunto'],
+        message=template['corpo_texto'].format(nome=nome, **extras),
+        from_email=django_settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[store.owner.email],
+        html_message=template['corpo_html'].format(nome=nome, **extras),
+        fail_silently=False,
+    )
+    EmailEnviado.objects.create(store=store, template=template_key)
+    return Response({'enviado': True, 'status': _status_contato(store)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_contatos_link_whatsapp(request):
+    """
+    GET /api/admin/contatos/whatsapp-link/?store_id=N&template=checkin
+    Só MONTA o link — não marca nada como enviado (isso só acontece
+    quando Igor confirmar manualmente depois de mandar de verdade).
+    """
+    import urllib.parse
+    from inventory.models import Store
+    from inventory.whatsapp_templates import TEMPLATES as WA_TEMPLATES
+    from inventory.contato_utils import campos_faltando, nome_para_saudacao
+
+    store_id = request.query_params.get('store_id')
+    template_key = request.query_params.get('template')
+
+    if template_key not in WA_TEMPLATES:
+        return Response({'error': f'Roteiro "{template_key}" não existe.'}, status=400)
+
+    store = Store.objects.filter(id=store_id, owner__isnull=False).select_related('owner').first()
+    if not store:
+        return Response({'error': 'Loja não encontrada.'}, status=404)
+
+    if not store.whatsapp:
+        return Response({'error': 'Essa loja não tem WhatsApp cadastrado.'}, status=400)
+
+    nome = nome_para_saudacao(store)
+    extras = {"campos": " e ".join(campos_faltando(store))} if template_key == "completar_perfil" else {}
+    texto = WA_TEMPLATES[template_key].format(nome=nome, **extras)
+
+    numero = "".join(c for c in store.whatsapp if c.isdigit())
+    link = f"https://wa.me/{numero}?text={urllib.parse.quote(texto)}"
+    return Response({'link': link, 'texto': texto})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_contatos_marcar_whatsapp(request):
+    """
+    POST /api/admin/contatos/marcar-whatsapp/
+    Igor confirma manualmente que mandou de verdade (depois de clicar no
+    link e apertar enviar lá no WhatsApp) — sem isso, o sistema não tem
+    como saber sozinho que a mensagem foi enviada.
+    """
+    from inventory.models import Store, WhatsappContatoMarcado
+
+    store_id = request.data.get('store_id')
+    template_key = request.data.get('template')
+
+    store = Store.objects.filter(id=store_id, owner__isnull=False).first()
+    if not store:
+        return Response({'error': 'Loja não encontrada.'}, status=404)
+
+    _, criado = WhatsappContatoMarcado.objects.get_or_create(store=store, template=template_key)
+    return Response({'marcado': True, 'ja_existia': not criado, 'status': _status_contato(store)})

@@ -54,6 +54,10 @@ export interface AdminUser {
   can_add_products?: boolean;
   total_value?: number;
   last_activity?: string | null;
+  // ⚠️ NOVO: status de contato — mesmo padrão já usado nos outros campos opcionais
+  email_enviado?: string[];
+  whatsapp_marcado?: string[];
+  campos_faltando?: string[];
 }
 
 export interface PlanConfig {
@@ -653,6 +657,11 @@ export default function AdminPanel() {
   // Estados de ações
   const [updatingId, setUpdatingId] = useState<string | number | null>(null);
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
+  // ⚠️ NOVO: estado do bloco de contato dentro do painel expandido —
+  // só um painel fica aberto de cada vez, então não precisa ser
+  // indexado por usuário.
+  const [roteiroContato, setRoteiroContato] = useState("checkin");
+  const [enviandoContato, setEnviandoContato] = useState(false);
 
   // Estados de modais
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -945,6 +954,49 @@ export default function AdminPanel() {
       toast({ title: "Erro", description: "Falha ao mudar plano", variant: "destructive" });
     } finally {
       setUpdatingId(null);
+    }
+  };
+
+  // ⚠️ NOVO: contato — e-mail manda de verdade; WhatsApp abre o link
+  // pronto (não dá pra confirmar envio automático sem conta Business).
+  const enviarEmailUsuario = async (user: AdminUser) => {
+    if (!user.store_id) return;
+    setEnviandoContato(true);
+    try {
+      await adminApi.enviarEmailContato({ store_id: Number(user.store_id), template: roteiroContato });
+      const atualizar = (u: AdminUser) =>
+        u.id === user.id ? { ...u, email_enviado: [...(u.email_enviado || []), roteiroContato] } : u;
+      setUsers((prev) => prev.map(atualizar));
+      setSelectedUser((prev) => (prev ? atualizar(prev) : prev));
+      toast({ title: "E-mail enviado!" });
+    } catch (err: any) {
+      toast({ title: "Não deu pra enviar", description: err?.response?.data?.error, variant: "destructive" });
+    } finally {
+      setEnviandoContato(false);
+    }
+  };
+
+  const abrirWhatsappUsuario = async (user: AdminUser) => {
+    if (!user.store_id) return;
+    try {
+      const { link } = await adminApi.gerarLinkWhatsapp(Number(user.store_id), roteiroContato);
+      window.open(link, "_blank");
+    } catch (err: any) {
+      toast({ title: "Não deu pra gerar o link", description: err?.response?.data?.error, variant: "destructive" });
+    }
+  };
+
+  const marcarWhatsappUsuario = async (user: AdminUser) => {
+    if (!user.store_id) return;
+    try {
+      await adminApi.marcarWhatsappEnviado({ store_id: Number(user.store_id), template: roteiroContato });
+      const atualizar = (u: AdminUser) =>
+        u.id === user.id ? { ...u, whatsapp_marcado: [...(u.whatsapp_marcado || []), roteiroContato] } : u;
+      setUsers((prev) => prev.map(atualizar));
+      setSelectedUser((prev) => (prev ? atualizar(prev) : prev));
+      toast({ title: "Marcado como enviado" });
+    } catch {
+      toast({ title: "Erro", description: "Não deu pra marcar", variant: "destructive" });
     }
   };
 
@@ -1724,6 +1776,69 @@ export default function AdminPanel() {
                                       </p>
                                     </div>
                                   </div>
+                                </div>
+
+                                {/* ⚠️ NOVO: Contato — e-mail manda de
+                                    verdade; WhatsApp abre o link com o
+                                    texto pronto (confirmação manual). */}
+                                <div className="mt-4 p-3 bg-card rounded-lg border border-border">
+                                  <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                                    <Mail className="h-4 w-4 text-primary" />
+                                    Contato
+                                  </h4>
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <select
+                                      value={roteiroContato}
+                                      onChange={(e) => setRoteiroContato(e.target.value)}
+                                      className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+                                    >
+                                      <option value="checkin">Check-in (primeiro contato)</option>
+                                      <option value="completar_perfil">Completar perfil</option>
+                                    </select>
+
+                                    {(u.email_enviado || []).includes(roteiroContato) ? (
+                                      <span className="flex items-center gap-1 text-xs text-emerald-600">
+                                        <Check className="h-3.5 w-3.5" /> E-mail enviado
+                                      </span>
+                                    ) : (
+                                      <button
+                                        onClick={() => enviarEmailUsuario(u)}
+                                        disabled={enviandoContato}
+                                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50"
+                                      >
+                                        <Mail className="h-3.5 w-3.5" /> Mandar e-mail
+                                      </button>
+                                    )}
+
+                                    {u.whatsapp_number && (
+                                      (u.whatsapp_marcado || []).includes(roteiroContato) ? (
+                                        <span className="flex items-center gap-1 text-xs text-emerald-600">
+                                          <Check className="h-3.5 w-3.5" /> WhatsApp marcado
+                                        </span>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => abrirWhatsappUsuario(u)}
+                                            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary"
+                                          >
+                                            <MessageCircle className="h-3.5 w-3.5" /> Abrir WhatsApp
+                                          </button>
+                                          <button
+                                            onClick={() => marcarWhatsappUsuario(u)}
+                                            className="text-[10px] text-muted-foreground hover:text-foreground"
+                                            title="Marcar como enviado depois de mandar de verdade"
+                                          >
+                                            marcar enviado
+                                          </button>
+                                        </>
+                                      )
+                                    )}
+                                  </div>
+                                  {(u.campos_faltando || []).length > 0 && (
+                                    <p className="mt-2 text-[10px] text-muted-foreground">
+                                      Falta preencher: {(u.campos_faltando || []).join(", ")}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                             </TableCell>

@@ -529,6 +529,14 @@ export const adminApi = {
   toggleReferralCode: (id: number) =>
     apiRequest<any>(`/admin/referral-codes/${id}/toggle/`, { method: "POST" }),
 
+  // 📬 Contato — e-mail real, WhatsApp com link pronto (envio manual)
+  enviarEmailContato: (data: { store_id: number; template: string }) =>
+    apiRequest<any>("/admin/contatos/enviar-email/", { method: "POST", body: JSON.stringify(data) }),
+  gerarLinkWhatsapp: (storeId: number, template: string) =>
+    apiRequest<any>(`/admin/contatos/whatsapp-link/?store_id=${storeId}&template=${template}`),
+  marcarWhatsappEnviado: (data: { store_id: number; template: string }) =>
+    apiRequest<any>("/admin/contatos/marcar-whatsapp/", { method: "POST", body: JSON.stringify(data) }),
+
   createPromotion: (data: Record<string, unknown>) =>
     apiRequest<any>("/admin/promotions/create/", {
       method: "POST",
