@@ -23,6 +23,7 @@ import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
 import ApiManagementTab from "../components/admin/ApiManagementTab";
 import AdminCatalogTab from "../components/admin/AdminCatalogTab";
 import AdminReferralTab from "../components/admin/AdminReferralTab";
+import UserDetailModal from "../components/admin/UserDetailModal";
 import AdminSupportTab from "../components/admin/AdminSupportTab";
 import { LoadingSpinner } from "../components/ui/loading-spinner";
 
@@ -54,6 +55,10 @@ export interface AdminUser {
   can_add_products?: boolean;
   total_value?: number;
   last_activity?: string | null;
+  // ⚠️ NOVO: status de contato — mesmo padrão já usado nos outros campos opcionais
+  email_enviado?: string[];
+  whatsapp_marcado?: string[];
+  campos_faltando?: string[];
 }
 
 export interface PlanConfig {
@@ -1575,7 +1580,7 @@ export default function AdminPanel() {
                       <React.Fragment key={u.id}>
                         <TableRow 
                           className="cursor-pointer hover:bg-secondary/30" 
-                          onClick={() => setSelectedUser(selectedUser?.id === u.id ? null : u)}
+                          onClick={() => setSelectedUser(u)}
                         >
                           <TableCell>
                             <p className="font-medium text-sm text-foreground">
@@ -1629,106 +1634,6 @@ export default function AdminPanel() {
                           </TableCell>
                         </TableRow>
 
-                        {/* ✅ DETALHES INLINE — aparece logo abaixo da linha clicada */}
-                        {selectedUser?.id === u.id && (
-                          <TableRow>
-                            <TableCell colSpan={4} className="p-0 border-0">
-                              <div className="p-5 bg-secondary/10 border-t border-b border-border animate-in slide-in-from-top-2 duration-200">
-                                <div className="flex justify-between items-center mb-4">
-                                  <h3 className="font-bold text-base flex items-center gap-2">
-                                    <User className="h-4 w-4 text-primary"/>
-                                    {u.display_name || u.email}
-                                  </h3>
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); setSelectedUser(null); }} 
-                                    className="p-1.5 hover:bg-secondary rounded-lg transition-colors"
-                                  >
-                                    <X className="h-4 w-4 text-muted-foreground"/>
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      Email
-                                    </p>
-                                    <p className="font-medium text-xs break-all">{u.email}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      WhatsApp
-                                    </p>
-                                    <p className="font-medium text-xs">
-                                      {u.whatsapp_number || 'Não informado'}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      Vitrine
-                                    </p>
-                                    <p className="font-medium text-xs">
-                                      {u.store_slug || 'Não criada'}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      Criada em
-                                    </p>
-                                    <p className="font-medium text-xs">
-                                      {formatDate(u.created_at)}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      Produtos
-                                    </p>
-                                    <p className="font-medium text-xs">{u.product_count}</p>
-                                  </div>
-                                </div>
-
-                                {/* Assinatura — SEM gateway (movido para aba Pagamentos) */}
-                                <div className="mt-4 p-3 bg-card rounded-lg border border-border">
-                                  <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-                                    <Crown className="h-4 w-4 text-amber-500"/>
-                                    Assinatura
-                                  </h4>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                                    <div>
-                                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">
-                                        Plano
-                                      </p>
-                                      <p className="font-medium uppercase">{u.plan}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">
-                                        Status
-                                      </p>
-                                      <p className="font-medium">
-                                        {u.subscription_status || 'N/A'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">
-                                        Início
-                                      </p>
-                                      <p className="font-medium">
-                                        {formatDate(u.subscription_started_at)}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">
-                                        Expira em
-                                      </p>
-                                      <p className="font-medium">
-                                        {formatDate(u.subscription_expires_at)}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )}
                       </React.Fragment>
                     ))
                   )}
@@ -2644,6 +2549,19 @@ export default function AdminPanel() {
             </div>
           </div>
         )}
+
+        {/* ⚠️ NOVO: modal de detalhe da usuária — substitui a linha
+            expandida inline por um modal de verdade, com abas (Visão
+            Geral, Assinatura, E-mail, WhatsApp). Pensado pra crescer:
+            adicionar uma aba nova é só mexer dentro do componente. */}
+        <UserDetailModal
+          user={selectedUser}
+          open={selectedUser !== null}
+          onClose={() => setSelectedUser(null)}
+          onTogglePlan={togglePlan}
+          updatingPlan={updatingId === selectedUser?.id}
+          toast={toast}
+        />
       </main>
     </div>
   );

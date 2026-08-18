@@ -1398,3 +1398,46 @@ class ReferralUse(models.Model):
 
     def __str__(self):
         return f"{self.referred_store} veio de {self.code.code}"
+
+class EmailEnviado(models.Model):
+    """
+    Histórico de e-mail de contato mandado — guarda o texto de verdade
+    enviado (não só qual modelo foi usado), porque agora o texto pode
+    ser editado livremente antes de mandar. 'template' vira só uma
+    referência opcional (qual modelo serviu de ponto de partida, se
+    algum) — não impede mandar de novo, é só um registro histórico.
+    """
+    store = models.ForeignKey('Store', on_delete=models.CASCADE, related_name='emails_enviados')
+    template = models.CharField(max_length=50, blank=True, help_text="Modelo usado como ponto de partida, se algum.")
+    assunto = models.CharField(max_length=255, blank=True)
+    corpo = models.TextField(blank=True)
+    enviado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'email_enviado'
+        ordering = ['-enviado_em']
+
+    def __str__(self):
+        return f"{self.assunto or self.template} → {self.store} em {self.enviado_em}"
+
+
+class WhatsappContatoMarcado(models.Model):
+    """
+    Diferente do EmailEnviado — aqui não dá pra confirmar envio de
+    verdade (o WhatsApp não tem API simples sem conta Business paga; o
+    que existe é abrir o wa.me com o texto pronto, a pessoa confirma
+    manualmente lá). Esse registro é marcado À MÃO no admin-panel depois
+    que a mensagem realmente foi enviada — serve só de histórico, não de
+    confirmação automática. Guarda o texto de verdade que foi usado.
+    """
+    store = models.ForeignKey('Store', on_delete=models.CASCADE, related_name='whatsapp_marcados')
+    template = models.CharField(max_length=50, blank=True, help_text="Modelo usado como ponto de partida, se algum.")
+    texto = models.TextField(blank=True)
+    marcado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'whatsapp_contato_marcado'
+        ordering = ['-marcado_em']
+
+    def __str__(self):
+        return f"{self.template or 'texto livre'} → {self.store} (marcado em {self.marcado_em})"
