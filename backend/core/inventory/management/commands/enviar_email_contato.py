@@ -65,7 +65,9 @@ class Command(BaseCommand):
                     html_message=template['corpo_html'].format(nome=nome, **extras),
                     fail_silently=False,
                 )
-                EmailEnviado.objects.create(store=store, template=template_key)
+                EmailEnviado.objects.create(
+                    store=store, template=template_key, assunto=template['assunto'], corpo=corpo,
+                )
                 enviados += 1
 
         self.stdout.write("")

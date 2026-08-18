@@ -23,6 +23,7 @@ import PaymentGatewaysTab from "../components/admin/PaymentGatewaysTab";
 import ApiManagementTab from "../components/admin/ApiManagementTab";
 import AdminCatalogTab from "../components/admin/AdminCatalogTab";
 import AdminReferralTab from "../components/admin/AdminReferralTab";
+import UserDetailModal from "../components/admin/UserDetailModal";
 import AdminSupportTab from "../components/admin/AdminSupportTab";
 import { LoadingSpinner } from "../components/ui/loading-spinner";
 
@@ -657,11 +658,6 @@ export default function AdminPanel() {
   // Estados de ações
   const [updatingId, setUpdatingId] = useState<string | number | null>(null);
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
-  // ⚠️ NOVO: estado do bloco de contato dentro do painel expandido —
-  // só um painel fica aberto de cada vez, então não precisa ser
-  // indexado por usuário.
-  const [roteiroContato, setRoteiroContato] = useState("checkin");
-  const [enviandoContato, setEnviandoContato] = useState(false);
 
   // Estados de modais
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -954,49 +950,6 @@ export default function AdminPanel() {
       toast({ title: "Erro", description: "Falha ao mudar plano", variant: "destructive" });
     } finally {
       setUpdatingId(null);
-    }
-  };
-
-  // ⚠️ NOVO: contato — e-mail manda de verdade; WhatsApp abre o link
-  // pronto (não dá pra confirmar envio automático sem conta Business).
-  const enviarEmailUsuario = async (user: AdminUser) => {
-    if (!user.store_id) return;
-    setEnviandoContato(true);
-    try {
-      await adminApi.enviarEmailContato({ store_id: Number(user.store_id), template: roteiroContato });
-      const atualizar = (u: AdminUser) =>
-        u.id === user.id ? { ...u, email_enviado: [...(u.email_enviado || []), roteiroContato] } : u;
-      setUsers((prev) => prev.map(atualizar));
-      setSelectedUser((prev) => (prev ? atualizar(prev) : prev));
-      toast({ title: "E-mail enviado!" });
-    } catch (err: any) {
-      toast({ title: "Não deu pra enviar", description: err?.response?.data?.error, variant: "destructive" });
-    } finally {
-      setEnviandoContato(false);
-    }
-  };
-
-  const abrirWhatsappUsuario = async (user: AdminUser) => {
-    if (!user.store_id) return;
-    try {
-      const { link } = await adminApi.gerarLinkWhatsapp(Number(user.store_id), roteiroContato);
-      window.open(link, "_blank");
-    } catch (err: any) {
-      toast({ title: "Não deu pra gerar o link", description: err?.response?.data?.error, variant: "destructive" });
-    }
-  };
-
-  const marcarWhatsappUsuario = async (user: AdminUser) => {
-    if (!user.store_id) return;
-    try {
-      await adminApi.marcarWhatsappEnviado({ store_id: Number(user.store_id), template: roteiroContato });
-      const atualizar = (u: AdminUser) =>
-        u.id === user.id ? { ...u, whatsapp_marcado: [...(u.whatsapp_marcado || []), roteiroContato] } : u;
-      setUsers((prev) => prev.map(atualizar));
-      setSelectedUser((prev) => (prev ? atualizar(prev) : prev));
-      toast({ title: "Marcado como enviado" });
-    } catch {
-      toast({ title: "Erro", description: "Não deu pra marcar", variant: "destructive" });
     }
   };
 
@@ -1627,7 +1580,7 @@ export default function AdminPanel() {
                       <React.Fragment key={u.id}>
                         <TableRow 
                           className="cursor-pointer hover:bg-secondary/30" 
-                          onClick={() => setSelectedUser(selectedUser?.id === u.id ? null : u)}
+                          onClick={() => setSelectedUser(u)}
                         >
                           <TableCell>
                             <p className="font-medium text-sm text-foreground">
@@ -1681,169 +1634,6 @@ export default function AdminPanel() {
                           </TableCell>
                         </TableRow>
 
-                        {/* ✅ DETALHES INLINE — aparece logo abaixo da linha clicada */}
-                        {selectedUser?.id === u.id && (
-                          <TableRow>
-                            <TableCell colSpan={4} className="p-0 border-0">
-                              <div className="p-5 bg-secondary/10 border-t border-b border-border animate-in slide-in-from-top-2 duration-200">
-                                <div className="flex justify-between items-center mb-4">
-                                  <h3 className="font-bold text-base flex items-center gap-2">
-                                    <User className="h-4 w-4 text-primary"/>
-                                    {u.display_name || u.email}
-                                  </h3>
-                                  <button 
-                                    onClick={(e) => { e.stopPropagation(); setSelectedUser(null); }} 
-                                    className="p-1.5 hover:bg-secondary rounded-lg transition-colors"
-                                  >
-                                    <X className="h-4 w-4 text-muted-foreground"/>
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      Email
-                                    </p>
-                                    <p className="font-medium text-xs break-all">{u.email}</p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      WhatsApp
-                                    </p>
-                                    <p className="font-medium text-xs">
-                                      {u.whatsapp_number || 'Não informado'}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      Vitrine
-                                    </p>
-                                    <p className="font-medium text-xs">
-                                      {u.store_slug || 'Não criada'}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      Criada em
-                                    </p>
-                                    <p className="font-medium text-xs">
-                                      {formatDate(u.created_at)}
-                                    </p>
-                                  </div>
-                                  <div>
-                                    <p className="text-muted-foreground text-xs font-semibold uppercase mb-1">
-                                      Produtos
-                                    </p>
-                                    <p className="font-medium text-xs">{u.product_count}</p>
-                                  </div>
-                                </div>
-
-                                {/* Assinatura — SEM gateway (movido para aba Pagamentos) */}
-                                <div className="mt-4 p-3 bg-card rounded-lg border border-border">
-                                  <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-                                    <Crown className="h-4 w-4 text-amber-500"/>
-                                    Assinatura
-                                  </h4>
-                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                                    <div>
-                                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">
-                                        Plano
-                                      </p>
-                                      <p className="font-medium uppercase">{u.plan}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">
-                                        Status
-                                      </p>
-                                      <p className="font-medium">
-                                        {u.subscription_status || 'N/A'}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">
-                                        Início
-                                      </p>
-                                      <p className="font-medium">
-                                        {formatDate(u.subscription_started_at)}
-                                      </p>
-                                    </div>
-                                    <div>
-                                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">
-                                        Expira em
-                                      </p>
-                                      <p className="font-medium">
-                                        {formatDate(u.subscription_expires_at)}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* ⚠️ NOVO: Contato — e-mail manda de
-                                    verdade; WhatsApp abre o link com o
-                                    texto pronto (confirmação manual). */}
-                                <div className="mt-4 p-3 bg-card rounded-lg border border-border">
-                                  <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
-                                    <Mail className="h-4 w-4 text-primary" />
-                                    Contato
-                                  </h4>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <select
-                                      value={roteiroContato}
-                                      onChange={(e) => setRoteiroContato(e.target.value)}
-                                      className="rounded-lg border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
-                                    >
-                                      <option value="checkin">Check-in (primeiro contato)</option>
-                                      <option value="completar_perfil">Completar perfil</option>
-                                    </select>
-
-                                    {(u.email_enviado || []).includes(roteiroContato) ? (
-                                      <span className="flex items-center gap-1 text-xs text-emerald-600">
-                                        <Check className="h-3.5 w-3.5" /> E-mail enviado
-                                      </span>
-                                    ) : (
-                                      <button
-                                        onClick={() => enviarEmailUsuario(u)}
-                                        disabled={enviandoContato}
-                                        className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary disabled:opacity-50"
-                                      >
-                                        <Mail className="h-3.5 w-3.5" /> Mandar e-mail
-                                      </button>
-                                    )}
-
-                                    {u.whatsapp_number && (
-                                      (u.whatsapp_marcado || []).includes(roteiroContato) ? (
-                                        <span className="flex items-center gap-1 text-xs text-emerald-600">
-                                          <Check className="h-3.5 w-3.5" /> WhatsApp marcado
-                                        </span>
-                                      ) : (
-                                        <>
-                                          <button
-                                            onClick={() => abrirWhatsappUsuario(u)}
-                                            className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-secondary"
-                                          >
-                                            <MessageCircle className="h-3.5 w-3.5" /> Abrir WhatsApp
-                                          </button>
-                                          <button
-                                            onClick={() => marcarWhatsappUsuario(u)}
-                                            className="text-[10px] text-muted-foreground hover:text-foreground"
-                                            title="Marcar como enviado depois de mandar de verdade"
-                                          >
-                                            marcar enviado
-                                          </button>
-                                        </>
-                                      )
-                                    )}
-                                  </div>
-                                  {(u.campos_faltando || []).length > 0 && (
-                                    <p className="mt-2 text-[10px] text-muted-foreground">
-                                      Falta preencher: {(u.campos_faltando || []).join(", ")}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )}
                       </React.Fragment>
                     ))
                   )}
@@ -2759,6 +2549,19 @@ export default function AdminPanel() {
             </div>
           </div>
         )}
+
+        {/* ⚠️ NOVO: modal de detalhe da usuária — substitui a linha
+            expandida inline por um modal de verdade, com abas (Visão
+            Geral, Assinatura, E-mail, WhatsApp). Pensado pra crescer:
+            adicionar uma aba nova é só mexer dentro do componente. */}
+        <UserDetailModal
+          user={selectedUser}
+          open={selectedUser !== null}
+          onClose={() => setSelectedUser(null)}
+          onTogglePlan={togglePlan}
+          updatingPlan={updatingId === selectedUser?.id}
+          toast={toast}
+        />
       </main>
     </div>
   );

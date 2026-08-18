@@ -1703,67 +1703,152 @@ def _status_contato(store):
     return {'email_enviado': list(emails_enviados), 'whatsapp_marcado': list(whats_marcados)}
 
 
-@api_view(['POST'])
+@api_view(['GET'])
 @permission_classes([IsAdminUser])
-def admin_contatos_enviar_email(request):
+def admin_templates_listar(request):
     """
-    POST /api/admin/contatos/enviar-email/
-    Manda o e-mail de verdade (não é dry-run — a tela já confirma antes
-    de chamar isso). Corpo esperado: {"store_id": N, "template": "checkin"}
+    GET /api/admin/templates/
+    Lista os modelos disponíveis (nome + rótulo), pra tela montar o
+    seletor de "carregar modelo" sem precisar saber o conteúdo de cada
+    um — o conteúdo só é resolvido quando a pessoa escolhe um, via
+    admin_contatos_renderizar_modelo.
     """
-    from django.core.mail import send_mail
-    from django.conf import settings as django_settings
-    from inventory.models import Store, EmailEnviado
-    from inventory.email_templates import TEMPLATES
+    from inventory.email_templates import TEMPLATES as EMAIL_TEMPLATES
+    from inventory.whatsapp_templates import TEMPLATES as WA_TEMPLATES
+
+    return Response({
+        'email': [{'value': k, 'label': v['assunto']} for k, v in EMAIL_TEMPLATES.items()],
+        'whatsapp': [{'value': k, 'label': k.replace('_', ' ').title()} for k in WA_TEMPLATES.keys()],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_contatos_renderizar_modelo(request):
+    """
+    GET /api/admin/contatos/renderizar-modelo/?tipo=email&template=checkin&store_id=N
+    Resolve o modelo (nome da pessoa, campo faltando) em texto de
+    verdade — a tela usa isso só pra PREENCHER o campo editável, a
+    pessoa pode mudar tudo antes de mandar. Nunca manda nada sozinho.
+    """
+    from inventory.models import Store
     from inventory.contato_utils import campos_faltando, nome_para_saudacao
 
-    store_id = request.data.get('store_id')
-    template_key = request.data.get('template')
-
-    if template_key not in TEMPLATES:
-        return Response({'error': f'Roteiro "{template_key}" não existe.'}, status=400)
+    tipo = request.query_params.get('tipo')
+    template_key = request.query_params.get('template')
+    store_id = request.query_params.get('store_id')
 
     store = Store.objects.filter(id=store_id, owner__isnull=False).select_related('owner').first()
     if not store:
         return Response({'error': 'Loja não encontrada.'}, status=404)
 
-    if EmailEnviado.objects.filter(store=store, template=template_key).exists():
-        return Response({'error': 'Esse roteiro já foi mandado pra essa loja antes.'}, status=400)
-
-    template = TEMPLATES[template_key]
     nome = nome_para_saudacao(store)
     extras = {"campos": " e ".join(campos_faltando(store))} if template_key == "completar_perfil" else {}
 
-    send_mail(
-        subject=template['assunto'],
-        message=template['corpo_texto'].format(nome=nome, **extras),
-        from_email=django_settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[store.owner.email],
-        html_message=template['corpo_html'].format(nome=nome, **extras),
-        fail_silently=False,
-    )
-    EmailEnviado.objects.create(store=store, template=template_key)
-    return Response({'enviado': True, 'status': _status_contato(store)})
+    if tipo == 'email':
+        from inventory.email_templates import TEMPLATES as EMAIL_TEMPLATES
+        if template_key not in EMAIL_TEMPLATES:
+            return Response({'error': f'Modelo "{template_key}" não existe.'}, status=400)
+        t = EMAIL_TEMPLATES[template_key]
+        return Response({
+            'assunto': t['assunto'],
+            'corpo_texto': t['corpo_texto'].format(nome=nome, **extras),
+        })
+    elif tipo == 'whatsapp':
+        from inventory.whatsapp_templates import TEMPLATES as WA_TEMPLATES
+        if template_key not in WA_TEMPLATES:
+            return Response({'error': f'Modelo "{template_key}" não existe.'}, status=400)
+        return Response({'texto': WA_TEMPLATES[template_key].format(nome=nome, **extras)})
+    else:
+        return Response({'error': 'tipo deve ser "email" ou "whatsapp".'}, status=400)
 
 
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
+def admin_contatos_historico(request):
+    """
+    GET /api/admin/contatos/historico/?store_id=N
+    Histórico de tudo que já foi mandado/marcado pra essa loja — e-mail
+    de verdade enviado e WhatsApp confirmado manualmente, mais recente
+    primeiro.
+    """
+    from inventory.models import Store, EmailEnviado, WhatsappContatoMarcado
+
+    store_id = request.query_params.get('store_id')
+    store = Store.objects.filter(id=store_id, owner__isnull=False).first()
+    if not store:
+        return Response({'error': 'Loja não encontrada.'}, status=404)
+
+    emails = [
+        {'canal': 'email', 'assunto': e.assunto, 'texto': e.corpo, 'quando': e.enviado_em.isoformat()}
+        for e in store.emails_enviados.all()
+    ]
+    whats = [
+        {'canal': 'whatsapp', 'assunto': None, 'texto': w.texto, 'quando': w.marcado_em.isoformat()}
+        for w in store.whatsapp_marcados.all()
+    ]
+    historico = sorted(emails + whats, key=lambda x: x['quando'], reverse=True)
+    return Response(historico)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_contatos_enviar_email(request):
+    """
+    POST /api/admin/contatos/enviar-email/
+    Manda o e-mail de verdade, com o texto que vier — carregado de um
+    modelo, editado, ou escrito do zero, tanto faz. Corpo esperado:
+    {"store_id": N, "assunto": "...", "corpo_texto": "...",
+     "corpo_html": "..." (opcional), "template": "checkin" (opcional,
+     só pra registro histórico de qual modelo serviu de base)}
+    """
+    from django.core.mail import send_mail
+    from django.conf import settings as django_settings
+    from inventory.models import Store, EmailEnviado
+
+    store_id = request.data.get('store_id')
+    assunto = (request.data.get('assunto') or '').strip()
+    corpo_texto = (request.data.get('corpo_texto') or '').strip()
+    corpo_html = request.data.get('corpo_html')
+    template_usado = request.data.get('template', '')
+
+    if not assunto or not corpo_texto:
+        return Response({'error': 'Assunto e corpo do e-mail são obrigatórios.'}, status=400)
+
+    store = Store.objects.filter(id=store_id, owner__isnull=False).select_related('owner').first()
+    if not store:
+        return Response({'error': 'Loja não encontrada.'}, status=404)
+
+    send_mail(
+        subject=assunto,
+        message=corpo_texto,
+        from_email=django_settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[store.owner.email],
+        html_message=corpo_html or None,
+        fail_silently=False,
+    )
+    EmailEnviado.objects.create(store=store, template=template_usado, assunto=assunto, corpo=corpo_texto)
+    return Response({'enviado': True, 'status': _status_contato(store)})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
 def admin_contatos_link_whatsapp(request):
     """
-    GET /api/admin/contatos/whatsapp-link/?store_id=N&template=checkin
-    Só MONTA o link — não marca nada como enviado (isso só acontece
-    quando Igor confirmar manualmente depois de mandar de verdade).
+    POST /api/admin/contatos/whatsapp-link/
+    Monta o link do wa.me com o texto que vier — carregado de modelo,
+    editado ou livre, tanto faz. Só monta o link, não marca nada como
+    enviado (isso é a admin_contatos_marcar_whatsapp, separado).
+    Corpo esperado: {"store_id": N, "texto": "..."}
     """
     import urllib.parse
     from inventory.models import Store
-    from inventory.whatsapp_templates import TEMPLATES as WA_TEMPLATES
-    from inventory.contato_utils import campos_faltando, nome_para_saudacao
 
-    store_id = request.query_params.get('store_id')
-    template_key = request.query_params.get('template')
+    store_id = request.data.get('store_id')
+    texto = (request.data.get('texto') or '').strip()
 
-    if template_key not in WA_TEMPLATES:
-        return Response({'error': f'Roteiro "{template_key}" não existe.'}, status=400)
+    if not texto:
+        return Response({'error': 'O texto da mensagem não pode ficar vazio.'}, status=400)
 
     store = Store.objects.filter(id=store_id, owner__isnull=False).select_related('owner').first()
     if not store:
@@ -1772,13 +1857,9 @@ def admin_contatos_link_whatsapp(request):
     if not store.whatsapp:
         return Response({'error': 'Essa loja não tem WhatsApp cadastrado.'}, status=400)
 
-    nome = nome_para_saudacao(store)
-    extras = {"campos": " e ".join(campos_faltando(store))} if template_key == "completar_perfil" else {}
-    texto = WA_TEMPLATES[template_key].format(nome=nome, **extras)
-
     numero = "".join(c for c in store.whatsapp if c.isdigit())
     link = f"https://wa.me/{numero}?text={urllib.parse.quote(texto)}"
-    return Response({'link': link, 'texto': texto})
+    return Response({'link': link})
 
 
 @api_view(['POST'])
@@ -1788,16 +1869,19 @@ def admin_contatos_marcar_whatsapp(request):
     POST /api/admin/contatos/marcar-whatsapp/
     Igor confirma manualmente que mandou de verdade (depois de clicar no
     link e apertar enviar lá no WhatsApp) — sem isso, o sistema não tem
-    como saber sozinho que a mensagem foi enviada.
+    como saber sozinho que a mensagem foi enviada. Guarda o texto real
+    usado, pra aparecer certo no histórico.
+    Corpo esperado: {"store_id": N, "texto": "...", "template": "checkin" (opcional)}
     """
     from inventory.models import Store, WhatsappContatoMarcado
 
     store_id = request.data.get('store_id')
-    template_key = request.data.get('template')
+    texto = (request.data.get('texto') or '').strip()
+    template_usado = request.data.get('template', '')
 
     store = Store.objects.filter(id=store_id, owner__isnull=False).first()
     if not store:
         return Response({'error': 'Loja não encontrada.'}, status=404)
 
-    _, criado = WhatsappContatoMarcado.objects.get_or_create(store=store, template=template_key)
-    return Response({'marcado': True, 'ja_existia': not criado, 'status': _status_contato(store)})
+    WhatsappContatoMarcado.objects.create(store=store, template=template_usado, texto=texto)
+    return Response({'marcado': True, 'status': _status_contato(store)})

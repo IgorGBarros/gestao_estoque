@@ -529,12 +529,18 @@ export const adminApi = {
   toggleReferralCode: (id: number) =>
     apiRequest<any>(`/admin/referral-codes/${id}/toggle/`, { method: "POST" }),
 
-  // 📬 Contato — e-mail real, WhatsApp com link pronto (envio manual)
-  enviarEmailContato: (data: { store_id: number; template: string }) =>
+  // 📬 Contato — e-mail real, WhatsApp com link pronto (envio manual).
+  // Texto sempre livre — modelo é só ponto de partida, nunca obrigatório.
+  listTemplates: () => apiRequest<{ email: { value: string; label: string }[]; whatsapp: { value: string; label: string }[] }>("/admin/templates/"),
+  renderizarModelo: (tipo: "email" | "whatsapp", template: string, storeId: number) =>
+    apiRequest<any>(`/admin/contatos/renderizar-modelo/?tipo=${tipo}&template=${template}&store_id=${storeId}`),
+  historicoContato: (storeId: number) =>
+    apiRequest<any[]>(`/admin/contatos/historico/?store_id=${storeId}`),
+  enviarEmailContato: (data: { store_id: number; assunto: string; corpo_texto: string; corpo_html?: string; template?: string }) =>
     apiRequest<any>("/admin/contatos/enviar-email/", { method: "POST", body: JSON.stringify(data) }),
-  gerarLinkWhatsapp: (storeId: number, template: string) =>
-    apiRequest<any>(`/admin/contatos/whatsapp-link/?store_id=${storeId}&template=${template}`),
-  marcarWhatsappEnviado: (data: { store_id: number; template: string }) =>
+  gerarLinkWhatsapp: (storeId: number, texto: string) =>
+    apiRequest<any>("/admin/contatos/whatsapp-link/", { method: "POST", body: JSON.stringify({ store_id: storeId, texto }) }),
+  marcarWhatsappEnviado: (data: { store_id: number; texto: string; template?: string }) =>
     apiRequest<any>("/admin/contatos/marcar-whatsapp/", { method: "POST", body: JSON.stringify(data) }),
 
   createPromotion: (data: Record<string, unknown>) =>
