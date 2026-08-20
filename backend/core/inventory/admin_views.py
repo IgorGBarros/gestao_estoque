@@ -1865,14 +1865,25 @@ def admin_contatos_enviar_email(request):
     if not store:
         return Response({'error': 'Loja não encontrada.'}, status=404)
 
-    send_mail(
-        subject=assunto,
-        message=corpo_texto,
-        from_email=django_settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[store.owner.email],
-        html_message=corpo_html or None,
-        fail_silently=False,
-    )
+    # ⚠️ CORREÇÃO: send_mail sem captura — se EMAIL_HOST estiver mal
+    # configurado (ou faltando) no Render, a exceção subia crua até
+    # virar um 500 sem explicação nenhuma no frontend. Agora devolve o
+    # motivo real, pra dar pra saber se é senha errada, host errado, etc.
+    try:
+        send_mail(
+            subject=assunto,
+            message=corpo_texto,
+            from_email=django_settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[store.owner.email],
+            html_message=corpo_html or None,
+            fail_silently=False,
+        )
+    except Exception as e:
+        return Response({
+            'error': f'Não deu pra mandar o e-mail — {e}',
+            'dica': 'Confira EMAIL_HOST, EMAIL_HOST_USER e EMAIL_HOST_PASSWORD nas variáveis de ambiente do Render.',
+        }, status=502)
+
     EmailEnviado.objects.create(store=store, template=template_usado, assunto=assunto, corpo=corpo_texto)
     return Response({'enviado': True, 'status': _status_contato(store)})
 
