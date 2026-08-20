@@ -12,6 +12,7 @@ import { ArrowLeft, PlayCircle, HelpCircle, BookOpen, Newspaper, MessageCircle, 
 import { api } from "../services/api";
 import { marcarComoVista } from "../lib/supportSeen";
 import { Badge } from "../components/ui/badge";
+import { useSystemConfig } from "../hooks/useSystemConfig";
 
 interface HelpContentItem {
   id: number;
@@ -254,18 +255,43 @@ function CentralDeAjuda() {
                   <p className="font-medium text-foreground">{itemAtivo.titulo}</p>
                   {itemAtivo.corpo && <p className="mt-1 text-sm text-muted-foreground">{itemAtivo.corpo}</p>}
                 </div>
+                <BotaoRetornoWhatsapp titulo={itemAtivo.titulo} />
               </>
             ) : (
               <div className="max-h-[80vh] overflow-y-auto rounded-xl bg-card p-5">
                 <Badge variant="outline" className="mb-2">{TIPO_INFO[itemAtivo.tipo].label}</Badge>
                 <p className="font-display text-lg font-bold text-foreground">{itemAtivo.titulo}</p>
                 <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{itemAtivo.corpo}</p>
+                <BotaoRetornoWhatsapp titulo={itemAtivo.titulo} />
               </div>
             )}
           </div>
         </div>
       )}
     </div>
+  );
+}
+
+// ⚠️ NOVO: "voltar pro WhatsApp" depois de ver um conteúdo de ajuda —
+// pra quem assistiu o vídeo ou leu o FAQ e ainda ficou com dúvida, sem
+// precisar navegar até outra tela pra achar como falar com o suporte.
+// Usa o número já configurado em Sistema > Configurações — se ainda não
+// tiver sido preenchido, simplesmente não aparece (não quebra a tela).
+function BotaoRetornoWhatsapp({ titulo }: { titulo: string }) {
+  const { whatsappSuporte } = useSystemConfig();
+  if (!whatsappSuporte) return null;
+
+  const texto = `Olá! Vi o conteúdo "${titulo}" na Central de Ajuda, mas ainda fiquei com uma dúvida.`;
+  return (
+    <a
+      href={`https://api.whatsapp.com/send?phone=${whatsappSuporte}&text=${encodeURIComponent(texto)}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-3 flex items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 py-2.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+    >
+      <MessageCircle className="h-4 w-4" />
+      Não resolveu? Fale com a gente no WhatsApp
+    </a>
   );
 }
 
