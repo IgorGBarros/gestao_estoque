@@ -29,5 +29,7 @@ export function useSystemConfig() {
     aiEnabled: config?.ai_enabled ?? true,
     storefrontEnabled: config?.storefront_enabled ?? true,
     ocrEnabled: config?.ocr_enabled ?? true,
+    whatsappSuporte: config?.whatsapp_suporte || "",
+    emailSuporte: config?.email_suporte || "",
   };
 }

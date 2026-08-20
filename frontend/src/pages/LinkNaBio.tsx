@@ -8,12 +8,14 @@
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, MessageCircle, Sparkles } from "lucide-react";
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
-
-// ⚠️ Troca pelo número de WhatsApp de suporte real antes de publicar.
-const WHATSAPP_SUPORTE = "5500000000000";
+import { useSystemConfig } from "../hooks/useSystemConfig";
 
 export default function LinkNaBio() {
   const navigate = useNavigate();
+  // ⚠️ CORREÇÃO: número de WhatsApp de suporte estava fixo direto no
+  // código — agora vem do painel admin (aba Sistema → Configurações),
+  // sem precisar mexer em código nem publicar de novo pra trocar.
+  const { whatsappSuporte } = useSystemConfig();
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#FDF2F7] to-white flex flex-col items-center px-4 py-10">
@@ -48,15 +50,17 @@ export default function LinkNaBio() {
           Conhecer o sistema
         </a>
 
-        <a
-          href={`https://api.whatsapp.com/send?phone=${WHATSAPP_SUPORTE}&text=${encodeURIComponent("Olá, tenho dúvidas sobre o Minha Amora! 😊")}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 w-full rounded-2xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold py-4 transition-colors"
-        >
-          <MessageCircle className="h-4 w-4" />
-          Falar no WhatsApp
-        </a>
+        {whatsappSuporte && (
+          <a
+            href={`https://api.whatsapp.com/send?phone=${whatsappSuporte}&text=${encodeURIComponent("Olá, tenho dúvidas sobre o Minha Amora! 😊")}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full rounded-2xl border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold py-4 transition-colors"
+          >
+            <MessageCircle className="h-4 w-4" />
+            Falar no WhatsApp
+          </a>
+        )}
       </div>
 
       <p className="mt-8 text-xs text-muted-foreground text-center">

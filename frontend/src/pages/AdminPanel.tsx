@@ -647,6 +647,11 @@ export default function AdminPanel() {
 
   // Estados de UI
   const [activeTab, setActiveTab] = useState("dashboard");
+  // ⚠️ NOVO: sub-aba ativa dentro do grupo "Loja" — precisa ser
+  // controlada (não só defaultValue) pra os atalhos rápidos do
+  // Dashboard conseguirem pular direto pra sub-aba certa (ex: "Novo
+  // Plano" precisa abrir Loja > Planos, não só Loja > Lojas).
+  const [lojaSubTab, setLojaSubTab] = useState("stores");
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [planFilter, setPlanFilter] = useState<"all" | "free" | "pro">("all");
@@ -1275,45 +1280,17 @@ export default function AdminPanel() {
               <BarChart3 className="h-4 w-4" />
               Dashboard
             </TabsTrigger>
-            <TabsTrigger value="stores" className="flex shrink-0 items-center gap-2">
+            <TabsTrigger value="loja" className="flex shrink-0 items-center gap-2">
               <Store className="h-4 w-4" />
-              Lojas
+              Loja
             </TabsTrigger>
-            <TabsTrigger value="plans" className="flex shrink-0 items-center gap-2">
-              <Settings2 className="h-4 w-4" />
-              Planos
-            </TabsTrigger>
-            <TabsTrigger value="promotions" className="flex shrink-0 items-center gap-2">
-              <Megaphone className="h-4 w-4" />
-              Promoções
-            </TabsTrigger>
-            <TabsTrigger value="payments" className="flex shrink-0 items-center gap-2">
-              <CreditCard className="h-4 w-4" />
-              Pagamentos
+            <TabsTrigger value="sistema" className="flex shrink-0 items-center gap-2">
+              <Server className="h-4 w-4" />
+              Sistema
             </TabsTrigger>
             <TabsTrigger value="analytics" className="flex shrink-0 items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               Analytics
-            </TabsTrigger>
-            <TabsTrigger value="support" className="flex shrink-0 items-center gap-2">
-              <MessageCircle className="h-4 w-4" />
-              Suporte
-            </TabsTrigger>
-            <TabsTrigger value="system" className="flex shrink-0 items-center gap-2">
-              <Server className="h-4 w-4" />
-              Sistema
-            </TabsTrigger>
-            <TabsTrigger value="api" className="flex shrink-0 items-center gap-2">
-              <Key className="h-4 w-4" />
-              API
-            </TabsTrigger>
-            <TabsTrigger value="catalog" className="flex shrink-0 items-center gap-2">
-              <Barcode className="h-4 w-4" />
-              Catálogo
-            </TabsTrigger>
-            <TabsTrigger value="referrals" className="flex shrink-0 items-center gap-2">
-              <Gift className="h-4 w-4" />
-              Indicações
             </TabsTrigger>
           </TabsList>
 
@@ -1457,7 +1434,8 @@ export default function AdminPanel() {
                     <div className="grid grid-cols-2 gap-3">
                       <button 
                         onClick={() => {
-                          setActiveTab("plans");
+                          setActiveTab("loja");
+                          setLojaSubTab("plans");
                           setShowPlanModal(true);
                         }}
                         className="flex items-center gap-2 p-3 border border-border rounded-lg hover:bg-secondary transition-colors text-left"
@@ -1467,7 +1445,8 @@ export default function AdminPanel() {
                       </button>
                       <button 
                         onClick={() => {
-                          setActiveTab("promotions");
+                          setActiveTab("loja");
+                          setLojaSubTab("promotions");
                           setShowPromotionModal(true);
                         }}
                         className="flex items-center gap-2 p-3 border border-border rounded-lg hover:bg-secondary transition-colors text-left"
@@ -1476,7 +1455,10 @@ export default function AdminPanel() {
                         <span className="text-sm">Nova Promoção</span>
                       </button>
                       <button 
-                        onClick={() => setActiveTab("stores")}
+                        onClick={() => {
+                          setActiveTab("loja");
+                          setLojaSubTab("stores");
+                        }}
                         className="flex items-center gap-2 p-3 border border-border rounded-lg hover:bg-secondary transition-colors text-left"
                       >
                         <Eye className="h-4 w-4 text-primary" />
@@ -1495,10 +1477,29 @@ export default function AdminPanel() {
               </>
             ) : null}
           </TabsContent>
-
           {/* ==========================================
-              TAB: LOJAS
+              GRUPO: LOJA — lojas, planos, promoções, indicações, suporte
               ========================================== */}
+          <TabsContent value="loja" className="space-y-6">
+            <Tabs value={lojaSubTab} onValueChange={setLojaSubTab} className="space-y-6">
+              <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
+                <TabsTrigger value="stores" className="flex shrink-0 items-center gap-2">
+                  <Store className="h-4 w-4" /> Lojas
+                </TabsTrigger>
+                <TabsTrigger value="plans" className="flex shrink-0 items-center gap-2">
+                  <Crown className="h-4 w-4" /> Planos
+                </TabsTrigger>
+                <TabsTrigger value="promotions" className="flex shrink-0 items-center gap-2">
+                  <Megaphone className="h-4 w-4" /> Promoções
+                </TabsTrigger>
+                <TabsTrigger value="referrals" className="flex shrink-0 items-center gap-2">
+                  <Gift className="h-4 w-4" /> Indicações
+                </TabsTrigger>
+                <TabsTrigger value="support" className="flex shrink-0 items-center gap-2">
+                  <MessageCircle className="h-4 w-4" /> Suporte
+                </TabsTrigger>
+              </TabsList>
+
           <TabsContent value="stores" className="space-y-6">
             {/* Filtros e Busca */}
             <div className="flex flex-col lg:flex-row gap-4">
@@ -1913,6 +1914,262 @@ export default function AdminPanel() {
           </TabsContent>
 
           {/* ✅ NOVA TAB: PAGAMENTOS */}
+          <TabsContent value="referrals" className="space-y-6">
+            <AdminReferralTab toast={toast} />
+          </TabsContent>
+
+          <TabsContent value="support" className="space-y-6">
+            <AdminSupportTab toast={toast} />
+          </TabsContent>
+
+          {/* ==========================================
+              TAB: SYSTEM HEALTH & AUDIT
+              ========================================== */}
+            </Tabs>
+          </TabsContent>
+
+          {/* ==========================================
+              GRUPO: SISTEMA — saúde, configuração, pagamento, API, catálogo
+              ========================================== */}
+          <TabsContent value="sistema" className="space-y-6">
+            <Tabs defaultValue="saude" className="space-y-6">
+              <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
+                <TabsTrigger value="saude" className="flex shrink-0 items-center gap-2">
+                  <Server className="h-4 w-4" /> Saúde
+                </TabsTrigger>
+                <TabsTrigger value="config" className="flex shrink-0 items-center gap-2">
+                  <Settings2 className="h-4 w-4" /> Configurações
+                </TabsTrigger>
+                <TabsTrigger value="payments" className="flex shrink-0 items-center gap-2">
+                  <CreditCard className="h-4 w-4" /> Pagamentos
+                </TabsTrigger>
+                <TabsTrigger value="api" className="flex shrink-0 items-center gap-2">
+                  <Key className="h-4 w-4" /> API
+                </TabsTrigger>
+                <TabsTrigger value="catalog" className="flex shrink-0 items-center gap-2">
+                  <Barcode className="h-4 w-4" /> Catálogo
+                </TabsTrigger>
+              </TabsList>
+
+          <TabsContent value="saude" className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold flex items-center gap-2">
+                  <Server className="h-6 w-6 text-primary" />
+                  Saúde do Sistema & Auditoria
+                </h2>
+                <p className="text-muted-foreground">Monitore infraestrutura e atividades administrativas</p>
+              </div>
+              <button
+                onClick={fetchSystemHealth}
+                className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm hover:bg-secondary"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Verificar Agora
+              </button>
+            </div>
+
+            {/* Cards de Saúde */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                { label: "API Backend", sub: "Django (Render)", status: systemHealth?.api_status, icon: Server, extra: `Uptime: ${systemHealth?.uptime_percentage ?? 0}%` },
+                { label: "Banco de Dados", sub: "PostgreSQL", status: systemHealth?.database_status, icon: Activity, extra: "Latência: ~80ms" },
+                { label: "Gateway Pagamento", sub: "Asaas", status: systemHealth?.payment_gateway_status, icon: CreditCard, extra: "Modo: Produção" },
+              ].map((s, i) => {
+                const ok = s.status === 'operational';
+                const degraded = s.status === 'degraded';
+                return (
+                  <div key={i} className="rounded-xl border border-border bg-card p-5">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <p className="font-semibold text-sm">{s.label}</p>
+                        <p className="text-xs text-muted-foreground">{s.sub}</p>
+                      </div>
+                      <s.icon className={`h-5 w-5 ${ok ? 'text-success' : degraded ? 'text-amber-500' : 'text-destructive'}`} />
+                    </div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`h-2 w-2 rounded-full ${ok ? 'bg-success animate-pulse' : degraded ? 'bg-amber-500' : 'bg-destructive'}`} />
+                      <span className={`text-sm font-medium ${ok ? 'text-success' : degraded ? 'text-amber-600' : 'text-destructive'}`}>
+                        {ok ? 'Operacional' : degraded ? 'Degradado' : 'Indisponível'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{s.extra}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Feature Flags / Manutenção */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="rounded-xl border border-border bg-card p-6">
+                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                  <Zap className="h-5 w-5 text-primary" /> Feature Flags Globais
+                </h3>
+                <div className="space-y-3">
+                  {[
+                    { key: 'ai_enabled' as const, label: 'Assistente IA', desc: 'Liga/desliga a Amorinha globalmente' },
+                    { key: 'storefront_enabled' as const, label: 'Vitrine Pública', desc: 'Permite vitrines públicas' },
+                    { key: 'ocr_enabled' as const, label: 'OCR de Validade', desc: 'Reconhecimento via foto' },
+                  ].map((f) => {
+                    const active = systemConfig?.[f.key] ?? true;
+                    return (
+                      <div key={f.key} className="flex items-center justify-between p-3 border border-border rounded-lg">
+                        <div>
+                          <p className="text-sm font-medium">{f.label}</p>
+                          <p className="text-xs text-muted-foreground">{f.desc}</p>
+                        </div>
+                        <button
+                          disabled={savingConfig}
+                          onClick={async () => {
+                            const ok = await updateConfig({ [f.key]: !active });
+                            if (ok) {
+                              logAuditEvent(active ? `DISABLE_${f.key.toUpperCase()}` : `ENABLE_${f.key.toUpperCase()}`);
+                              toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
+                            }
+                          }}
+                          className={`disabled:opacity-60 ${active ? 'text-success' : 'text-muted-foreground'}`}
+                        >
+                          {active ? <ToggleRight className="h-7 w-7" /> : <ToggleLeft className="h-7 w-7" />}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Audit Logs */}
+            <div className="rounded-xl border border-border bg-card overflow-hidden">
+              <div className="flex justify-between items-center p-4 border-b border-border">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <FileSearch className="h-5 w-5 text-primary" />
+                  Logs de Auditoria
+                </h3>
+                <Badge variant="outline">{auditLogs.length} eventos</Badge>
+              </div>
+              <Table>
+                <TableHeader className="bg-secondary/20">
+                  <TableRow>
+                    <TableHead>Data/Hora</TableHead>
+                    <TableHead>Ação</TableHead>
+                    <TableHead>Admin</TableHead>
+                    <TableHead className="hidden md:table-cell">Alvo</TableHead>
+                    <TableHead className="hidden md:table-cell">IP</TableHead>
+                    <TableHead className="text-right">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {auditLogs.length === 0 ? (
+                    <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">Nenhum log registrado.</TableCell></TableRow>
+                  ) : auditLogs.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="text-xs">{new Date(log.timestamp).toLocaleString('pt-BR')}</TableCell>
+                      <TableCell><Badge variant="outline" className="text-xs font-mono">{log.action}</Badge></TableCell>
+                      <TableCell className="text-xs">{log.user_email}</TableCell>
+                      <TableCell className="text-xs hidden md:table-cell">{log.target_user || '—'}</TableCell>
+                      <TableCell className="text-xs font-mono hidden md:table-cell">{log.ip_address}</TableCell>
+                      <TableCell className="text-right">
+                        {log.status === 'success'
+                          ? <Badge className="bg-success/10 text-success hover:bg-success/20"><Check className="h-3 w-3 mr-1" />OK</Badge>
+                          : <Badge variant="destructive"><AlertTriangle className="h-3 w-3 mr-1" />Falhou</Badge>}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+<TabsContent value="config" className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Settings2 className="h-6 w-6 text-primary" />
+                Configurações Gerais
+              </h2>
+              <p className="text-muted-foreground">Informação de contato e comportamento global do sistema</p>
+            </div>
+
+            {/* ⚠️ NOVO: contato centralizado — antes o número de WhatsApp
+                de suporte, por exemplo, ficava fixo direto no código da
+                página de link na bio. Agora é editável aqui, sem precisar
+                mexer em código nem publicar de novo pra trocar. */}
+            <div className="rounded-xl border border-border bg-card p-6">
+              <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                <Mail className="h-5 w-5 text-primary" /> Contato
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">WhatsApp de suporte</label>
+                  <input
+                    type="text"
+                    defaultValue={systemConfig?.whatsapp_suporte ?? ""}
+                    onBlur={(e) => updateConfig({ whatsapp_suporte: e.target.value })}
+                    placeholder="5547999998888 (DDI+DDD+número, só dígitos)"
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
+                  <p className="mt-1 text-[10px] text-muted-foreground">Usado no botão de WhatsApp da página de link na bio e em outros lugares do sistema.</p>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">E-mail de suporte</label>
+                  <input
+                    type="email"
+                    defaultValue={systemConfig?.email_suporte ?? ""}
+                    onBlur={(e) => updateConfig({ email_suporte: e.target.value })}
+                    placeholder="contato@minhaamora.com.br"
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
+                </div>
+              </div>
+              {savingConfig && <p className="mt-3 text-xs text-muted-foreground">Salvando...</p>}
+            </div>
+
+              <div className="rounded-xl border border-border bg-card p-6">
+                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-amber-500" /> Modo de Manutenção
+                </h3>
+                {(() => {
+                  const maintenance = systemConfig?.maintenance_mode ?? false;
+                  return (
+                    <>
+                      <div className={`p-4 rounded-lg mb-4 ${maintenance ? 'bg-amber-50 border border-amber-200' : 'bg-secondary/30'}`}>
+                        <p className="text-sm font-medium mb-1">
+                          Status: {maintenance ? '🟡 EM MANUTENÇÃO' : '🟢 Operação normal'}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {maintenance
+                            ? 'Toda consultora vê um aviso ao entrar no sistema — não bloqueia o acesso, só avisa.'
+                            : 'Sistema disponível para todos os usuários, sem nenhum aviso.'}
+                        </p>
+                      </div>
+                      {maintenance && (
+                        <textarea
+                          value={systemConfig?.maintenance_message ?? ''}
+                          onChange={(e) => setSystemConfig(cfg => cfg ? { ...cfg, maintenance_message: e.target.value } : cfg)}
+                          onBlur={(e) => updateConfig({ maintenance_message: e.target.value })}
+                          placeholder="Mensagem que a consultora vai ver..."
+                          className="w-full mb-3 rounded-lg border border-input px-3 py-2 text-sm"
+                          rows={2}
+                        />
+                      )}
+                      <button
+                        disabled={savingConfig}
+                        onClick={async () => {
+                          const next = !maintenance;
+                          const ok = await updateConfig({ maintenance_mode: next });
+                          if (ok) {
+                            logAuditEvent(next ? 'ENABLE_MAINTENANCE' : 'DISABLE_MAINTENANCE');
+                            toast({ title: next ? "Manutenção ativada" : "Manutenção desativada", variant: next ? "destructive" : "default" });
+                          }
+                        }}
+                        className={`w-full py-2 rounded-lg font-medium disabled:opacity-60 ${maintenance ? 'bg-primary text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
+                      >
+                        {maintenance ? 'Desativar Manutenção' : 'Ativar Modo Manutenção'}
+                      </button>
+                    </>
+                  );
+                })()}
+              </div>
+          </TabsContent>
           <TabsContent value="payments" className="space-y-6">
             <PaymentGatewaysTab />
           </TabsContent>
@@ -1920,6 +2177,23 @@ export default function AdminPanel() {
           {/* ==========================================
               TAB: ANALYTICS
               ========================================== */}
+          <TabsContent value="api" className="space-y-6">
+            <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
+          </TabsContent>
+
+          {/* ==========================================
+              TAB: CATÁLOGO (Revisão de códigos de barras do crawler)
+              ========================================== */}
+          <TabsContent value="catalog" className="space-y-6">
+            <AdminCatalogTab toast={toast} />
+          </TabsContent>
+
+          {/* ==========================================
+              TAB: INDICAÇÕES (Códigos de indicação individuais)
+              ========================================== */}
+            </Tabs>
+          </TabsContent>
+
           <TabsContent value="analytics" className="space-y-6">
             {/* 📊 Indicadores de gestão que saíram do Dashboard da consultora.
                 Para ela não geravam ação; aqui mostram quem precisa de ajuda. */}
@@ -2258,214 +2532,6 @@ export default function AdminPanel() {
               </div>
             )}
           </TabsContent>
-
-          {/* ==========================================
-              TAB: SUPORTE
-              ========================================== */}
-          <TabsContent value="support" className="space-y-6">
-            <AdminSupportTab toast={toast} />
-          </TabsContent>
-
-          {/* ==========================================
-              TAB: SYSTEM HEALTH & AUDIT
-              ========================================== */}
-          <TabsContent value="system" className="space-y-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <h2 className="text-2xl font-bold flex items-center gap-2">
-                  <Server className="h-6 w-6 text-primary" />
-                  Saúde do Sistema & Auditoria
-                </h2>
-                <p className="text-muted-foreground">Monitore infraestrutura e atividades administrativas</p>
-              </div>
-              <button
-                onClick={fetchSystemHealth}
-                className="flex items-center gap-2 border border-border rounded-lg px-3 py-2 text-sm hover:bg-secondary"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Verificar Agora
-              </button>
-            </div>
-
-            {/* Cards de Saúde */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {[
-                { label: "API Backend", sub: "Django (Render)", status: systemHealth?.api_status, icon: Server, extra: `Uptime: ${systemHealth?.uptime_percentage ?? 0}%` },
-                { label: "Banco de Dados", sub: "PostgreSQL", status: systemHealth?.database_status, icon: Activity, extra: "Latência: ~80ms" },
-                { label: "Gateway Pagamento", sub: "Asaas", status: systemHealth?.payment_gateway_status, icon: CreditCard, extra: "Modo: Produção" },
-              ].map((s, i) => {
-                const ok = s.status === 'operational';
-                const degraded = s.status === 'degraded';
-                return (
-                  <div key={i} className="rounded-xl border border-border bg-card p-5">
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <p className="font-semibold text-sm">{s.label}</p>
-                        <p className="text-xs text-muted-foreground">{s.sub}</p>
-                      </div>
-                      <s.icon className={`h-5 w-5 ${ok ? 'text-success' : degraded ? 'text-amber-500' : 'text-destructive'}`} />
-                    </div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`h-2 w-2 rounded-full ${ok ? 'bg-success animate-pulse' : degraded ? 'bg-amber-500' : 'bg-destructive'}`} />
-                      <span className={`text-sm font-medium ${ok ? 'text-success' : degraded ? 'text-amber-600' : 'text-destructive'}`}>
-                        {ok ? 'Operacional' : degraded ? 'Degradado' : 'Indisponível'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{s.extra}</p>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Feature Flags / Manutenção */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="rounded-xl border border-border bg-card p-6">
-                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                  <Zap className="h-5 w-5 text-primary" /> Feature Flags Globais
-                </h3>
-                <div className="space-y-3">
-                  {[
-                    { key: 'ai_enabled' as const, label: 'Assistente IA', desc: 'Liga/desliga a Amorinha globalmente' },
-                    { key: 'storefront_enabled' as const, label: 'Vitrine Pública', desc: 'Permite vitrines públicas' },
-                    { key: 'ocr_enabled' as const, label: 'OCR de Validade', desc: 'Reconhecimento via foto' },
-                  ].map((f) => {
-                    const active = systemConfig?.[f.key] ?? true;
-                    return (
-                      <div key={f.key} className="flex items-center justify-between p-3 border border-border rounded-lg">
-                        <div>
-                          <p className="text-sm font-medium">{f.label}</p>
-                          <p className="text-xs text-muted-foreground">{f.desc}</p>
-                        </div>
-                        <button
-                          disabled={savingConfig}
-                          onClick={async () => {
-                            const ok = await updateConfig({ [f.key]: !active });
-                            if (ok) {
-                              logAuditEvent(active ? `DISABLE_${f.key.toUpperCase()}` : `ENABLE_${f.key.toUpperCase()}`);
-                              toast({ title: `${f.label} ${active ? 'desativada' : 'ativada'}` });
-                            }
-                          }}
-                          className={`disabled:opacity-60 ${active ? 'text-success' : 'text-muted-foreground'}`}
-                        >
-                          {active ? <ToggleRight className="h-7 w-7" /> : <ToggleLeft className="h-7 w-7" />}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-border bg-card p-6">
-                <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5 text-amber-500" /> Modo de Manutenção
-                </h3>
-                {(() => {
-                  const maintenance = systemConfig?.maintenance_mode ?? false;
-                  return (
-                    <>
-                      <div className={`p-4 rounded-lg mb-4 ${maintenance ? 'bg-amber-50 border border-amber-200' : 'bg-secondary/30'}`}>
-                        <p className="text-sm font-medium mb-1">
-                          Status: {maintenance ? '🟡 EM MANUTENÇÃO' : '🟢 Operação normal'}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {maintenance
-                            ? 'Toda consultora vê um aviso ao entrar no sistema — não bloqueia o acesso, só avisa.'
-                            : 'Sistema disponível para todos os usuários, sem nenhum aviso.'}
-                        </p>
-                      </div>
-                      {maintenance && (
-                        <textarea
-                          value={systemConfig?.maintenance_message ?? ''}
-                          onChange={(e) => setSystemConfig(cfg => cfg ? { ...cfg, maintenance_message: e.target.value } : cfg)}
-                          onBlur={(e) => updateConfig({ maintenance_message: e.target.value })}
-                          placeholder="Mensagem que a consultora vai ver..."
-                          className="w-full mb-3 rounded-lg border border-input px-3 py-2 text-sm"
-                          rows={2}
-                        />
-                      )}
-                      <button
-                        disabled={savingConfig}
-                        onClick={async () => {
-                          const next = !maintenance;
-                          const ok = await updateConfig({ maintenance_mode: next });
-                          if (ok) {
-                            logAuditEvent(next ? 'ENABLE_MAINTENANCE' : 'DISABLE_MAINTENANCE');
-                            toast({ title: next ? "Manutenção ativada" : "Manutenção desativada", variant: next ? "destructive" : "default" });
-                          }
-                        }}
-                        className={`w-full py-2 rounded-lg font-medium disabled:opacity-60 ${maintenance ? 'bg-primary text-white' : 'bg-amber-500 text-white hover:bg-amber-600'}`}
-                      >
-                        {maintenance ? 'Desativar Manutenção' : 'Ativar Modo Manutenção'}
-                      </button>
-                    </>
-                  );
-                })()}
-              </div>
-            </div>
-
-            {/* Audit Logs */}
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="flex justify-between items-center p-4 border-b border-border">
-                <h3 className="font-semibold flex items-center gap-2">
-                  <FileSearch className="h-5 w-5 text-primary" />
-                  Logs de Auditoria
-                </h3>
-                <Badge variant="outline">{auditLogs.length} eventos</Badge>
-              </div>
-              <Table>
-                <TableHeader className="bg-secondary/20">
-                  <TableRow>
-                    <TableHead>Data/Hora</TableHead>
-                    <TableHead>Ação</TableHead>
-                    <TableHead>Admin</TableHead>
-                    <TableHead className="hidden md:table-cell">Alvo</TableHead>
-                    <TableHead className="hidden md:table-cell">IP</TableHead>
-                    <TableHead className="text-right">Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {auditLogs.length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground">Nenhum log registrado.</TableCell></TableRow>
-                  ) : auditLogs.map((log) => (
-                    <TableRow key={log.id}>
-                      <TableCell className="text-xs">{new Date(log.timestamp).toLocaleString('pt-BR')}</TableCell>
-                      <TableCell><Badge variant="outline" className="text-xs font-mono">{log.action}</Badge></TableCell>
-                      <TableCell className="text-xs">{log.user_email}</TableCell>
-                      <TableCell className="text-xs hidden md:table-cell">{log.target_user || '—'}</TableCell>
-                      <TableCell className="text-xs font-mono hidden md:table-cell">{log.ip_address}</TableCell>
-                      <TableCell className="text-right">
-                        {log.status === 'success'
-                          ? <Badge className="bg-success/10 text-success hover:bg-success/20"><Check className="h-3 w-3 mr-1" />OK</Badge>
-                          : <Badge variant="destructive"><AlertTriangle className="h-3 w-3 mr-1" />Falhou</Badge>}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </TabsContent>
-
-          {/* ==========================================
-              TAB: API & WEBHOOKS (Monetização do Banco de Dados)
-              ========================================== */}
-          <TabsContent value="api" className="space-y-6">
-            <ApiManagementTab formatCurrency={formatCurrency} toast={toast} />
-          </TabsContent>
-
-          {/* ==========================================
-              TAB: CATÁLOGO (Revisão de códigos de barras do crawler)
-              ========================================== */}
-          <TabsContent value="catalog" className="space-y-6">
-            <AdminCatalogTab toast={toast} />
-          </TabsContent>
-
-          {/* ==========================================
-              TAB: INDICAÇÕES (Códigos de indicação individuais)
-              ========================================== */}
-          <TabsContent value="referrals" className="space-y-6">
-            <AdminReferralTab toast={toast} />
-          </TabsContent>
-
         </Tabs>
 
         {/* Modal de Assinatura Manual (mantido do código original) */}

@@ -1148,7 +1148,7 @@ def update_system_config(request):
     """PATCH /api/admin/system-config/ — liga/desliga manutenção e feature flags globais."""
     cfg = SystemConfig.get_solo()
     data = request.data
-    campos = ['maintenance_mode', 'maintenance_message', 'ai_enabled', 'storefront_enabled', 'ocr_enabled']
+    campos = ['maintenance_mode', 'maintenance_message', 'ai_enabled', 'storefront_enabled', 'ocr_enabled', 'whatsapp_suporte', 'email_suporte']
     alterados = []
     for campo in campos:
         if campo in data:
@@ -1161,6 +1161,8 @@ def update_system_config(request):
         'ai_enabled': cfg.ai_enabled,
         'storefront_enabled': cfg.storefront_enabled,
         'ocr_enabled': cfg.ocr_enabled,
+        'whatsapp_suporte': cfg.whatsapp_suporte,
+        'email_suporte': cfg.email_suporte,
         'updated_fields': alterados,
     })
 

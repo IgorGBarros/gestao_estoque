@@ -928,6 +928,8 @@ export interface SystemConfigStatus {
   ai_enabled: boolean;
   storefront_enabled: boolean;
   ocr_enabled: boolean;
+  whatsapp_suporte: string;
+  email_suporte: string;
 }
 
 // 🔹 Pública — precisa funcionar até pra quem ainda não conseguiu logar,
