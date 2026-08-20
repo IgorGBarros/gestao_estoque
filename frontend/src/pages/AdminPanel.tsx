@@ -142,6 +142,8 @@ export interface SystemHealth {
   api_status: 'operational' | 'degraded' | 'down';
   database_status: 'operational' | 'degraded' | 'down';
   payment_gateway_status: 'operational' | 'degraded' | 'down';
+  database_latency_ms?: number;
+  payment_gateway_latency_ms?: number;
   last_check: string;
   uptime_percentage: number;
 }
@@ -740,18 +742,43 @@ export default function AdminPanel() {
   // ==========================================
 
   const fetchSystemHealth = useCallback(async () => {
-    let apiOk = true;
+    // ⚠️ CORREÇÃO: antes só checava se a API respondia (res.ok) e
+    // INFERIA o resto — banco de dados virava um espelho da API
+    // ("respondeu = operacional"), e o gateway de pagamento ficava
+    // fixo em "operational" pra sempre, sem checar nada de verdade.
+    // O backend (health_check_view) já fazia a checagem REAL de cada
+    // um (consulta no banco cronometrada, chamada de verdade no Asaas)
+    // — só que essa resposta rica nunca era lida, era descartada.
     try {
       const res = await fetch(`${(import.meta as any).env?.VITE_API_BASE_URL || "https://gestao-estoque-k5vy.onrender.com"}/api/health/`, { method: "GET" });
-      apiOk = res.ok;
-    } catch { apiOk = false; }
-    setSystemHealth({
-      api_status: apiOk ? 'operational' : 'down',
-      database_status: apiOk ? 'operational' : 'degraded',
-      payment_gateway_status: 'operational',
-      last_check: new Date().toISOString(),
-      uptime_percentage: apiOk ? 99.9 : 92.0,
-    });
+      if (!res.ok) throw new Error("health check falhou");
+      const dados = await res.json();
+      setSystemHealth({
+        api_status: dados.api_status ?? 'operational',
+        database_status: dados.database_status ?? 'down',
+        payment_gateway_status: dados.payment_gateway_status ?? 'down',
+        database_latency_ms: dados.database_latency_ms,
+        payment_gateway_latency_ms: dados.payment_gateway_latency_ms,
+        last_check: dados.last_check ?? new Date().toISOString(),
+        // ⚠️ uptime_percentage continua sendo um valor aproximado, não
+        // uma métrica real acompanhada ao longo do tempo — o backend
+        // não rastreia histórico de disponibilidade hoje. Rastrear
+        // isso de verdade seria uma feature nova (monitoramento
+        // contínuo), não parte desta correção.
+        uptime_percentage: 99.9,
+      });
+    } catch {
+      // Não conseguiu nem alcançar a API -- os três só podem estar
+      // ruins, não dá pra saber o estado real de banco/pagamento
+      // sem conseguir nem completar essa chamada.
+      setSystemHealth({
+        api_status: 'down',
+        database_status: 'down',
+        payment_gateway_status: 'down',
+        last_check: new Date().toISOString(),
+        uptime_percentage: 92.0,
+      });
+    }
     const stored = localStorage.getItem("admin_audit_logs");
     if (stored) {
       try { setAuditLogs(JSON.parse(stored)); return; } catch {}
@@ -1985,8 +2012,8 @@ export default function AdminPanel() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
                 { label: "API Backend", sub: "Django (Render)", status: systemHealth?.api_status, icon: Server, extra: `Uptime: ${systemHealth?.uptime_percentage ?? 0}%` },
-                { label: "Banco de Dados", sub: "PostgreSQL", status: systemHealth?.database_status, icon: Activity, extra: "Latência: ~80ms" },
-                { label: "Gateway Pagamento", sub: "Asaas", status: systemHealth?.payment_gateway_status, icon: CreditCard, extra: "Modo: Produção" },
+                { label: "Banco de Dados", sub: "PostgreSQL", status: systemHealth?.database_status, icon: Activity, extra: systemHealth?.database_latency_ms != null ? `Latência: ${systemHealth.database_latency_ms}ms` : "Latência: —" },
+                { label: "Gateway Pagamento", sub: "Asaas", status: systemHealth?.payment_gateway_status, icon: CreditCard, extra: systemHealth?.payment_gateway_latency_ms != null ? `Latência: ${systemHealth.payment_gateway_latency_ms}ms` : "Latência: —" },
               ].map((s, i) => {
                 const ok = s.status === 'operational';
                 const degraded = s.status === 'degraded';
