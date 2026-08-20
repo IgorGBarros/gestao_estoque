@@ -652,6 +652,18 @@ export default function AdminPanel() {
   // Dashboard conseguirem pular direto pra sub-aba certa (ex: "Novo
   // Plano" precisa abrir Loja > Planos, não só Loja > Lojas).
   const [lojaSubTab, setLojaSubTab] = useState("stores");
+  // ⚠️ NOVO: mesma ideia do lojaSubTab, pro grupo Sistema — sem isso, o
+  // carregamento de dado das sub-abas (Planos, Promoções, API) nunca
+  // disparava, porque a checagem de "qual aba está ativa" só olhava pro
+  // activeTab de fora, que agora nunca vale "plans"/"promotions"/"api"
+  // diretamente (viraram sub-abas dentro de "loja"/"sistema").
+  const [sistemaSubTab, setSistemaSubTab] = useState("saude");
+  // ⚠️ NOVO: resolve qual aba "conta de verdade" pra fins de carregar
+  // dado — dentro de "loja"/"sistema", é a sub-aba que importa (é ela
+  // que sabe se precisa buscar Planos, Promoções ou API); fora disso,
+  // é a própria activeTab (Dashboard, Analytics). Precisa vir cedo
+  // aqui — handleRefresh e outros usam antes de qualquer outra coisa.
+  const effectiveTab = activeTab === "loja" ? lojaSubTab : activeTab === "sistema" ? sistemaSubTab : activeTab;
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [planFilter, setPlanFilter] = useState<"all" | "free" | "pro">("all");
@@ -940,9 +952,9 @@ export default function AdminPanel() {
     // Limpa cache e força recarregamento
     dataCache.current = {};
     await fetchCriticalData();
-    await loadTabData(activeTab);
+    await loadTabData(effectiveTab);
     toast({ title: "Dados atualizados" });
-  }, [activeTab]);
+  }, [effectiveTab]);
 
   const togglePlan = async (user: AdminUser) => {
     const newPlan = user.plan === "pro" ? "free" : "pro";
@@ -1073,9 +1085,9 @@ export default function AdminPanel() {
   // Carrega dados pesados apenas quando muda de tab
   useEffect(() => {
     if (authenticated) {
-      loadTabData(activeTab);
+      loadTabData(effectiveTab);
     }
-  }, [activeTab, authenticated]);
+  }, [effectiveTab, authenticated]);
 
   // ==========================================
   // COMPUTAÇÕES
@@ -1932,7 +1944,7 @@ export default function AdminPanel() {
               GRUPO: SISTEMA — saúde, configuração, pagamento, API, catálogo
               ========================================== */}
           <TabsContent value="sistema" className="space-y-6">
-            <Tabs defaultValue="saude" className="space-y-6">
+            <Tabs value={sistemaSubTab} onValueChange={setSistemaSubTab} className="space-y-6">
               <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
                 <TabsTrigger value="saude" className="flex shrink-0 items-center gap-2">
                   <Server className="h-4 w-4" /> Saúde
