@@ -1148,7 +1148,7 @@ def update_system_config(request):
     """PATCH /api/admin/system-config/ — liga/desliga manutenção e feature flags globais."""
     cfg = SystemConfig.get_solo()
     data = request.data
-    campos = ['maintenance_mode', 'maintenance_message', 'ai_enabled', 'storefront_enabled', 'ocr_enabled']
+    campos = ['maintenance_mode', 'maintenance_message', 'ai_enabled', 'storefront_enabled', 'ocr_enabled', 'whatsapp_suporte', 'email_suporte']
     alterados = []
     for campo in campos:
         if campo in data:
@@ -1161,6 +1161,8 @@ def update_system_config(request):
         'ai_enabled': cfg.ai_enabled,
         'storefront_enabled': cfg.storefront_enabled,
         'ocr_enabled': cfg.ocr_enabled,
+        'whatsapp_suporte': cfg.whatsapp_suporte,
+        'email_suporte': cfg.email_suporte,
         'updated_fields': alterados,
     })
 
@@ -1791,6 +1793,50 @@ def admin_contatos_historico(request):
     return Response(historico)
 
 
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_pagamentos_loja(request):
+    """
+    GET /api/admin/pagamentos-loja/?store_id=N
+    Histórico de pagamento REAL — não estimativa. Usa
+    ProcessedPaymentEvent (já alimentado pelo webhook do Asaas com o
+    valor de verdade pago) pra responder: quando foi o último
+    pagamento, quanto já pagou no total, e se está com a assinatura
+    vencida sem renovar (o jeito mais direto de responder "está devendo").
+    """
+    from inventory.models import Store, ProcessedPaymentEvent
+    from django.utils import timezone
+    from django.db.models import Sum
+
+    store_id = request.query_params.get('store_id')
+    store = Store.objects.filter(id=store_id, owner__isnull=False).first()
+    if not store:
+        return Response({'error': 'Loja não encontrada.'}, status=404)
+
+    pagamentos = ProcessedPaymentEvent.objects.filter(store=store).order_by('-processed_at')
+    ultimo = pagamentos.first()
+    total_pago = pagamentos.aggregate(soma=Sum('value'))['soma'] or 0
+
+    # ⚠️ "Está devendo" = tem plano PRO, mas a data de expiração já
+    # passou sem renovar — sinal direto, sem tentar reconstruir mês a
+    # mês (ficaria complexo demais sem ganho real de precisão).
+    vencida = bool(
+        store.plan == 'pro' and store.subscription_expires_at and store.subscription_expires_at < timezone.now()
+    )
+
+    return Response({
+        'ultimo_pagamento': {
+            'data': ultimo.processed_at.isoformat(),
+            'valor': float(ultimo.value) if ultimo.value else None,
+            'forma': ultimo.billing_type,
+        } if ultimo else None,
+        'total_pago': float(total_pago),
+        'quantidade_pagamentos': pagamentos.count(),
+        'assinatura_vencida': vencida,
+        'subscription_expires_at': store.subscription_expires_at.isoformat() if store.subscription_expires_at else None,
+    })
+
+
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def admin_contatos_enviar_email(request):
@@ -1819,14 +1865,25 @@ def admin_contatos_enviar_email(request):
     if not store:
         return Response({'error': 'Loja não encontrada.'}, status=404)
 
-    send_mail(
-        subject=assunto,
-        message=corpo_texto,
-        from_email=django_settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[store.owner.email],
-        html_message=corpo_html or None,
-        fail_silently=False,
-    )
+    # ⚠️ CORREÇÃO: send_mail sem captura — se EMAIL_HOST estiver mal
+    # configurado (ou faltando) no Render, a exceção subia crua até
+    # virar um 500 sem explicação nenhuma no frontend. Agora devolve o
+    # motivo real, pra dar pra saber se é senha errada, host errado, etc.
+    try:
+        send_mail(
+            subject=assunto,
+            message=corpo_texto,
+            from_email=django_settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[store.owner.email],
+            html_message=corpo_html or None,
+            fail_silently=False,
+        )
+    except Exception as e:
+        return Response({
+            'error': f'Não deu pra mandar o e-mail — {e}',
+            'dica': 'Confira EMAIL_HOST, EMAIL_HOST_USER e EMAIL_HOST_PASSWORD nas variáveis de ambiente do Render.',
+        }, status=502)
+
     EmailEnviado.objects.create(store=store, template=template_usado, assunto=assunto, corpo=corpo_texto)
     return Response({'enviado': True, 'status': _status_contato(store)})
 

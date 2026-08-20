@@ -78,6 +78,17 @@ export default function Profile() {
   );
 
   const handleSave = async () => {
+    // ⚠️ NOVO: bloqueia ANTES de mandar pro servidor — resposta
+    // imediata, sem esperar o erro do backend ir e voltar.
+    const somenteDigitos = (form.whatsapp_number || "").replace(/\D/g, "");
+    if (somenteDigitos.length < 10) {
+      toast({
+        title: "WhatsApp obrigatório",
+        description: "Informe um número válido com DDD (ex: 47999998888).",
+        variant: "destructive",
+      });
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -231,7 +242,7 @@ export default function Profile() {
 
           <div>
             <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-              <Phone className="h-3.5 w-3.5" /> WhatsApp (com DDD)
+              <Phone className="h-3.5 w-3.5" /> WhatsApp (com DDD) <span className="text-destructive">*</span>
               {!form.whatsapp_number && (
                 <AlertTriangle className="h-3 w-3 text-destructive" />
               )}
@@ -245,8 +256,11 @@ export default function Profile() {
               placeholder="5511999999999"
               className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-brand"
             />
+            {/* ⚠️ CORREÇÃO: WhatsApp agora é obrigatório — é o canal
+                principal de contato pra conversão de lead, e-mail
+                sozinho tem taxa de resposta muito pior. */}
             <p className="mt-1 text-[10px] text-muted-foreground">
-              Usado para clientes contatarem pela vitrine
+              Obrigatório — usado pra falar com você e pelos clientes na vitrine
             </p>
           </div>
 

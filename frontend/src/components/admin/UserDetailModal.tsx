@@ -12,6 +12,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
 import {
   User, Mail, MessageCircle, Crown, Loader2, Send, Check, Clock,
+  DollarSign as DollarSignIcon, AlertCircle, Gift,
 } from "lucide-react";
 import { adminApi } from "../../lib/api";
 import type { AdminUser } from "../../pages/AdminPanel";
@@ -48,6 +49,18 @@ export default function UserDetailModal({ user, open, onClose, onTogglePlan, upd
   const [historico, setHistorico] = useState<HistoricoItem[]>([]);
   const [carregandoHistorico, setCarregandoHistorico] = useState(false);
 
+  // ⚠️ NOVO: pagamento real e promoção individual
+  const [pagamento, setPagamento] = useState<{
+    ultimo_pagamento: { data: string; valor: number | null; forma: string } | null;
+    total_pago: number; quantidade_pagamentos: number; assinatura_vencida: boolean;
+  } | null>(null);
+  const [carregandoPagamento, setCarregandoPagamento] = useState(false);
+  const [mostrarFormPromocao, setMostrarFormPromocao] = useState(false);
+  const [promoTitulo, setPromoTitulo] = useState("");
+  const [promoMensagem, setPromoMensagem] = useState("");
+  const [promoDesconto, setPromoDesconto] = useState("");
+  const [criandoPromocao, setCriandoPromocao] = useState(false);
+
   // Carrega os modelos disponíveis uma vez (não muda por usuária)
   useEffect(() => {
     if (!open) return;
@@ -64,7 +77,12 @@ export default function UserDetailModal({ user, open, onClose, onTogglePlan, upd
     setCorpoEmail("");
     setTextoWhatsapp("");
     setLinkWhatsappGerado(false);
+    setMostrarFormPromocao(false);
+    setPromoTitulo("");
+    setPromoMensagem("");
+    setPromoDesconto("");
     carregarHistorico();
+    carregarPagamento();
   }, [open, user?.store_id]);
 
   const carregarHistorico = async () => {
@@ -76,6 +94,44 @@ export default function UserDetailModal({ user, open, onClose, onTogglePlan, upd
       // silencioso — histórico é informativo, não crítico
     } finally {
       setCarregandoHistorico(false);
+    }
+  };
+
+  const carregarPagamento = async () => {
+    if (!user?.store_id) return;
+    setCarregandoPagamento(true);
+    try {
+      setPagamento(await adminApi.pagamentosLoja(Number(user.store_id)));
+    } catch {
+      // silencioso — não trava a tela por causa disso
+    } finally {
+      setCarregandoPagamento(false);
+    }
+  };
+
+  const criarPromocaoIndividual = async () => {
+    if (!user?.store_id || !promoTitulo.trim() || !promoMensagem.trim()) {
+      toast({ title: "Preencha título e mensagem", variant: "destructive" });
+      return;
+    }
+    setCriandoPromocao(true);
+    try {
+      await adminApi.createPromotion({
+        title: promoTitulo,
+        message: promoMensagem,
+        promotion_type: "banner",
+        discount_percent: promoDesconto ? Number(promoDesconto) : 0,
+        target_store_ids: [Number(user.store_id)],
+      });
+      toast({ title: "Promoção criada!", description: `Só pra ${user.display_name || user.email}` });
+      setMostrarFormPromocao(false);
+      setPromoTitulo("");
+      setPromoMensagem("");
+      setPromoDesconto("");
+    } catch (err: any) {
+      toast({ title: "Não deu pra criar", description: err?.response?.data?.error, variant: "destructive" });
+    } finally {
+      setCriandoPromocao(false);
     }
   };
 
@@ -204,7 +260,7 @@ export default function UserDetailModal({ user, open, onClose, onTogglePlan, upd
           </TabsContent>
 
           {/* ── Assinatura ── */}
-          <TabsContent value="assinatura" className="mt-4">
+          <TabsContent value="assinatura" className="mt-4 space-y-3">
             <div className="rounded-lg border border-border p-3">
               <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
                 <Crown className="h-4 w-4 text-amber-500" /> Assinatura
@@ -234,6 +290,106 @@ export default function UserDetailModal({ user, open, onClose, onTogglePlan, upd
               >
                 {user.plan === "pro" ? "Rebaixar pra Free" : "Virar PRO"}
               </button>
+            </div>
+
+            {/* ⚠️ NOVO: pagamento real (ProcessedPaymentEvent), não
+                estimativa — último pagamento, total já pago, e se a
+                assinatura está vencida sem renovar. */}
+            <div className="rounded-lg border border-border p-3">
+              <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                <DollarSignIcon className="h-4 w-4 text-emerald-600" /> Pagamento
+              </h4>
+              {carregandoPagamento ? (
+                <div className="flex justify-center py-3"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+              ) : pagamento ? (
+                <div className="space-y-2 text-xs">
+                  {pagamento.assinatura_vencida && (
+                    <div className="flex items-center gap-1.5 rounded-lg bg-destructive/10 px-2.5 py-1.5 text-destructive">
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" /> Assinatura vencida — sem renovar
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">Último pagamento</p>
+                      <p className="font-medium">
+                        {pagamento.ultimo_pagamento
+                          ? `${formatDate(pagamento.ultimo_pagamento.data)} — R$ ${pagamento.ultimo_pagamento.valor?.toFixed(2)}`
+                          : "Nunca pagou"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">Forma</p>
+                      <p className="font-medium">{pagamento.ultimo_pagamento?.forma || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">Total pago</p>
+                      <p className="font-medium">R$ {pagamento.total_pago.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground font-semibold uppercase mb-0.5">Pagamentos</p>
+                      <p className="font-medium">{pagamento.quantidade_pagamentos}</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Sem dado de pagamento.</p>
+              )}
+            </div>
+
+            {/* ⚠️ NOVO: promoção individual — reaproveita o Promotion já
+                existente (target_stores), só que escopado direto pra
+                essa loja, sem precisar ir pra outra tela escolher da
+                lista inteira. */}
+            <div className="rounded-lg border border-border p-3">
+              <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+                <Gift className="h-4 w-4 text-brand" /> Promoção pra essa usuária
+              </h4>
+              {!mostrarFormPromocao ? (
+                <button
+                  onClick={() => setMostrarFormPromocao(true)}
+                  className="w-full rounded-lg border border-brand/30 bg-brand-soft py-2 text-xs font-medium text-brand hover:bg-brand/10"
+                >
+                  Dar promoção individual
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <input
+                    value={promoTitulo}
+                    onChange={(e) => setPromoTitulo(e.target.value)}
+                    placeholder="Título (ex: Condição especial pra você)"
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-brand"
+                  />
+                  <textarea
+                    value={promoMensagem}
+                    onChange={(e) => setPromoMensagem(e.target.value)}
+                    placeholder="Mensagem da promoção"
+                    rows={2}
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-brand resize-none"
+                  />
+                  <input
+                    type="number"
+                    value={promoDesconto}
+                    onChange={(e) => setPromoDesconto(e.target.value)}
+                    placeholder="% de desconto (opcional)"
+                    className="w-full rounded-lg border border-input bg-background px-3 py-2 text-xs outline-none focus:border-brand"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setMostrarFormPromocao(false)}
+                      className="flex-1 rounded-lg border border-border py-2 text-xs font-medium hover:bg-secondary"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={criarPromocaoIndividual}
+                      disabled={criandoPromocao}
+                      className="flex-1 rounded-lg bg-brand py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      {criandoPromocao ? <Loader2 className="mx-auto h-3.5 w-3.5 animate-spin" /> : "Criar"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </TabsContent>
 

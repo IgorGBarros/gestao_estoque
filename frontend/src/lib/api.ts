@@ -536,6 +536,14 @@ export const adminApi = {
     apiRequest<any>(`/admin/contatos/renderizar-modelo/?tipo=${tipo}&template=${template}&store_id=${storeId}`),
   historicoContato: (storeId: number) =>
     apiRequest<any[]>(`/admin/contatos/historico/?store_id=${storeId}`),
+  // 💰 Pagamento real (ProcessedPaymentEvent) — último pagamento, total
+  // pago, e se a assinatura está vencida sem renovar.
+  pagamentosLoja: (storeId: number) =>
+    apiRequest<{
+      ultimo_pagamento: { data: string; valor: number | null; forma: string } | null;
+      total_pago: number; quantidade_pagamentos: number; assinatura_vencida: boolean;
+      subscription_expires_at: string | null;
+    }>(`/admin/pagamentos-loja/?store_id=${storeId}`),
   enviarEmailContato: (data: { store_id: number; assunto: string; corpo_texto: string; corpo_html?: string; template?: string }) =>
     apiRequest<any>("/admin/contatos/enviar-email/", { method: "POST", body: JSON.stringify(data) }),
   gerarLinkWhatsapp: (storeId: number, texto: string) =>
@@ -928,6 +936,8 @@ export interface SystemConfigStatus {
   ai_enabled: boolean;
   storefront_enabled: boolean;
   ocr_enabled: boolean;
+  whatsapp_suporte: string;
+  email_suporte: string;
 }
 
 // 🔹 Pública — precisa funcionar até pra quem ainda não conseguiu logar,

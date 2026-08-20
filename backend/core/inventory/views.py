@@ -5039,6 +5039,8 @@ def system_config_view(request):
         'ai_enabled': cfg.ai_enabled,
         'storefront_enabled': cfg.storefront_enabled,
         'ocr_enabled': cfg.ocr_enabled,
+        'whatsapp_suporte': cfg.whatsapp_suporte,
+        'email_suporte': cfg.email_suporte,
     })
 
 

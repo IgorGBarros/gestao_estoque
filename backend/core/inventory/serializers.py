@@ -681,7 +681,16 @@ class ProfileSerializer(serializers.ModelSerializer):
         return value if value else ""
     
     def validate_whatsapp_number(self, value):
-        return value if value else ""
+        # ⚠️ CORREÇÃO: era opcional — sem WhatsApp cadastrado, o único
+        # jeito de contatar a usuária é e-mail (taxa de resposta bem
+        # pior) e não dá pra falar direto com ela pra converter lead.
+        # Agora exige um número com DDD (mínimo 10 dígitos), sempre.
+        somente_digitos = "".join(c for c in (value or "") if c.isdigit())
+        if len(somente_digitos) < 10:
+            raise serializers.ValidationError(
+                "WhatsApp é obrigatório — informe com DDD (ex: 47999998888)."
+            )
+        return somente_digitos
 
 
 # ==========================================

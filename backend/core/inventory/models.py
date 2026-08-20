@@ -1285,6 +1285,16 @@ class SystemConfig(models.Model):
     storefront_enabled = models.BooleanField(default=True)
     ocr_enabled = models.BooleanField(default=True)
 
+    # ⚠️ NOVO: informação de contato centralizada — antes ficava
+    # espalhada, hardcoded em cada tela que precisava (ex: número de
+    # WhatsApp de suporte digitado direto no código da página de link na
+    # bio). Agora é um lugar só, editável sem precisar mexer em código.
+    whatsapp_suporte = models.CharField(
+        max_length=20, blank=True,
+        help_text="Só números, com DDI e DDD — ex: 5547999998888",
+    )
+    email_suporte = models.EmailField(blank=True)
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
