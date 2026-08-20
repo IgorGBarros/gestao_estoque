@@ -23,6 +23,7 @@ import { PostAuthConsentModal } from "./components/PostAuthConsentModal";
 
 // Pages - Public
 import LandingPage from "./pages/LandingPage";
+import LinkNaBio from "./pages/LinkNaBio";
 import Auth from "./pages/Auth";
 import Storefront from "./pages/Storefront";
 import NotFound from "./pages/NotFound";
@@ -191,6 +192,7 @@ const App = () => {
                           ROTAS PÚBLICAS (Sem autenticação)
                           ========================================== */}
                       <Route path="/lp" element={<LandingPage />} />
+                      <Route path="/links" element={<LinkNaBio />} />
                       <Route path="/auth" element={<Auth />} />
                       <Route path="/privacy" element={<PrivacyPage />} />
                       <Route path="/terms" element={<TermsPage />} />
