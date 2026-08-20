@@ -1793,6 +1793,50 @@ def admin_contatos_historico(request):
     return Response(historico)
 
 
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_pagamentos_loja(request):
+    """
+    GET /api/admin/pagamentos-loja/?store_id=N
+    Histórico de pagamento REAL — não estimativa. Usa
+    ProcessedPaymentEvent (já alimentado pelo webhook do Asaas com o
+    valor de verdade pago) pra responder: quando foi o último
+    pagamento, quanto já pagou no total, e se está com a assinatura
+    vencida sem renovar (o jeito mais direto de responder "está devendo").
+    """
+    from inventory.models import Store, ProcessedPaymentEvent
+    from django.utils import timezone
+    from django.db.models import Sum
+
+    store_id = request.query_params.get('store_id')
+    store = Store.objects.filter(id=store_id, owner__isnull=False).first()
+    if not store:
+        return Response({'error': 'Loja não encontrada.'}, status=404)
+
+    pagamentos = ProcessedPaymentEvent.objects.filter(store=store).order_by('-processed_at')
+    ultimo = pagamentos.first()
+    total_pago = pagamentos.aggregate(soma=Sum('value'))['soma'] or 0
+
+    # ⚠️ "Está devendo" = tem plano PRO, mas a data de expiração já
+    # passou sem renovar — sinal direto, sem tentar reconstruir mês a
+    # mês (ficaria complexo demais sem ganho real de precisão).
+    vencida = bool(
+        store.plan == 'pro' and store.subscription_expires_at and store.subscription_expires_at < timezone.now()
+    )
+
+    return Response({
+        'ultimo_pagamento': {
+            'data': ultimo.processed_at.isoformat(),
+            'valor': float(ultimo.value) if ultimo.value else None,
+            'forma': ultimo.billing_type,
+        } if ultimo else None,
+        'total_pago': float(total_pago),
+        'quantidade_pagamentos': pagamentos.count(),
+        'assinatura_vencida': vencida,
+        'subscription_expires_at': store.subscription_expires_at.isoformat() if store.subscription_expires_at else None,
+    })
+
+
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def admin_contatos_enviar_email(request):
