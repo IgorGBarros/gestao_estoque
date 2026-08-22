@@ -191,6 +191,13 @@ const App = () => {
                       {/* ==========================================
                           ROTAS PÚBLICAS (Sem autenticação)
                           ========================================== */}
+                      {/* ⚠️ NOVO: raiz do domínio agora é a landing page
+                          pública — antes caía direto na tela logada
+                          (Index), o que não faz sentido pra quem chega
+                          pelo Google/Instagram sem conta ainda. /lp
+                          continua funcionando também, como alias (link
+                          antigo em anúncio/material não quebra). */}
+                      <Route path="/" element={<LandingPage />} />
                       <Route path="/lp" element={<LandingPage />} />
                       <Route path="/links" element={<LinkNaBio />} />
                       <Route path="/auth" element={<Auth />} />
@@ -217,8 +224,9 @@ const App = () => {
                           ROTAS PROTEGIDAS (Requer autenticação)
                           ========================================== */}
                       
-                      {/* Home / Dashboard Principal */}
-                      <Route path="/" element={
+                      {/* Home / Dashboard Principal — movida de "/" pra
+                          "/app" (raiz agora é a landing page pública) */}
+                      <Route path="/app" element={
                         <ProtectedRoute>
                           <ProtectedLayout>
                             <Index />

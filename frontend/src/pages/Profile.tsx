@@ -129,7 +129,7 @@ export default function Profile() {
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-lg items-center gap-3 px-6 py-4">
           <button
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/app")}
             className="rounded-lg p-2 text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-5 w-5" />

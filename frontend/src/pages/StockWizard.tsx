@@ -223,7 +223,7 @@ export default function StockWizard() {
         title: "Entrada registrada!",
         description: `+${data.quantity} ${data.product_name}`,
       });
-      navigate("/");
+      navigate("/app");
     } catch {
       // erro tratado pelo hook
     }
@@ -244,7 +244,7 @@ export default function StockWizard() {
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
           <button
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/app")}
             className="rounded-lg p-2 text-muted-foreground hover:text-foreground"
           >
             <X className="h-5 w-5" />

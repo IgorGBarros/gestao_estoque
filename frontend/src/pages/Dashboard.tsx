@@ -132,7 +132,7 @@ export default function Dashboard() {
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3 sm:px-6">
           <button
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/app")}
             className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
             aria-label="Voltar para o início"
           >

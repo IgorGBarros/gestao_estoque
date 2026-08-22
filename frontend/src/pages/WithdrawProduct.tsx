@@ -226,7 +226,7 @@ export default function WithdrawProduct() {
       });
 
       setIsSuccess(true);
-      setTimeout(() => navigate("/"), 2000);
+      setTimeout(() => navigate("/app"), 2000);
     } catch (err: any) {
       toast({ title: "Erro", description: err.message || "Erro ao processar baixa", variant: "destructive" });
     } finally {
@@ -241,7 +241,7 @@ export default function WithdrawProduct() {
           ══════════════════════════════════════════ */}
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
-          <button onClick={() => navigate("/")} className="rounded-lg p-2 text-muted-foreground hover:text-foreground">
+          <button onClick={() => navigate("/app")} className="rounded-lg p-2 text-muted-foreground hover:text-foreground">
             <X className="h-5 w-5" />
           </button>
           <h1 className="font-display text-base font-bold text-foreground">Baixa / PDV</h1>
