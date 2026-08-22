@@ -163,6 +163,26 @@ function TrialExpiredListener() {
   );
 }
 
+// ⚠️ NOVO: dispara "page_view" pro GA4 toda vez que a rota muda —
+// o script no index.html só cobre o carregamento inicial sozinho,
+// o resto da navegação (SPA, sem recarregar) precisa disso pra
+// o Google Analytics enxergar de verdade.
+function GoogleAnalyticsTracker() {
+  const location = useLocation();
+
+  useEffect(() => {
+    const gtag = (window as any).gtag;
+    if (typeof gtag !== "function") return; // GA ainda não carregou, ou bloqueado (ex: ad-blocker)
+    gtag("event", "page_view", {
+      page_path: location.pathname + location.search,
+      page_location: window.location.href,
+      page_title: document.title,
+    });
+  }, [location.pathname, location.search]);
+
+  return null;
+}
+
 const App = () => {
   return (
     // ✅ ErrorBoundary REMOVIDO - erros agora vão para o console/global handler
@@ -174,6 +194,13 @@ const App = () => {
           
           {/* ✅ BrowserRouter DEVE envolver AuthProvider para useNavigate funcionar */}
           <BrowserRouter>
+            {/* ⚠️ NOVO: sem isso, o Google Analytics só via a PRIMEIRA
+                página carregada — como é um SPA (troca de tela sem
+                recarregar o navegador), navegar de /lp pra /plans, por
+                exemplo, nunca virava um "page_view" novo pro GA4. Fica
+                logo no topo, funciona igual pra rota pública e logada. */}
+            <GoogleAnalyticsTracker />
+
             {/* ✅ 1. Banner de cookies básico (pré-auth, para TODOS os visitantes) */}
             <CookieConsentBanner />
             

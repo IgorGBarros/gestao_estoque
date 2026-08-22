@@ -38,7 +38,11 @@
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
-      gtag('config', 'G-GSVSL4PBBG');
+      // ⚠️ send_page_view:false — sem isso, a PRIMEIRA página contaria em
+      // dobro: uma vez aqui automaticamente, outra vez pelo
+      // GoogleAnalyticsTracker (React), que cobre TODA a navegação
+      // (inclusive a primeira) de um jeito consistente com um SPA.
+      gtag('config', 'G-GSVSL4PBBG', { send_page_view: false });
     </script>
   </head>
   <body>
