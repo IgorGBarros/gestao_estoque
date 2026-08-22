@@ -91,7 +91,7 @@ export default function Support() {
     <div className="min-h-screen bg-background pb-20">
       <header className="sticky top-0 z-20 border-b border-border bg-card">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-4 py-4">
-          <button onClick={() => navigate("/")} className="rounded-lg p-1.5 hover:bg-secondary">
+          <button onClick={() => navigate("/app")} className="rounded-lg p-1.5 hover:bg-secondary">
             <ArrowLeft className="h-5 w-5" />
           </button>
           <h1 className="font-display text-lg font-bold text-foreground">Ajuda</h1>

@@ -205,7 +205,7 @@ export default function ProductList() {
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => navigate("/")}
+              onClick={() => navigate("/app")}
               className="rounded-lg p-2 text-muted-foreground hover:bg-brand-soft hover:text-brand transition-colors"
             >
               <ArrowLeft className="h-5 w-5" />

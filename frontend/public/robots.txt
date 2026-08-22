@@ -7,7 +7,8 @@
 
 User-agent: *
 
-# Páginas de marketing/público — pode indexar
+# Home e páginas de marketing/público — pode indexar
+Allow: /
 Allow: /lp
 Allow: /links
 Allow: /auth
@@ -20,6 +21,7 @@ Allow: /api/pricing
 Allow: /api/docs
 
 # Área logada — sem valor de busca, exige autenticação
+Disallow: /app
 Disallow: /dashboard
 Disallow: /add
 Disallow: /products

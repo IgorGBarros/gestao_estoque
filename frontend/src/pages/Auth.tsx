@@ -67,7 +67,7 @@ export default function Auth() {
     try {
       if (isLogin) {
         await signIn(email, password);
-        navigate("/");
+        navigate("/app");
       } else {
         // 1. Criar usuário
         await signUp(email, password, name, referralCode.trim() || undefined);
@@ -88,7 +88,7 @@ export default function Auth() {
           console.warn("Usuário criado, mas consentimento LGPD falhou");
         }
         
-        navigate("/");
+        navigate("/app");
       }
     } catch (err: any) {
       // ✅ Mensagem genérica para evitar enumeration (LGPD + segurança)
@@ -117,7 +117,7 @@ export default function Auth() {
       // faltante é o PostAuthConsentModal, que aparece sozinho na primeira
       // vez — aqui não registramos nada.
       
-      navigate("/");
+      navigate("/app");
     } catch (err: any) {
       toast({
         title: "Erro no Google Sign-In",

@@ -362,7 +362,7 @@ export default function AddProduct() {
     setShowContinueModal(false);
     const hasSummary = await finishSession();
     if (!hasSummary) {
-      navigate("/");
+      navigate("/app");
     }
   };
 
@@ -383,7 +383,7 @@ export default function AddProduct() {
       setShowInvestmentModal(false);
       setShowSessionSummary(false);
       toast({ title: "Sucesso!", description: "Investimento registrado com sucesso." });
-      navigate("/");
+      navigate("/app");
     } catch (error) {
       console.error("Erro ao confirmar investimento:", error);
       toast({ title: "Erro", description: "Falha ao registrar investimento.", variant: "destructive" });
@@ -453,7 +453,7 @@ export default function AddProduct() {
           <button
             onClick={async () => {
               await finishSession();
-              navigate("/");
+              navigate("/app");
             }}
             className="rounded-lg p-2 text-muted-foreground hover:text-foreground"
           >
@@ -1081,7 +1081,7 @@ export default function AddProduct() {
               <button
                 onClick={() => {
                   setShowSessionSummary(false);
-                  navigate("/");
+                  navigate("/app");
                 }}
                 className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-secondary"
               >
@@ -1110,7 +1110,7 @@ export default function AddProduct() {
           estimatedCost={sessionSummaryData?.total_estimated_cost || 0}
           onClose={() => {
             setShowInvestmentModal(false);
-            navigate("/");
+            navigate("/app");
           }}
           onConfirm={confirmInvestment}
         />

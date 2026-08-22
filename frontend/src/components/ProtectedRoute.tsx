@@ -45,7 +45,7 @@ export default function ProtectedRoute({
   
   // ✅ Requer admin mas usuário não é staff
   if (requireAdmin && !user.is_staff) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/app" replace />;
   }
   
   // ✅ LGPD: NÃO bloquear - modal é discreto

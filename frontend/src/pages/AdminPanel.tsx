@@ -1243,7 +1243,7 @@ export default function AdminPanel() {
             não tem permissão de acesso.
           </p>
           <button
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/app")}
             className="w-full bg-primary text-white py-2 rounded-lg font-bold hover:bg-primary/90 transition-colors"
           >
             Voltar ao início
@@ -1287,7 +1287,7 @@ export default function AdminPanel() {
       <header className="sticky top-0 z-30 border-b border-border bg-card/95 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3">
           <button 
-            onClick={() => navigate("/")} 
+            onClick={() => navigate("/app")} 
             className="rounded-lg p-2 text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="h-5 w-5" />

@@ -144,7 +144,7 @@ export default function MovementHistory() {
       <header className="sticky top-0 z-20 border-b border-border bg-card shadow-sm">
         <div className="mx-auto flex max-w-4xl items-center gap-3 px-6 py-4">
           <button
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/app")}
             className="rounded-lg p-2 text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
           >
             <ArrowLeft className="h-5 w-5" />

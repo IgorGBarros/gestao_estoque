@@ -290,7 +290,7 @@ export default function CRM() {
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
-          <Button size="icon" variant="ghost" onClick={() => navigate("/")}>
+          <Button size="icon" variant="ghost" onClick={() => navigate("/app")}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
