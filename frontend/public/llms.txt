@@ -1,0 +1,18 @@
+# Minha Amora
+
+> Sistema de gestão de estoque para consultoras de venda direta (Natura, Avon, O Boticário, Eudora, Mary Kay, Quem Disse Berenice). Controle de estoque por lote e validade (FIFO), cálculo de lucro real, vitrine online e assistente de IA. Teste grátis de 14 dias, depois assinatura mensal ou anual.
+
+## Produto
+
+- [Página inicial](https://minhaamora.com.br/lp): visão geral do sistema e funcionalidades
+- [Planos e preços](https://minhaamora.com.br/plans): valores da assinatura mensal e anual
+- [Criar conta](https://minhaamora.com.br/auth): cadastro para iniciar o teste grátis
+
+## API para desenvolvedores
+
+- [Produto de API](https://minhaamora.com.br/api): acesso programático ao catálogo de produtos de beleza, para desenvolvedores terceiros
+
+## Institucional
+
+- [Política de Privacidade](https://minhaamora.com.br/privacy)
+- [Termos de Uso](https://minhaamora.com.br/terms)

@@ -1,0 +1,38 @@
+# minhaamora.com.br — robots.txt
+#
+# ⚠️ Este é um app de página única (SPA) — toda rota serve o mesmo
+# index.html, o conteúdo real é montado no navegador. As regras abaixo
+# ajudam o Google a não perder tempo indexando tela que exige login
+# (não tem valor de busca, e mostraria só uma tela de "Entrar").
+
+User-agent: *
+
+# Páginas de marketing/público — pode indexar
+Allow: /lp
+Allow: /links
+Allow: /auth
+Allow: /plans
+Allow: /privacy
+Allow: /terms
+Allow: /vitrine
+Allow: /api
+Allow: /api/pricing
+Allow: /api/docs
+
+# Área logada — sem valor de busca, exige autenticação
+Disallow: /dashboard
+Disallow: /add
+Disallow: /products
+Disallow: /crm
+Disallow: /history
+Disallow: /withdraw
+Disallow: /stock
+Disallow: /profile
+Disallow: /settings
+Disallow: /support
+Disallow: /admin-panel
+Disallow: /api/dashboard
+Disallow: /api/sandbox
+Disallow: /api/login
+
+Sitemap: https://minhaamora.com.br/sitemap.xml
