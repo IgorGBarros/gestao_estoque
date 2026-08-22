@@ -1,10 +1,45 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/assets/amorinha-avatar.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Minha Amora</title>
+
+    <!-- ⚠️ NOVO: título e descrição fixos aqui — como é um app de página
+         única (SPA, sem renderização no servidor), toda rota compartilha
+         o MESMO <head>. Prioriza a mensagem que mais importa pra quem
+         chega direto do Google/Instagram, já que não dá pra personalizar
+         por página sem uma mudança de arquitetura maior (SSR). -->
+    <title>Minha Amora — Gestão de Estoque para Consultoras</title>
+    <meta name="description" content="Sistema de gestão de estoque para consultoras de Natura, Avon, O Boticário, Eudora, Mary Kay e Quem Disse Berenice. Controle de validade, lucro real e vitrine online. Teste grátis por 14 dias." />
+    <link rel="canonical" href="https://minhaamora.com.br/" />
+
+    <!-- Open Graph — como aparece ao compartilhar no WhatsApp/Instagram/Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:site_name" content="Minha Amora" />
+    <meta property="og:title" content="Minha Amora — Gestão de Estoque para Consultoras" />
+    <meta property="og:description" content="Controle de estoque, validade e lucro real para consultoras de venda direta. Teste grátis por 14 dias, sem cartão." />
+    <meta property="og:url" content="https://minhaamora.com.br/" />
+    <meta property="og:image" content="https://minhaamora.com.br/assets/app-preview-1.png" />
+
+    <!-- Twitter/X Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Minha Amora — Gestão de Estoque para Consultoras" />
+    <meta name="twitter:description" content="Controle de estoque, validade e lucro real para consultoras de venda direta. Teste grátis por 14 dias." />
+    <meta name="twitter:image" content="https://minhaamora.com.br/assets/app-preview-1.png" />
+
+    <!-- ⚠️ Google Analytics (GA4) — troque G-XXXXXXXXXX pelo ID real,
+         gerado em analytics.google.com ao criar a propriedade. Sem essa
+         troca, o script carrega mas não manda dado pra lugar nenhum
+         (ID inválido é ignorado silenciosamente pelo GA, não quebra o site). -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-GSVSL4PBBG');
+    </script>
   </head>
   <body>
     <div id="root"></div>
