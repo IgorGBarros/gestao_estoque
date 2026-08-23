@@ -544,6 +544,24 @@ export const adminApi = {
       total_pago: number; quantidade_pagamentos: number; assinatura_vencida: boolean;
       subscription_expires_at: string | null;
     }>(`/admin/pagamentos-loja/?store_id=${storeId}`),
+  // 📦 Catálogo de produtos — navegação paginada por marca, e console
+  // de consulta SQL restrito a leitura.
+  marcasDisponiveis: () => apiRequest<string[]>("/admin/marcas-disponiveis/"),
+  produtosCatalogo: (params: { brand?: string; busca?: string; page?: number; page_size?: number }) => {
+    const qs = new URLSearchParams();
+    if (params.brand) qs.set("brand", params.brand);
+    if (params.busca) qs.set("busca", params.busca);
+    qs.set("page", String(params.page || 1));
+    qs.set("page_size", String(params.page_size || 50));
+    return apiRequest<{
+      produtos: { id: number; name: string; brand: string; bar_code: string | null; natura_sku: string | null; category: string; official_price: number | null }[];
+      total: number; pagina_atual: number; total_paginas: number;
+    }>(`/admin/produtos-catalogo/?${qs.toString()}`);
+  },
+  sqlConsole: (query: string) =>
+    apiRequest<{ colunas: string[]; linhas: any[][]; total_retornado: number }>(
+      "/admin/sql-console/", { method: "POST", body: JSON.stringify({ query }) }
+    ),
   enviarEmailContato: (data: { store_id: number; assunto: string; corpo_texto: string; corpo_html?: string; template?: string }) =>
     apiRequest<any>("/admin/contatos/enviar-email/", { method: "POST", body: JSON.stringify(data) }),
   gerarLinkWhatsapp: (storeId: number, texto: string) =>
