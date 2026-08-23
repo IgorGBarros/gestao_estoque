@@ -1484,6 +1484,14 @@ def admin_help_content_detail(request, content_id):
 def _serialize_barcode_candidate(c):
     from inventory.models import Product
     ja_tem_barcode = Product.objects.filter(bar_code=c.gtin).exists()
+
+    # ⚠️ NOVO: a foto pertence ao Product (não ao candidato) — se o
+    # crawler já achou uma pro produto vinculado por SKU, mostra ela
+    # aqui. Se não tiver, a tela permite preencher manualmente.
+    produto_vinculado = None
+    if c.searched_product_sku:
+        produto_vinculado = Product.objects.filter(natura_sku=c.searched_product_sku).first()
+
     return {
         'id': c.id,
         'gtin': c.gtin,
@@ -1496,6 +1504,8 @@ def _serialize_barcode_candidate(c):
         'matched': c.matched,
         'created_at': c.created_at.isoformat(),
         'ja_aplicado': ja_tem_barcode,
+        'produto_id': produto_vinculado.id if produto_vinculado else None,
+        'image_url': produto_vinculado.image_url if produto_vinculado else None,
     }
 
 
@@ -1583,6 +1593,38 @@ def admin_barcode_candidate_reject(request, candidate_id):
     candidato.matched = False
     candidato.save(update_fields=['matched'])
     return Response({'recusado': True})
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_barcode_candidate_set_image(request, candidate_id):
+    """
+    POST /api/admin/barcode-candidates/<id>/imagem/
+    Preenche manualmente a foto do produto vinculado a esse candidato —
+    a foto pertence ao Product (não ao candidato em si), então fica
+    disponível em qualquer outro lugar que mostrar esse produto depois,
+    não só nesta tela de revisão.
+    """
+    from inventory.models import ExternalBarcodeCatalog, Product
+
+    candidato = ExternalBarcodeCatalog.objects.filter(id=candidate_id).first()
+    if not candidato:
+        return Response({'error': 'Candidato não encontrado.'}, status=404)
+
+    if not candidato.searched_product_sku:
+        return Response({'error': 'Esse candidato não está vinculado a nenhum produto.'}, status=400)
+
+    produto = Product.objects.filter(natura_sku=candidato.searched_product_sku).first()
+    if not produto:
+        return Response({'error': 'Produto vinculado não encontrado.'}, status=404)
+
+    image_url = (request.data.get('image_url') or '').strip()
+    if not image_url:
+        return Response({'error': 'Informe uma URL de imagem.'}, status=400)
+
+    produto.image_url = image_url
+    produto.save(update_fields=['image_url'])
+    return Response({'salvo': True, 'image_url': produto.image_url})
 
 # ─────────────────────────────────────────────────────────────
 # 🎁 CÓDIGOS DE INDICAÇÃO — não é programa aberto ao público, é

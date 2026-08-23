@@ -519,6 +519,8 @@ export const adminApi = {
     apiRequest<any>(`/admin/barcode-candidates/${id}/approve/`, { method: "POST" }),
   rejectBarcodeCandidate: (id: number) =>
     apiRequest<any>(`/admin/barcode-candidates/${id}/reject/`, { method: "POST" }),
+  setBarcodeCandidateImage: (id: number, imageUrl: string) =>
+    apiRequest<any>(`/admin/barcode-candidates/${id}/imagem/`, { method: "POST", body: JSON.stringify({ image_url: imageUrl }) }),
 
   // 🎁 Códigos de indicação — individuais, não é programa aberto
   listReferralCodes: () => apiRequest<any[]>("/admin/referral-codes/"),

@@ -26,6 +26,8 @@ interface Candidato {
   searched_product_name: string | null;
   search_term_used: string | null;
   created_at: string;
+  produto_id: number | null;
+  image_url: string | null;
 }
 
 const CONFIANCA_COR: Record<string, string> = {
@@ -47,6 +49,11 @@ export default function AdminBarcodeReviewTab({ toast }: Props) {
   const [filtroBrand, setFiltroBrand] = useState("");
   const [filtroConfianca, setFiltroConfianca] = useState("");
   const [processando, setProcessando] = useState<number | null>(null);
+  // ⚠️ NOVO: qual linha está com o campo de "colar link da foto" aberto,
+  // e o texto digitado ali — só um por vez, mais simples de acompanhar.
+  const [editandoFoto, setEditandoFoto] = useState<number | null>(null);
+  const [urlFoto, setUrlFoto] = useState("");
+  const [salvandoFoto, setSalvandoFoto] = useState(false);
 
   const carregar = async () => {
     setLoading(true);
@@ -95,6 +102,22 @@ export default function AdminBarcodeReviewTab({ toast }: Props) {
     }
   };
 
+  const salvarFoto = async (c: Candidato) => {
+    if (!urlFoto.trim()) return;
+    setSalvandoFoto(true);
+    try {
+      await adminApi.setBarcodeCandidateImage(c.id, urlFoto.trim());
+      setCandidatos((prev) => prev.map((x) => (x.id === c.id ? { ...x, image_url: urlFoto.trim() } : x)));
+      toast({ title: "Foto salva no produto" });
+      setEditandoFoto(null);
+      setUrlFoto("");
+    } catch (err: any) {
+      toast({ title: "Não deu pra salvar", description: err?.response?.data?.error, variant: "destructive" });
+    } finally {
+      setSalvandoFoto(false);
+    }
+  };
+
   // Marcas já presentes na fila, pro filtro — não é lista fixa.
   const marcasExistentes = Array.from(new Set(candidatos.map((c) => c.brand).filter(Boolean)));
 
@@ -137,40 +160,87 @@ export default function AdminBarcodeReviewTab({ toast }: Props) {
         ) : (
           <div className="space-y-2">
             {candidatos.map((c) => (
-              <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate text-sm font-medium text-foreground">
-                      {c.searched_product_name || c.description}
-                    </p>
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${CONFIANCA_COR[c.confidence_level] || ""}`}>
-                      {CONFIANCA_LABEL[c.confidence_level] || c.confidence_level}
-                    </span>
-                    {c.brand && <Badge variant="outline" className="text-[10px]">{c.brand}</Badge>}
+              <div key={c.id} className="rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between gap-3">
+                  {/* ⚠️ NOVO: foto do produto vinculado — se o crawler já
+                      tiver achado uma, mostra direto; se não, oferece
+                      preencher na hora, sem precisar ir em outra tela. */}
+                  <div className="h-12 w-12 shrink-0 overflow-hidden rounded-lg bg-secondary/50">
+                    {c.image_url ? (
+                      <img src={c.image_url} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                        <Barcode className="h-5 w-5 opacity-40" />
+                      </div>
+                    )}
                   </div>
-                  <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-                    GTIN {c.gtin}
-                    {c.searched_product_sku && ` · SKU ${c.searched_product_sku}`}
-                  </p>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {c.searched_product_name || c.description}
+                      </p>
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${CONFIANCA_COR[c.confidence_level] || ""}`}>
+                        {CONFIANCA_LABEL[c.confidence_level] || c.confidence_level}
+                      </span>
+                      {c.brand && <Badge variant="outline" className="text-[10px]">{c.brand}</Badge>}
+                    </div>
+                    <p className="mt-0.5 font-mono text-xs text-muted-foreground">
+                      GTIN {c.gtin}
+                      {c.searched_product_sku && ` · SKU ${c.searched_product_sku}`}
+                    </p>
+                    {!c.image_url && c.produto_id && editandoFoto !== c.id && (
+                      <button
+                        onClick={() => { setEditandoFoto(c.id); setUrlFoto(""); }}
+                        className="mt-1 text-[10px] text-brand hover:underline"
+                      >
+                        + Adicionar foto
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    <button
+                      onClick={() => recusar(c)}
+                      disabled={processando === c.id}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-destructive/30 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                      title="Recusar"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => aprovar(c)}
+                      disabled={processando === c.id}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-300 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+                      title="Aprovar e aplicar no produto"
+                    >
+                      {processando === c.id ? <LoadingSpinner /> : <Check className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
-                <div className="flex shrink-0 gap-1.5">
-                  <button
-                    onClick={() => recusar(c)}
-                    disabled={processando === c.id}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-destructive/30 text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                    title="Recusar"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                  <button
-                    onClick={() => aprovar(c)}
-                    disabled={processando === c.id}
-                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-300 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
-                    title="Aprovar e aplicar no produto"
-                  >
-                    {processando === c.id ? <LoadingSpinner /> : <Check className="h-4 w-4" />}
-                  </button>
-                </div>
+
+                {editandoFoto === c.id && (
+                  <div className="mt-2 flex gap-2 pl-[60px]">
+                    <input
+                      value={urlFoto}
+                      onChange={(e) => setUrlFoto(e.target.value)}
+                      placeholder="Cole o link da foto (https://...)"
+                      className="flex-1 rounded-lg border border-input bg-background px-3 py-1.5 text-xs outline-none focus:border-brand"
+                    />
+                    <button
+                      onClick={() => setEditandoFoto(null)}
+                      className="rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-secondary"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={() => salvarFoto(c)}
+                      disabled={salvandoFoto || !urlFoto.trim()}
+                      className="rounded-lg bg-brand px-2.5 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      {salvandoFoto ? <LoadingSpinner size="sm" /> : "Salvar"}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
