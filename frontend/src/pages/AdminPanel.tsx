@@ -1972,23 +1972,30 @@ export default function AdminPanel() {
               ========================================== */}
           <TabsContent value="sistema" className="space-y-6">
             <Tabs value={sistemaSubTab} onValueChange={setSistemaSubTab} className="space-y-6">
-              <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
-                <TabsTrigger value="saude" className="flex shrink-0 items-center gap-2">
-                  <Server className="h-4 w-4" /> Saúde
-                </TabsTrigger>
-                <TabsTrigger value="config" className="flex shrink-0 items-center gap-2">
-                  <Settings2 className="h-4 w-4" /> Configurações
-                </TabsTrigger>
-                <TabsTrigger value="payments" className="flex shrink-0 items-center gap-2">
-                  <CreditCard className="h-4 w-4" /> Pagamentos
-                </TabsTrigger>
-                <TabsTrigger value="api" className="flex shrink-0 items-center gap-2">
-                  <Key className="h-4 w-4" /> API
-                </TabsTrigger>
-                <TabsTrigger value="catalog" className="flex shrink-0 items-center gap-2">
-                  <Barcode className="h-4 w-4" /> Catálogo
-                </TabsTrigger>
-              </TabsList>
+              {/* ⚠️ NOVO: essa barra some quando "Catálogo" está ativo —
+                  ele tem sub-abas próprias, e mostrar as duas fileiras
+                  empilhadas junto ficava em cascata. O botão "← Sistema"
+                  dentro do Catálogo substitui essa barra, na mesma linha
+                  das sub-abas dele. */}
+              {sistemaSubTab !== "catalog" && (
+                <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
+                  <TabsTrigger value="saude" className="flex shrink-0 items-center gap-2">
+                    <Server className="h-4 w-4" /> Saúde
+                  </TabsTrigger>
+                  <TabsTrigger value="config" className="flex shrink-0 items-center gap-2">
+                    <Settings2 className="h-4 w-4" /> Configurações
+                  </TabsTrigger>
+                  <TabsTrigger value="payments" className="flex shrink-0 items-center gap-2">
+                    <CreditCard className="h-4 w-4" /> Pagamentos
+                  </TabsTrigger>
+                  <TabsTrigger value="api" className="flex shrink-0 items-center gap-2">
+                    <Key className="h-4 w-4" /> API
+                  </TabsTrigger>
+                  <TabsTrigger value="catalog" className="flex shrink-0 items-center gap-2">
+                    <Barcode className="h-4 w-4" /> Catálogo
+                  </TabsTrigger>
+                </TabsList>
+              )}
 
           <TabsContent value="saude" className="space-y-6">
             <div className="flex justify-between items-center">
@@ -2235,7 +2242,7 @@ export default function AdminPanel() {
               TAB: CATÁLOGO (Revisão de códigos de barras do crawler)
               ========================================== */}
           <TabsContent value="catalog" className="space-y-6">
-            <AdminCatalogTab toast={toast} />
+            <AdminCatalogTab toast={toast} onVoltar={() => setSistemaSubTab("saude")} />
           </TabsContent>
 
           {/* ==========================================

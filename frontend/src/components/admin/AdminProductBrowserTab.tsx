@@ -94,6 +94,7 @@ export default function AdminProductBrowserTab({ toast }: Props) {
                   <tr className="border-b border-border text-left text-xs text-muted-foreground">
                     <th className="pb-2 pr-3">Nome</th>
                     <th className="pb-2 pr-3">Marca</th>
+                    <th className="pb-2 pr-3">SKU</th>
                     <th className="pb-2 pr-3">Código de barras</th>
                     <th className="pb-2 pr-3">Categoria</th>
                     <th className="pb-2">Preço</th>
@@ -104,6 +105,7 @@ export default function AdminProductBrowserTab({ toast }: Props) {
                     <tr key={p.id} className="border-b border-border/50">
                       <td className="py-2 pr-3">{p.name}</td>
                       <td className="py-2 pr-3">{p.brand}</td>
+                      <td className="py-2 pr-3 font-mono text-xs">{p.natura_sku || "—"}</td>
                       <td className="py-2 pr-3 font-mono text-xs">{p.bar_code || "—"}</td>
                       <td className="py-2 pr-3">{p.category || "—"}</td>
                       <td className="py-2">{p.official_price != null ? `R$ ${p.official_price.toFixed(2)}` : "—"}</td>

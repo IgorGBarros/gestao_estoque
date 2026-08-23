@@ -2027,7 +2027,9 @@ def admin_produtos_catalogo(request):
     if brand:
         qs = qs.filter(brand=brand)
     if busca:
-        qs = qs.filter(name__icontains=busca)
+        # ⚠️ NOVO: agora que SKU e código de barras aparecem na tabela,
+        # faz sentido buscar por eles também, não só pelo nome.
+        qs = qs.filter(Q(name__icontains=busca) | Q(natura_sku__icontains=busca) | Q(bar_code__icontains=busca))
 
     paginator = Paginator(qs, page_size)
     pagina = paginator.get_page(page)
