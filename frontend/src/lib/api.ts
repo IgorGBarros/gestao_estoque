@@ -938,6 +938,7 @@ export interface SystemConfigStatus {
   ocr_enabled: boolean;
   whatsapp_suporte: string;
   email_suporte: string;
+  video_apresentacao_url: string;
 }
 
 // 🔹 Pública — precisa funcionar até pra quem ainda não conseguiu logar,

@@ -981,18 +981,21 @@ class StockEntryView(APIView):
                             product.save()
                             print("Produto atualizado com os novos dados")
                 else:
-                    print("Criando novo produto local")
-                    product = Product.objects.create(
-                        bar_code=barcode_input,
-                        natura_sku=sku_input,
-                        name=name_input,
-                        category=category_input,
-                        brand=data.get('brand') or None,
-                        official_price=data.get('sale_price', 0),
-                        image_url=data.get('image_url', ''),
-                        last_checked_at=timezone.now()
-                    )
-                    print(f"Produto criado: {product}")
+                    # ⚠️ CORREÇÃO: antes, não achar o produto no catálogo
+                    # criava um produto NOVO na hora — mas o catálogo é
+                    # GLOBAL (compartilhado entre todas as lojas). Um
+                    # código lido errado, ou uma consultora digitando
+                    # nome/categoria por conta própria, poluía o banco
+                    # pra sempre, pra todo mundo. Agora recusa e pede
+                    # pra conferir a leitura, em vez de criar sozinho.
+                    return Response({
+                        'error': (
+                            'Não encontramos esse produto no catálogo. Confira se o '
+                            'código de barras foi lido certo e tente escanear de novo. '
+                            'Se o produto for novo de verdade, fale com o suporte.'
+                        ),
+                        'error_code': 'PRODUTO_NAO_ENCONTRADO',
+                    }, status=422)
                 
                 # 3. Gerenciar estoque da loja (TENANT-AWARE)
                 print(f"Criando/atualizando InventoryItem para store={store}, product={product}")
@@ -1292,6 +1295,21 @@ def lookup_product(request):
 
     # --- 2. SE FOR BUSCA POR EAN / SKU (NÚMERO) ---
     print(f"   ↳ Busca Numérica detectada. Verificando base local...")
+
+    # ⚠️ NOVO: leitura de código de barras claramente errada (muito
+    # curta ou absurdamente longa) — pede pra escanear de novo antes
+    # de gastar tempo buscando algo que o leitor capturou pela metade.
+    # Faixa larga de propósito (6-14) — cobre EAN-8, UPC-A e EAN-13,
+    # e também o SKU da Mary Kay usado como código de barras (8 dígitos,
+    # não é um EAN de verdade, não passaria por validação de dígito
+    # verificador — por isso não faço checagem de checksum, só de
+    # tamanho plausível).
+    if len(query) < 6 or len(query) > 14:
+        return Response({
+            "found": False,
+            "error": "Essa leitura não parece um código de barras válido. Tente escanear de novo.",
+            "error_code": "LEITURA_INVALIDA",
+        }, status=422)
 
     if not force_remote:
         local = Product.objects.filter(Q(bar_code=query) | Q(natura_sku=query)).first()
@@ -5041,6 +5059,7 @@ def system_config_view(request):
         'ocr_enabled': cfg.ocr_enabled,
         'whatsapp_suporte': cfg.whatsapp_suporte,
         'email_suporte': cfg.email_suporte,
+        'video_apresentacao_url': cfg.video_apresentacao_url,
     })
 
 
