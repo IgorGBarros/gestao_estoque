@@ -4,16 +4,16 @@
 // barras (existia antes, só movida pra cá), navegação por marca (novo,
 // paginado de verdade) e consulta SQL (novo, restrito a leitura).
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
-import { Barcode, Package, Terminal, ArrowLeft } from "lucide-react";
+import { Barcode, Package, Terminal, ChevronRight } from "lucide-react";
 import AdminBarcodeReviewTab from "./AdminBarcodeReviewTab";
 import AdminProductBrowserTab from "./AdminProductBrowserTab";
 import AdminSQLConsoleTab from "./AdminSQLConsoleTab";
 
 interface Props {
   toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
-  // ⚠️ NOVO: opcional de propósito — quando informado, mostra um botão
-  // de voltar na MESMA linha das sub-abas, substituindo a fileira de
-  // cima (Saúde/Config/etc) em vez de empilhar mais uma barra.
+  // ⚠️ NOVO: opcional de propósito — quando informado, mostra a trilha
+  // "Sistema › Catálogo" no mesmo estilo usado em Loja e Sistema, em
+  // vez de uma segunda fileira de abas empilhada.
   onVoltar?: () => void;
 }
 
@@ -22,13 +22,13 @@ export default function AdminCatalogTab({ toast, onVoltar }: Props) {
     <Tabs defaultValue="revisao" className="space-y-4">
       <TabsList className="scrollbar-hide flex w-full items-center gap-1 overflow-x-auto">
         {onVoltar && (
-          <button
-            onClick={onVoltar}
-            className="flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
-            title="Voltar pra Sistema"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" /> Sistema
-          </button>
+          <div className="mr-1 flex shrink-0 items-center gap-1 border-r border-border pr-2 text-xs font-medium">
+            <button onClick={onVoltar} className="text-muted-foreground hover:text-foreground hover:underline">
+              Sistema
+            </button>
+            <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+            <span className="text-foreground">Catálogo</span>
+          </div>
         )}
         <TabsTrigger value="revisao" className="flex shrink-0 items-center gap-2">
           <Barcode className="h-4 w-4" /> Revisão de Código de Barras

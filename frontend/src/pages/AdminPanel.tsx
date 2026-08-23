@@ -7,7 +7,7 @@ import {
   Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
   Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
   FileText, Download, Upload, Eye, EyeOff, Palette, Zap, Bell, Gift, Percent,
-  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy, MessageCircle, Barcode
+  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy, MessageCircle, Barcode, ChevronRight
 } from "lucide-react";
 
 import { profileApi, adminApi, adminHealthApi, systemConfigApi, SystemConfigStatus } from "../lib/api";
@@ -1521,7 +1521,13 @@ export default function AdminPanel() {
               ========================================== */}
           <TabsContent value="loja" className="space-y-6">
             <Tabs value={lojaSubTab} onValueChange={setLojaSubTab} className="space-y-6">
-              <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
+              <TabsList className="scrollbar-hide flex w-full items-center gap-1 overflow-x-auto">
+                {/* ⚠️ NOVO: rótulo de trilha — mesmo tratamento visual em
+                    todo grupo aninhado (Loja, Sistema, Catálogo), pra
+                    sempre ficar claro onde você está, de forma consistente. */}
+                <span className="mr-1 shrink-0 border-r border-border pr-2 text-xs font-medium text-muted-foreground">
+                  Loja
+                </span>
                 <TabsTrigger value="stores" className="flex shrink-0 items-center gap-2">
                   <Store className="h-4 w-4" /> Lojas
                 </TabsTrigger>
@@ -1978,7 +1984,10 @@ export default function AdminPanel() {
                   dentro do Catálogo substitui essa barra, na mesma linha
                   das sub-abas dele. */}
               {sistemaSubTab !== "catalog" && (
-                <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
+                <TabsList className="scrollbar-hide flex w-full items-center gap-1 overflow-x-auto">
+                  <span className="mr-1 shrink-0 border-r border-border pr-2 text-xs font-medium text-muted-foreground">
+                    Sistema
+                  </span>
                   <TabsTrigger value="saude" className="flex shrink-0 items-center gap-2">
                     <Server className="h-4 w-4" /> Saúde
                   </TabsTrigger>
