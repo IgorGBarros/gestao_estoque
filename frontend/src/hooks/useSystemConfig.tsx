@@ -31,5 +31,6 @@ export function useSystemConfig() {
     ocrEnabled: config?.ocr_enabled ?? true,
     whatsappSuporte: config?.whatsapp_suporte || "",
     emailSuporte: config?.email_suporte || "",
+    videoApresentacaoUrl: config?.video_apresentacao_url || "",
   };
 }

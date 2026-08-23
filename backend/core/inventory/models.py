@@ -1294,6 +1294,10 @@ class SystemConfig(models.Model):
         help_text="Só números, com DDI e DDD — ex: 5547999998888",
     )
     email_suporte = models.EmailField(blank=True)
+    # ⚠️ NOVO: vídeo de apresentação da página /links (link na bio do
+    # Instagram) — editável aqui, sem precisar mexer em código nem
+    # publicar de novo pra trocar o vídeo.
+    video_apresentacao_url = models.URLField(blank=True)
 
     updated_at = models.DateTimeField(auto_now=True)
 

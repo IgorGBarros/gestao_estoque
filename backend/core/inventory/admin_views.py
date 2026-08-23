@@ -1148,7 +1148,7 @@ def update_system_config(request):
     """PATCH /api/admin/system-config/ — liga/desliga manutenção e feature flags globais."""
     cfg = SystemConfig.get_solo()
     data = request.data
-    campos = ['maintenance_mode', 'maintenance_message', 'ai_enabled', 'storefront_enabled', 'ocr_enabled', 'whatsapp_suporte', 'email_suporte']
+    campos = ['maintenance_mode', 'maintenance_message', 'ai_enabled', 'storefront_enabled', 'ocr_enabled', 'whatsapp_suporte', 'email_suporte', 'video_apresentacao_url']
     alterados = []
     for campo in campos:
         if campo in data:
@@ -1163,6 +1163,7 @@ def update_system_config(request):
         'ocr_enabled': cfg.ocr_enabled,
         'whatsapp_suporte': cfg.whatsapp_suporte,
         'email_suporte': cfg.email_suporte,
+        'video_apresentacao_url': cfg.video_apresentacao_url,
         'updated_fields': alterados,
     })
 
@@ -1941,4 +1942,131 @@ def admin_contatos_marcar_whatsapp(request):
         return Response({'error': 'Loja não encontrada.'}, status=404)
 
     WhatsappContatoMarcado.objects.create(store=store, template=template_usado, texto=texto)
-    return Response({'marcado': True, 'status': _status_contato(store)})
+    return Response({'marcado': True, 'status': _status_contato(store)})# ─────────────────────────────────────────────────────────────
+# 📦 CATÁLOGO DE PRODUTOS — navegação paginada por marca, e um console
+# de consulta SQL restrito a leitura (inspirado no Query Generator do
+# SAP Business One, mas travado: só SELECT, uma instrução por vez,
+# limite de linha forçado, tempo máximo de execução).
+# ─────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_marcas_disponiveis(request):
+    """GET /api/admin/marcas-disponiveis/ — lista de marcas distintas, pra popular o filtro."""
+    from inventory.models import Product
+    marcas = (
+        Product.objects.exclude(brand__isnull=True).exclude(brand='')
+        .values_list('brand', flat=True).distinct().order_by('brand')
+    )
+    return Response(list(marcas))
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_produtos_catalogo(request):
+    """
+    GET /api/admin/produtos-catalogo/?brand=Natura&busca=kaiak&page=1&page_size=50
+    Navegação paginada pelo catálogo global — nunca carrega tudo de uma
+    vez (o motivo original do pedido: catálogo com 6 marcas fica pesado
+    demais sem isso). Usa o índice de busca rápida (GIN trigram) já
+    existente quando a busca por nome é usada.
+    """
+    from inventory.models import Product
+    from django.core.paginator import Paginator
+
+    brand = request.query_params.get('brand', '').strip()
+    busca = request.query_params.get('busca', '').strip()
+    page = int(request.query_params.get('page', 1))
+    # ⚠️ Teto de 200 por página -- mesmo pedindo mais, não deixa a
+    # consulta virar pesada de novo por engano.
+    page_size = min(int(request.query_params.get('page_size', 50)), 200)
+
+    qs = Product.objects.all().order_by('name')
+    if brand:
+        qs = qs.filter(brand=brand)
+    if busca:
+        qs = qs.filter(name__icontains=busca)
+
+    paginator = Paginator(qs, page_size)
+    pagina = paginator.get_page(page)
+
+    produtos = [{
+        'id': p.id, 'name': p.name, 'brand': p.brand, 'bar_code': p.bar_code,
+        'natura_sku': p.natura_sku, 'category': p.category,
+        'official_price': float(p.official_price) if p.official_price else None,
+    } for p in pagina]
+
+    return Response({
+        'produtos': produtos,
+        'total': paginator.count,
+        'pagina_atual': pagina.number,
+        'total_paginas': paginator.num_pages,
+    })
+
+
+# Palavras que nunca podem aparecer numa consulta do console -- cobre
+# qualquer coisa que altere dado ou estrutura, não só o óbvio (DROP/DELETE).
+_SQL_PALAVRAS_PROIBIDAS = [
+    'insert', 'update', 'delete', 'drop', 'alter', 'truncate', 'create',
+    'grant', 'revoke', 'exec', 'execute', 'call', 'copy', 'vacuum',
+    'reindex', 'cluster', 'refresh', 'set', 'reset', 'listen',
+    'notify', 'unlisten', 'load', 'lock', 'merge', 'comment', 'do',
+]
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_sql_console(request):
+    """
+    POST /api/admin/sql-console/
+    Console de consulta SOMENTE LEITURA — igual o "Query Generator" do
+    SAP Business One, mas travado: só SELECT, uma instrução por vez,
+    limite de 500 linhas forçado (mesmo sem LIMIT na consulta), tempo
+    máximo de 5 segundos de execução (não trava o banco pro resto do
+    sistema numa consulta pesada). Não é acesso livre — é uma
+    ferramenta de relatório rápido, pra não precisar abrir o Supabase.
+    """
+    import re
+    from django.db import connection, transaction
+
+    query = (request.data.get('query') or '').strip()
+    if not query:
+        return Response({'error': 'Consulta vazia.'}, status=400)
+
+    # Remove comentário ANTES de validar -- senão dava pra esconder uma
+    # palavra proibida depois de "--" achando que passaria despercebido.
+    sem_comentario = re.sub(r'--.*$', '', query, flags=re.MULTILINE)
+    sem_comentario = re.sub(r'/\*.*?\*/', '', sem_comentario, flags=re.DOTALL)
+    normalizada = sem_comentario.strip().lower()
+
+    if not normalizada.startswith('select'):
+        return Response({'error': 'Só é permitido consulta SELECT.'}, status=400)
+
+    partes = [p for p in sem_comentario.split(';') if p.strip()]
+    if len(partes) > 1:
+        return Response({'error': 'Só uma consulta por vez — sem ponto e vírgula no meio.'}, status=400)
+
+    for palavra in _SQL_PALAVRAS_PROIBIDAS:
+        if re.search(rf'\b{palavra}\b', normalizada):
+            return Response({'error': f'Palavra não permitida na consulta: "{palavra}".'}, status=400)
+
+    query_com_limite = f"SELECT * FROM ({partes[0]}) AS subconsulta LIMIT 500"
+
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                # SET LOCAL -- só vale dentro desta transação, nunca
+                # "vaza" pra outras consultas que reaproveitem a mesma
+                # conexão do pool depois (CONN_MAX_AGE mantém conexão viva).
+                cursor.execute("SET LOCAL statement_timeout = '5000'")
+                cursor.execute(query_com_limite)
+                colunas = [col[0] for col in cursor.description]
+                linhas = cursor.fetchall()
+    except Exception as e:
+        return Response({'error': f'Erro na consulta: {e}'}, status=400)
+
+    return Response({
+        'colunas': colunas,
+        'linhas': [list(linha) for linha in linhas],
+        'total_retornado': len(linhas),
+    })

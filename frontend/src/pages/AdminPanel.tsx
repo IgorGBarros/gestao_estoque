@@ -824,8 +824,8 @@ export default function AdminPanel() {
         title: `Acessando como ${r.user.display_name || r.user.email}`,
         description: `Sessão de suporte de ${r.expires_in_minutes} minutos.`,
       });
-      // Recarrega na home já com a sessão da consultora.
-      setTimeout(() => { window.location.href = "/"; }, 600);
+      // Recarrega já na home da consultora (não mais "/", que agora é a landing pública).
+      setTimeout(() => { window.location.href = "/app"; }, 600);
     } catch (e: any) {
       toast({
         title: "Não foi possível acessar",
@@ -2157,6 +2157,17 @@ export default function AdminPanel() {
                     placeholder="contato@minhaamora.com.br"
                     className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
                   />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground">Vídeo de apresentação (link na bio)</label>
+                  <input
+                    type="text"
+                    defaultValue={systemConfig?.video_apresentacao_url ?? ""}
+                    onBlur={(e) => updateConfig({ video_apresentacao_url: e.target.value })}
+                    placeholder="https://youtube.com/watch?v=..."
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
+                  <p className="mt-1 text-[10px] text-muted-foreground">Aparece no topo de minhaamora.com.br/links</p>
                 </div>
               </div>
               {savingConfig && <p className="mt-3 text-xs text-muted-foreground">Salvando...</p>}

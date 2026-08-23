@@ -10,26 +10,42 @@ import { ArrowRight, MessageCircle, Sparkles } from "lucide-react";
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
 import { useSystemConfig } from "../hooks/useSystemConfig";
 
+// Mesma extração usada em Support.tsx — cobre link normal, encurtado
+// (youtu.be), shorts e embed já pronto.
+function youtubeId(url: string): string | null {
+  const m = url.match(
+    /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/))([a-zA-Z0-9_-]{6,})/
+  );
+  return m ? m[1] : null;
+}
+
 export default function LinkNaBio() {
   const navigate = useNavigate();
-  // ⚠️ CORREÇÃO: número de WhatsApp de suporte estava fixo direto no
-  // código — agora vem do painel admin (aba Sistema → Configurações),
-  // sem precisar mexer em código nem publicar de novo pra trocar.
-  const { whatsappSuporte } = useSystemConfig();
+  // ⚠️ CORREÇÃO: número de WhatsApp e vídeo de apresentação estavam
+  // fixos direto no código — agora vêm do painel admin (Sistema →
+  // Configurações), sem precisar mexer em código nem publicar de novo.
+  const { whatsappSuporte, videoApresentacaoUrl } = useSystemConfig();
+  const idVideo = videoApresentacaoUrl ? youtubeId(videoApresentacaoUrl) : null;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#FDF2F7] to-white flex flex-col items-center px-4 py-10">
       <img src={logoMinhaAmora} alt="Minha Amora" className="h-14 mb-6" />
 
-      {/* ⚠️ Espaço reservado pro vídeo de apresentação — troca o iframe
-          pelo vídeo de verdade assim que gravar (Dia 4-5 do plano). Até
-          lá, mostra um cartão de "em breve" em vez de quebrar a página. */}
       <div className="w-full max-w-sm aspect-[9/16] max-h-[420px] rounded-2xl bg-white shadow-md border border-border flex items-center justify-center mb-6 overflow-hidden">
-        {/* Troque por: <iframe src="https://www.youtube.com/embed/SEU_VIDEO_ID" className="w-full h-full" allowFullScreen /> */}
-        <div className="text-center px-6">
-          <Sparkles className="h-8 w-8 text-brand mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground">Vídeo de apresentação em breve</p>
-        </div>
+        {idVideo ? (
+          <iframe
+            src={`https://www.youtube.com/embed/${idVideo}`}
+            className="h-full w-full"
+            title="Apresentação Minha Amora"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        ) : (
+          <div className="text-center px-6">
+            <Sparkles className="h-8 w-8 text-brand mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">Vídeo de apresentação em breve</p>
+          </div>
+        )}
       </div>
 
       <div className="w-full max-w-sm space-y-3">
