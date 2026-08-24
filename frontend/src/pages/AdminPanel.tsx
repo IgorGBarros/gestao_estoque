@@ -7,7 +7,7 @@ import {
   Settings2, ToggleLeft, ToggleRight, CreditCard, Clock, CalendarCheck, CalendarX, X,
   Plus, Edit2, Trash2, Save, DollarSign, Target, Megaphone, TrendingUp, Activity,
   FileText, Download, Upload, Eye, EyeOff, Palette, Zap, Bell, Gift, Percent,
-  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy, MessageCircle, Barcode
+  Bot, Server, Lock, LogIn, Ban, FileSearch, AlertCircle, Key, Copy, MessageCircle, Barcode, ChevronRight
 } from "lucide-react";
 
 import { profileApi, adminApi, adminHealthApi, systemConfigApi, SystemConfigStatus } from "../lib/api";
@@ -1314,24 +1314,31 @@ export default function AdminPanel() {
           {/* ⚠️ Rolagem horizontal, não grid de colunas fixas — com 10
               abas agora, um número fixo de colunas sempre acaba quebrando
               de novo a cada aba nova adicionada. */}
-          <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
-            <TabsTrigger value="dashboard" className="flex shrink-0 items-center gap-2">
-              <BarChart3 className="h-4 w-4" />
-              Dashboard
-            </TabsTrigger>
-            <TabsTrigger value="loja" className="flex shrink-0 items-center gap-2">
-              <Store className="h-4 w-4" />
-              Loja
-            </TabsTrigger>
-            <TabsTrigger value="sistema" className="flex shrink-0 items-center gap-2">
-              <Server className="h-4 w-4" />
-              Sistema
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex shrink-0 items-center gap-2">
-              <BarChart3 className="h-4 w-4" />
-              Analytics
-            </TabsTrigger>
-          </TabsList>
+          {/* ⚠️ NOVO: some quando está dentro de Loja ou Sistema — esses
+              grupos sempre mostram sub-navegação própria, então manter
+              essa barra visível ao mesmo tempo virava a "cascata" que
+              você reclamou. Volta a aparecer em Dashboard/Analytics
+              (que não têm sub-aba), ou clicando em "Painel" na trilha. */}
+          {activeTab !== "loja" && activeTab !== "sistema" && (
+            <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
+              <TabsTrigger value="dashboard" className="flex shrink-0 items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Dashboard
+              </TabsTrigger>
+              <TabsTrigger value="loja" className="flex shrink-0 items-center gap-2">
+                <Store className="h-4 w-4" />
+                Loja
+              </TabsTrigger>
+              <TabsTrigger value="sistema" className="flex shrink-0 items-center gap-2">
+                <Server className="h-4 w-4" />
+                Sistema
+              </TabsTrigger>
+              <TabsTrigger value="analytics" className="flex shrink-0 items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Analytics
+              </TabsTrigger>
+            </TabsList>
+          )}
 
           {/* ==========================================
               TAB: DASHBOARD
@@ -1521,7 +1528,20 @@ export default function AdminPanel() {
               ========================================== */}
           <TabsContent value="loja" className="space-y-6">
             <Tabs value={lojaSubTab} onValueChange={setLojaSubTab} className="space-y-6">
-              <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
+              <TabsList className="scrollbar-hide flex w-full items-center gap-1 overflow-x-auto">
+                {/* ⚠️ NOVO: rótulo de trilha — mesmo tratamento visual em
+                    todo grupo aninhado (Loja, Sistema, Catálogo), pra
+                    sempre ficar claro onde você está, de forma consistente.
+                    "Painel" volta pro Dashboard, restaurando a barra
+                    principal (Dashboard/Loja/Sistema/Analytics) que
+                    fica escondida enquanto está dentro de um grupo. */}
+                <div className="mr-1 flex shrink-0 items-center gap-1 border-r border-border pr-2 text-xs font-medium">
+                  <button onClick={() => setActiveTab("dashboard")} className="text-muted-foreground hover:text-foreground hover:underline">
+                    Painel
+                  </button>
+                  <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+                  <span className="text-foreground">Loja</span>
+                </div>
                 <TabsTrigger value="stores" className="flex shrink-0 items-center gap-2">
                   <Store className="h-4 w-4" /> Lojas
                 </TabsTrigger>
@@ -1972,23 +1992,37 @@ export default function AdminPanel() {
               ========================================== */}
           <TabsContent value="sistema" className="space-y-6">
             <Tabs value={sistemaSubTab} onValueChange={setSistemaSubTab} className="space-y-6">
-              <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
-                <TabsTrigger value="saude" className="flex shrink-0 items-center gap-2">
-                  <Server className="h-4 w-4" /> Saúde
-                </TabsTrigger>
-                <TabsTrigger value="config" className="flex shrink-0 items-center gap-2">
-                  <Settings2 className="h-4 w-4" /> Configurações
-                </TabsTrigger>
-                <TabsTrigger value="payments" className="flex shrink-0 items-center gap-2">
-                  <CreditCard className="h-4 w-4" /> Pagamentos
-                </TabsTrigger>
-                <TabsTrigger value="api" className="flex shrink-0 items-center gap-2">
-                  <Key className="h-4 w-4" /> API
-                </TabsTrigger>
-                <TabsTrigger value="catalog" className="flex shrink-0 items-center gap-2">
-                  <Barcode className="h-4 w-4" /> Catálogo
-                </TabsTrigger>
-              </TabsList>
+              {/* ⚠️ NOVO: essa barra some quando "Catálogo" está ativo —
+                  ele tem sub-abas próprias, e mostrar as duas fileiras
+                  empilhadas junto ficava em cascata. O botão "← Sistema"
+                  dentro do Catálogo substitui essa barra, na mesma linha
+                  das sub-abas dele. */}
+              {sistemaSubTab !== "catalog" && (
+                <TabsList className="scrollbar-hide flex w-full items-center gap-1 overflow-x-auto">
+                  <div className="mr-1 flex shrink-0 items-center gap-1 border-r border-border pr-2 text-xs font-medium">
+                    <button onClick={() => setActiveTab("dashboard")} className="text-muted-foreground hover:text-foreground hover:underline">
+                      Painel
+                    </button>
+                    <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+                    <span className="text-foreground">Sistema</span>
+                  </div>
+                  <TabsTrigger value="saude" className="flex shrink-0 items-center gap-2">
+                    <Server className="h-4 w-4" /> Saúde
+                  </TabsTrigger>
+                  <TabsTrigger value="config" className="flex shrink-0 items-center gap-2">
+                    <Settings2 className="h-4 w-4" /> Configurações
+                  </TabsTrigger>
+                  <TabsTrigger value="payments" className="flex shrink-0 items-center gap-2">
+                    <CreditCard className="h-4 w-4" /> Pagamentos
+                  </TabsTrigger>
+                  <TabsTrigger value="api" className="flex shrink-0 items-center gap-2">
+                    <Key className="h-4 w-4" /> API
+                  </TabsTrigger>
+                  <TabsTrigger value="catalog" className="flex shrink-0 items-center gap-2">
+                    <Barcode className="h-4 w-4" /> Catálogo
+                  </TabsTrigger>
+                </TabsList>
+              )}
 
           <TabsContent value="saude" className="space-y-6">
             <div className="flex justify-between items-center">
@@ -2235,7 +2269,7 @@ export default function AdminPanel() {
               TAB: CATÁLOGO (Revisão de códigos de barras do crawler)
               ========================================== */}
           <TabsContent value="catalog" className="space-y-6">
-            <AdminCatalogTab toast={toast} />
+            <AdminCatalogTab toast={toast} onVoltar={() => setSistemaSubTab("saude")} onPainel={() => setActiveTab("dashboard")} />
           </TabsContent>
 
           {/* ==========================================
