@@ -11,18 +11,28 @@ import AdminSQLConsoleTab from "./AdminSQLConsoleTab";
 
 interface Props {
   toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
-  // ⚠️ NOVO: opcional de propósito — quando informado, mostra a trilha
-  // "Sistema › Catálogo" no mesmo estilo usado em Loja e Sistema, em
-  // vez de uma segunda fileira de abas empilhada.
+  // ⚠️ NOVO: dois níveis de volta — "Sistema" volta só pras sub-abas
+  // dele (Saúde/Config/etc); "Painel" volta pro nível principal de
+  // verdade (Dashboard/Loja/Sistema/Analytics), que fica escondido
+  // enquanto estiver dentro do grupo Sistema, com ou sem Catálogo.
   onVoltar?: () => void;
+  onPainel?: () => void;
 }
 
-export default function AdminCatalogTab({ toast, onVoltar }: Props) {
+export default function AdminCatalogTab({ toast, onVoltar, onPainel }: Props) {
   return (
     <Tabs defaultValue="revisao" className="space-y-4">
       <TabsList className="scrollbar-hide flex w-full items-center gap-1 overflow-x-auto">
         {onVoltar && (
           <div className="mr-1 flex shrink-0 items-center gap-1 border-r border-border pr-2 text-xs font-medium">
+            {onPainel && (
+              <>
+                <button onClick={onPainel} className="text-muted-foreground hover:text-foreground hover:underline">
+                  Painel
+                </button>
+                <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+              </>
+            )}
             <button onClick={onVoltar} className="text-muted-foreground hover:text-foreground hover:underline">
               Sistema
             </button>

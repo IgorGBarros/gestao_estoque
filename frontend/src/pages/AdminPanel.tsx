@@ -1314,24 +1314,31 @@ export default function AdminPanel() {
           {/* ⚠️ Rolagem horizontal, não grid de colunas fixas — com 10
               abas agora, um número fixo de colunas sempre acaba quebrando
               de novo a cada aba nova adicionada. */}
-          <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
-            <TabsTrigger value="dashboard" className="flex shrink-0 items-center gap-2">
-              <BarChart3 className="h-4 w-4" />
-              Dashboard
-            </TabsTrigger>
-            <TabsTrigger value="loja" className="flex shrink-0 items-center gap-2">
-              <Store className="h-4 w-4" />
-              Loja
-            </TabsTrigger>
-            <TabsTrigger value="sistema" className="flex shrink-0 items-center gap-2">
-              <Server className="h-4 w-4" />
-              Sistema
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="flex shrink-0 items-center gap-2">
-              <BarChart3 className="h-4 w-4" />
-              Analytics
-            </TabsTrigger>
-          </TabsList>
+          {/* ⚠️ NOVO: some quando está dentro de Loja ou Sistema — esses
+              grupos sempre mostram sub-navegação própria, então manter
+              essa barra visível ao mesmo tempo virava a "cascata" que
+              você reclamou. Volta a aparecer em Dashboard/Analytics
+              (que não têm sub-aba), ou clicando em "Painel" na trilha. */}
+          {activeTab !== "loja" && activeTab !== "sistema" && (
+            <TabsList className="scrollbar-hide flex w-full gap-1 overflow-x-auto">
+              <TabsTrigger value="dashboard" className="flex shrink-0 items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Dashboard
+              </TabsTrigger>
+              <TabsTrigger value="loja" className="flex shrink-0 items-center gap-2">
+                <Store className="h-4 w-4" />
+                Loja
+              </TabsTrigger>
+              <TabsTrigger value="sistema" className="flex shrink-0 items-center gap-2">
+                <Server className="h-4 w-4" />
+                Sistema
+              </TabsTrigger>
+              <TabsTrigger value="analytics" className="flex shrink-0 items-center gap-2">
+                <BarChart3 className="h-4 w-4" />
+                Analytics
+              </TabsTrigger>
+            </TabsList>
+          )}
 
           {/* ==========================================
               TAB: DASHBOARD
@@ -1524,10 +1531,17 @@ export default function AdminPanel() {
               <TabsList className="scrollbar-hide flex w-full items-center gap-1 overflow-x-auto">
                 {/* ⚠️ NOVO: rótulo de trilha — mesmo tratamento visual em
                     todo grupo aninhado (Loja, Sistema, Catálogo), pra
-                    sempre ficar claro onde você está, de forma consistente. */}
-                <span className="mr-1 shrink-0 border-r border-border pr-2 text-xs font-medium text-muted-foreground">
-                  Loja
-                </span>
+                    sempre ficar claro onde você está, de forma consistente.
+                    "Painel" volta pro Dashboard, restaurando a barra
+                    principal (Dashboard/Loja/Sistema/Analytics) que
+                    fica escondida enquanto está dentro de um grupo. */}
+                <div className="mr-1 flex shrink-0 items-center gap-1 border-r border-border pr-2 text-xs font-medium">
+                  <button onClick={() => setActiveTab("dashboard")} className="text-muted-foreground hover:text-foreground hover:underline">
+                    Painel
+                  </button>
+                  <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+                  <span className="text-foreground">Loja</span>
+                </div>
                 <TabsTrigger value="stores" className="flex shrink-0 items-center gap-2">
                   <Store className="h-4 w-4" /> Lojas
                 </TabsTrigger>
@@ -1985,9 +1999,13 @@ export default function AdminPanel() {
                   das sub-abas dele. */}
               {sistemaSubTab !== "catalog" && (
                 <TabsList className="scrollbar-hide flex w-full items-center gap-1 overflow-x-auto">
-                  <span className="mr-1 shrink-0 border-r border-border pr-2 text-xs font-medium text-muted-foreground">
-                    Sistema
-                  </span>
+                  <div className="mr-1 flex shrink-0 items-center gap-1 border-r border-border pr-2 text-xs font-medium">
+                    <button onClick={() => setActiveTab("dashboard")} className="text-muted-foreground hover:text-foreground hover:underline">
+                      Painel
+                    </button>
+                    <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
+                    <span className="text-foreground">Sistema</span>
+                  </div>
                   <TabsTrigger value="saude" className="flex shrink-0 items-center gap-2">
                     <Server className="h-4 w-4" /> Saúde
                   </TabsTrigger>
@@ -2251,7 +2269,7 @@ export default function AdminPanel() {
               TAB: CATÁLOGO (Revisão de códigos de barras do crawler)
               ========================================== */}
           <TabsContent value="catalog" className="space-y-6">
-            <AdminCatalogTab toast={toast} onVoltar={() => setSistemaSubTab("saude")} />
+            <AdminCatalogTab toast={toast} onVoltar={() => setSistemaSubTab("saude")} onPainel={() => setActiveTab("dashboard")} />
           </TabsContent>
 
           {/* ==========================================
