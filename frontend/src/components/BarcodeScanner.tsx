@@ -11,6 +11,7 @@ interface BarcodeScannerProps {
 interface ExtendedCameraCapabilities {
   torch?: boolean;
   zoom?: { min: number; max: number; step: number };
+  focusMode?: string[];
 }
 
 // 🍎 Detectar iOS para otimizações específicas
@@ -121,16 +122,57 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         setIsScanning(true);
 
         if (isMounted) {
-          // Detectar torch após inicialização
-          const torchDelay = isIOS ? 1000 : 500;
-          setTimeout(() => {
+          // ⚠️ NOVO: foco contínuo + zoom leve + lanterna automática —
+          // o principal motivo de leitura ruim é o celular não
+          // conseguir focar de perto o suficiente pro código de barras.
+          // iOS/Safari é mais restrito nisso que Android/Chrome (WebKit
+          // historicamente aceita menos constraint de câmera avançada
+          // via navegador) — por isso o delay maior e o try/catch em
+          // cada ajuste separado: se um falhar (ex: iOS não suporta
+          // focusMode), os outros continuam tentando, não trava tudo.
+          const ajusteDelay = isIOS ? 1000 : 500;
+          setTimeout(async () => {
             try {
               const capabilities = scanner.getRunningTrackCameraCapabilities() as unknown as ExtendedCameraCapabilities;
+
               setHasTorch(!!capabilities?.torch);
+
+              const advanced: Record<string, unknown>[] = [];
+
+              // Foco contínuo — ajuda MUITO mais que ficar tentando focar
+              // manualmente aproximando/afastando o celular.
+              if (capabilities?.focusMode?.includes("continuous")) {
+                advanced.push({ focusMode: "continuous" });
+              }
+
+              // Zoom leve (não no máximo) — aproxima o suficiente pra
+              // ajudar o foco travar no código, sem perder nitidez por
+              // zoom digital exagerado.
+              if (capabilities?.zoom) {
+                const { min, max } = capabilities.zoom;
+                const zoomAlvo = Math.min(max, min + (max - min) * 0.25);
+                if (zoomAlvo > min) advanced.push({ zoom: zoomAlvo });
+              }
+
+              if (advanced.length > 0) {
+                await scanner.applyVideoConstraints({ advanced } as any);
+              }
+
+              // Lanterna automática — em vez de exigir que a consultora
+              // descubra e toque o botão, já liga sozinha quando
+              // disponível (ela pode apagar manualmente se não precisar).
+              if (capabilities?.torch) {
+                try {
+                  await scanner.applyVideoConstraints({ advanced: [{ torch: true }] } as any);
+                  setTorchOn(true);
+                } catch (e) {
+                  console.warn("Não deu pra ligar a lanterna automaticamente:", e);
+                }
+              }
             } catch (e) {
-              console.warn("Erro ao detectar torch:", e);
+              console.warn("Erro ao ajustar câmera:", e);
             }
-          }, torchDelay);
+          }, ajusteDelay);
         }
 
       } catch (err: any) {
