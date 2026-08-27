@@ -4,10 +4,11 @@
 // (nunca carrega tudo de uma vez, é por isso que o carregamento não
 // fica pesado mesmo com o catálogo crescendo toda semana via crawler).
 import { useState, useEffect } from "react";
-import { Package, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Package, Search, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { adminApi } from "../../lib/api";
 import { LoadingSpinner } from "../ui/loading-spinner";
+import ProductFormModal, { ProdutoEditavel } from "./ProductFormModal";
 
 interface Props {
   toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
@@ -22,6 +23,10 @@ export default function AdminProductBrowserTab({ toast }: Props) {
   const [totalPaginas, setTotalPaginas] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  // ⚠️ NOVO: modal de cadastro/edição — null com modalAberto=true significa
+  // "criando produto novo"; com um objeto, significa "editando esse".
+  const [produtoEditando, setProdutoEditando] = useState<ProdutoEditavel | null>(null);
+  const [modalAberto, setModalAberto] = useState(false);
 
   useEffect(() => {
     adminApi.marcasDisponiveis().then(setMarcas).catch(() => {});
@@ -50,13 +55,21 @@ export default function AdminProductBrowserTab({ toast }: Props) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2">
-          <Package className="h-4 w-4" /> Produtos por Marca
-        </CardTitle>
-        <CardDescription>
-          {total > 0 ? `${total} produto${total !== 1 ? "s" : ""} no total` : "Navegue pelo catálogo completo"}
-        </CardDescription>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Package className="h-4 w-4" /> Produtos por Marca
+          </CardTitle>
+          <CardDescription>
+            {total > 0 ? `${total} produto${total !== 1 ? "s" : ""} no total` : "Navegue pelo catálogo completo"}
+          </CardDescription>
+        </div>
+        <button
+          onClick={() => { setProdutoEditando(null); setModalAberto(true); }}
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-xs font-semibold text-white hover:opacity-90"
+        >
+          <Plus className="h-3.5 w-3.5" /> Novo produto
+        </button>
       </CardHeader>
       <CardContent>
         <div className="mb-4 flex flex-wrap gap-2">
@@ -102,7 +115,11 @@ export default function AdminProductBrowserTab({ toast }: Props) {
                 </thead>
                 <tbody>
                   {produtos.map((p) => (
-                    <tr key={p.id} className="border-b border-border/50">
+                    <tr
+                      key={p.id}
+                      onClick={() => { setProdutoEditando(p); setModalAberto(true); }}
+                      className="cursor-pointer border-b border-border/50 hover:bg-secondary/40"
+                    >
                       <td className="py-2 pr-3">{p.name}</td>
                       <td className="py-2 pr-3">{p.brand}</td>
                       <td className="py-2 pr-3 font-mono text-xs">{p.natura_sku || "—"}</td>
@@ -137,6 +154,15 @@ export default function AdminProductBrowserTab({ toast }: Props) {
           </>
         )}
       </CardContent>
+
+      <ProductFormModal
+        produto={produtoEditando}
+        open={modalAberto}
+        onClose={() => setModalAberto(false)}
+        onSaved={() => carregar()}
+        onDeleted={() => carregar()}
+        toast={toast}
+      />
     </Card>
   );
 }
