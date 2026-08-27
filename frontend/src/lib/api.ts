@@ -560,6 +560,14 @@ export const adminApi = {
       total: number; pagina_atual: number; total_paginas: number;
     }>(`/admin/produtos-catalogo/?${qs.toString()}`);
   },
+  // ✏️ CRUD de produto — cadastrar, editar e apagar direto no catálogo.
+  obterProduto: (id: number) => apiRequest<any>(`/admin/produtos-catalogo/${id}/detalhe/`),
+  criarProduto: (data: Record<string, unknown>) =>
+    apiRequest<any>("/admin/produtos-catalogo/criar/", { method: "POST", body: JSON.stringify(data) }),
+  atualizarProduto: (id: number, data: Record<string, unknown>) =>
+    apiRequest<any>(`/admin/produtos-catalogo/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
+  deletarProduto: (id: number) =>
+    apiRequest<any>(`/admin/produtos-catalogo/${id}/deletar/`, { method: "DELETE" }),
   sqlConsole: (query: string) =>
     apiRequest<{ colunas: string[]; linhas: any[][]; total_retornado: number }>(
       "/admin/sql-console/", { method: "POST", body: JSON.stringify({ query }) }

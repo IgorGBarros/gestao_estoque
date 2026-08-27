@@ -11,10 +11,39 @@ interface BarcodeScannerProps {
 interface ExtendedCameraCapabilities {
   torch?: boolean;
   zoom?: { min: number; max: number; step: number };
+  focusMode?: string[];
 }
 
 // 🍎 Detectar iOS para otimizações específicas
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+
+// ⚠️ NOVO: validação de verdade — antes, qualquer sequência de 8 a 14
+// dígitos passava, mesmo que o leitor tivesse lido errado (câmera com
+// pouco foco, código de barras amassado, etc). Como o scanner já está
+// restrito a decodificar só EAN-13/EAN-8 (formatsToSupport, abaixo),
+// esses dois formatos têm um dígito verificador embutido — e agora ele
+// é conferido de verdade, não só o tamanho da string.
+function validarEAN13(codigo: string): boolean {
+  if (!/^\d{13}$/.test(codigo)) return false;
+  const digitos = codigo.split("").map(Number);
+  let soma = 0;
+  for (let i = 0; i < 12; i++) soma += digitos[i] * (i % 2 === 0 ? 1 : 3);
+  return (10 - (soma % 10)) % 10 === digitos[12];
+}
+
+function validarEAN8(codigo: string): boolean {
+  if (!/^\d{8}$/.test(codigo)) return false;
+  const digitos = codigo.split("").map(Number);
+  let soma = 0;
+  for (let i = 0; i < 7; i++) soma += digitos[i] * (i % 2 === 0 ? 3 : 1);
+  return (10 - (soma % 10)) % 10 === digitos[7];
+}
+
+// Ponto único usado nos dois fluxos (câmera e envio de foto) — evita
+// duas cópias da mesma regra podendo divergir uma da outra depois.
+function codigoDeBarraValido(codigo: string): boolean {
+  return validarEAN13(codigo) || validarEAN8(codigo);
+}
 
 export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
   const [error, setError] = useState<string>("");
@@ -67,8 +96,9 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
           (decodedText) => {
             if (!isMounted || hasScannedRef.current) return;
             
-            // Validação simples
-            if (/^\d{8,14}$/.test(decodedText)) {
+            // Validação de verdade — confere o dígito verificador do
+            // EAN, não só se "parece" um código (tem 8-14 dígitos).
+            if (codigoDeBarraValido(decodedText)) {
               hasScannedRef.current = true;
               
               // ✅ Delay para ambas as plataformas (mostra resultado)
@@ -77,6 +107,12 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
                 stopScanner();
                 onScan(decodedText);
               }, delay);
+            } else if (/^\d{6,14}$/.test(decodedText)) {
+              // Tinha formato de número, mas o dígito verificador não
+              // bateu -- é bem provável que o leitor tenha lido errado
+              // (não trava a câmera, só avisa e deixa tentar de novo).
+              setError("Leitura não confere — tente aproximar mais ou melhorar a luz.");
+              setTimeout(() => setError(""), 2000);
             }
           },
           () => {} // Ignora erros de frame vazio
@@ -86,16 +122,57 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         setIsScanning(true);
 
         if (isMounted) {
-          // Detectar torch após inicialização
-          const torchDelay = isIOS ? 1000 : 500;
-          setTimeout(() => {
+          // ⚠️ NOVO: foco contínuo + zoom leve + lanterna automática —
+          // o principal motivo de leitura ruim é o celular não
+          // conseguir focar de perto o suficiente pro código de barras.
+          // iOS/Safari é mais restrito nisso que Android/Chrome (WebKit
+          // historicamente aceita menos constraint de câmera avançada
+          // via navegador) — por isso o delay maior e o try/catch em
+          // cada ajuste separado: se um falhar (ex: iOS não suporta
+          // focusMode), os outros continuam tentando, não trava tudo.
+          const ajusteDelay = isIOS ? 1000 : 500;
+          setTimeout(async () => {
             try {
               const capabilities = scanner.getRunningTrackCameraCapabilities() as unknown as ExtendedCameraCapabilities;
+
               setHasTorch(!!capabilities?.torch);
+
+              const advanced: Record<string, unknown>[] = [];
+
+              // Foco contínuo — ajuda MUITO mais que ficar tentando focar
+              // manualmente aproximando/afastando o celular.
+              if (capabilities?.focusMode?.includes("continuous")) {
+                advanced.push({ focusMode: "continuous" });
+              }
+
+              // Zoom leve (não no máximo) — aproxima o suficiente pra
+              // ajudar o foco travar no código, sem perder nitidez por
+              // zoom digital exagerado.
+              if (capabilities?.zoom) {
+                const { min, max } = capabilities.zoom;
+                const zoomAlvo = Math.min(max, min + (max - min) * 0.25);
+                if (zoomAlvo > min) advanced.push({ zoom: zoomAlvo });
+              }
+
+              if (advanced.length > 0) {
+                await scanner.applyVideoConstraints({ advanced } as any);
+              }
+
+              // Lanterna automática — em vez de exigir que a consultora
+              // descubra e toque o botão, já liga sozinha quando
+              // disponível (ela pode apagar manualmente se não precisar).
+              if (capabilities?.torch) {
+                try {
+                  await scanner.applyVideoConstraints({ advanced: [{ torch: true }] } as any);
+                  setTorchOn(true);
+                } catch (e) {
+                  console.warn("Não deu pra ligar a lanterna automaticamente:", e);
+                }
+              }
             } catch (e) {
-              console.warn("Erro ao detectar torch:", e);
+              console.warn("Erro ao ajustar câmera:", e);
             }
-          }, torchDelay);
+          }, ajusteDelay);
         }
 
       } catch (err: any) {
@@ -153,10 +230,10 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
       const fileScanner = new Html5Qrcode("barcode-reader-file");
       const result = await fileScanner.scanFile(file, true);
       
-      if (/^\d{8,14}$/.test(result)) {
+      if (codigoDeBarraValido(result)) {
         onScan(result);
       } else {
-        setError("Código não identificado na imagem.");
+        setError("Código lido não confere — tire uma foto mais nítida, de frente pro código.");
       }
     } catch (e) {
       setError("Código não identificado na imagem. Tente uma foto mais nítida.");

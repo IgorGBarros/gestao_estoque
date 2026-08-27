@@ -5,12 +5,13 @@
 // aplicar sozinho (só "muito alta" vira bar_code automaticamente — ver
 // admin_views.py). Aqui o admin confirma ou recusa cada um, rápido.
 import { useState, useEffect } from "react";
-import { Barcode, Check, X, RefreshCw } from "lucide-react";
+import { Barcode, Check, X, RefreshCw, Pencil, Loader2 } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { adminApi } from "../../lib/api";
 import { LoadingSpinner } from "../ui/loading-spinner";
+import ProductFormModal, { ProdutoEditavel } from "./ProductFormModal";
 
 interface Props {
   toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
@@ -54,6 +55,26 @@ export default function AdminBarcodeReviewTab({ toast }: Props) {
   const [editandoFoto, setEditandoFoto] = useState<number | null>(null);
   const [urlFoto, setUrlFoto] = useState("");
   const [salvandoFoto, setSalvandoFoto] = useState(false);
+  // ⚠️ NOVO: editar o produto vinculado ao candidato — não só a foto,
+  // mas nome/categoria/preço/etc. Busca os dados completos antes de
+  // abrir o modal, já que a fila só traz produto_id e image_url.
+  const [produtoEditando, setProdutoEditando] = useState<ProdutoEditavel | null>(null);
+  const [modalProdutoAberto, setModalProdutoAberto] = useState(false);
+  const [carregandoProduto, setCarregandoProduto] = useState<number | null>(null);
+
+  const editarProdutoVinculado = async (c: Candidato) => {
+    if (!c.produto_id) return;
+    setCarregandoProduto(c.id);
+    try {
+      const produto = await adminApi.obterProduto(c.produto_id);
+      setProdutoEditando(produto);
+      setModalProdutoAberto(true);
+    } catch {
+      toast({ title: "Erro", description: "Não deu pra carregar o produto", variant: "destructive" });
+    } finally {
+      setCarregandoProduto(null);
+    }
+  };
 
   const carregar = async () => {
     setLoading(true);
@@ -199,6 +220,16 @@ export default function AdminBarcodeReviewTab({ toast }: Props) {
                     )}
                   </div>
                   <div className="flex shrink-0 gap-1.5">
+                    {c.produto_id && (
+                      <button
+                        onClick={() => editarProdutoVinculado(c)}
+                        disabled={carregandoProduto === c.id}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground hover:bg-secondary disabled:opacity-50"
+                        title="Editar produto vinculado"
+                      >
+                        {carregandoProduto === c.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
+                      </button>
+                    )}
                     <button
                       onClick={() => recusar(c)}
                       disabled={processando === c.id}
@@ -246,6 +277,21 @@ export default function AdminBarcodeReviewTab({ toast }: Props) {
           </div>
         )}
       </CardContent>
+
+      <ProductFormModal
+        produto={produtoEditando}
+        open={modalProdutoAberto}
+        onClose={() => setModalProdutoAberto(false)}
+        onSaved={(produtoAtualizado) => {
+          // Atualiza a foto/nome exibidos na fila sem precisar recarregar tudo
+          setCandidatos((prev) => prev.map((c) =>
+            c.produto_id === produtoAtualizado.id
+              ? { ...c, image_url: produtoAtualizado.image_url, searched_product_name: produtoAtualizado.name }
+              : c
+          ));
+        }}
+        toast={toast}
+      />
     </Card>
   );
 }

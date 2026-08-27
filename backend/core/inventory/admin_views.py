@@ -2114,3 +2114,130 @@ def admin_sql_console(request):
         'linhas': [list(linha) for linha in linhas],
         'total_retornado': len(linhas),
     })
+
+# ─────────────────────────────────────────────────────────────
+# ✏️ CRUD DE PRODUTO — cadastrar, editar e apagar direto no catálogo
+# global, sem depender só das automações (crawl_all3 e cosmos_barcode_finder)
+# encontrarem/corrigirem sozinhas. Reaproveitado também na revisão de
+# código de barras, pra corrigir o produto vinculado ali mesmo.
+# ─────────────────────────────────────────────────────────────
+
+_CAMPOS_PRODUTO = ['name', 'brand', 'bar_code', 'natura_sku', 'category', 'description', 'image_url', 'official_price', 'min_quantity']
+
+
+def _serialize_produto_completo(p):
+    return {
+        'id': p.id, 'name': p.name, 'brand': p.brand, 'bar_code': p.bar_code,
+        'natura_sku': p.natura_sku, 'category': p.category, 'description': p.description,
+        'image_url': p.image_url,
+        'official_price': float(p.official_price) if p.official_price is not None else None,
+        'min_quantity': p.min_quantity,
+    }
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_produto_criar(request):
+    """
+    POST /api/admin/produtos-catalogo/criar/
+    Cadastro manual — pra quando as automações não encontraram o
+    produto ainda, ou pra corrigir algo rápido sem esperar o próximo
+    ciclo do crawler.
+    """
+    from inventory.models import Product
+    from django.db import IntegrityError
+
+    nome = (request.data.get('name') or '').strip()
+    if not nome:
+        return Response({'error': 'Nome é obrigatório.'}, status=400)
+
+    dados = {campo: request.data[campo] for campo in _CAMPOS_PRODUTO if campo in request.data}
+    dados['name'] = nome
+    # Campo vazio em texto único (bar_code/natura_sku) precisa virar None,
+    # não string vazia -- senão duas linhas com "" colidem no unique=True.
+    for campo in ('bar_code', 'natura_sku'):
+        if dados.get(campo) == '':
+            dados[campo] = None
+
+    try:
+        produto = Product.objects.create(**dados)
+    except IntegrityError as e:
+        return Response({'error': f'Código de barras ou SKU já usado por outro produto. ({e})'}, status=400)
+
+    return Response(_serialize_produto_completo(produto), status=201)
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_produto_obter(request, produto_id):
+    """
+    GET /api/admin/produtos-catalogo/<id>/detalhe/
+    Busca os dados completos de UM produto — usado pela revisão de
+    código de barras antes de abrir o formulário de edição (a fila só
+    tem produto_id e image_url, não os outros campos).
+    """
+    from inventory.models import Product
+
+    produto = Product.objects.filter(id=produto_id).first()
+    if not produto:
+        return Response({'error': 'Produto não encontrado.'}, status=404)
+    return Response(_serialize_produto_completo(produto))
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAdminUser])
+def admin_produto_atualizar(request, produto_id):
+    """
+    PATCH /api/admin/produtos-catalogo/<id>/
+    Edita um produto existente — usado tanto na tela "Produtos por
+    Marca" quanto na "Revisão de Código de Barras" (corrigir o produto
+    vinculado ao candidato, não só aprovar/recusar o código em si).
+    """
+    from inventory.models import Product
+    from django.db import IntegrityError
+
+    produto = Product.objects.filter(id=produto_id).first()
+    if not produto:
+        return Response({'error': 'Produto não encontrado.'}, status=404)
+
+    dados = {campo: request.data[campo] for campo in _CAMPOS_PRODUTO if campo in request.data}
+    for campo in ('bar_code', 'natura_sku'):
+        if dados.get(campo) == '':
+            dados[campo] = None
+
+    for campo, valor in dados.items():
+        setattr(produto, campo, valor)
+
+    try:
+        produto.save(update_fields=list(dados.keys()) or None)
+    except IntegrityError as e:
+        return Response({'error': f'Código de barras ou SKU já usado por outro produto. ({e})'}, status=400)
+
+    return Response(_serialize_produto_completo(produto))
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAdminUser])
+def admin_produto_deletar(request, produto_id):
+    """
+    DELETE /api/admin/produtos-catalogo/<id>/
+    Apaga um produto do catálogo global — recusado automaticamente
+    (pelo próprio Django, via on_delete=PROTECT) se alguma loja já tiver
+    esse produto no estoque, numa venda, ou numa movimentação. Evita
+    apagar algo que quebraria histórico real de alguém.
+    """
+    from inventory.models import Product
+    from django.db.models import ProtectedError
+
+    produto = Product.objects.filter(id=produto_id).first()
+    if not produto:
+        return Response({'error': 'Produto não encontrado.'}, status=404)
+
+    try:
+        produto.delete()
+    except ProtectedError:
+        return Response({
+            'error': 'Esse produto já está em uso (estoque, venda ou movimentação de alguma loja) — não pode ser apagado.',
+        }, status=409)
+
+    return Response({'deletado': True})
