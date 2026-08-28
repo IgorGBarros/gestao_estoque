@@ -122,55 +122,53 @@ export default function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps)
         setIsScanning(true);
 
         if (isMounted) {
-          // ⚠️ NOVO: foco contínuo + zoom leve + lanterna automática —
-          // o principal motivo de leitura ruim é o celular não
-          // conseguir focar de perto o suficiente pro código de barras.
-          // iOS/Safari é mais restrito nisso que Android/Chrome (WebKit
-          // historicamente aceita menos constraint de câmera avançada
-          // via navegador) — por isso o delay maior e o try/catch em
-          // cada ajuste separado: se um falhar (ex: iOS não suporta
-          // focusMode), os outros continuam tentando, não trava tudo.
+          // ⚠️ CORREÇÃO: iOS/Safari não implementa
+          // getCapabilities() da câmera (limitação conhecida do WebKit)
+          // — capabilities?.torch, .focusMode e .zoom vinham sempre
+          // vazios no iPhone, então nem o botão de lanterna aparecia
+          // nem a tentativa automática rodava, mesmo em aparelho com
+          // flash de verdade. Agora TENTA aplicar direto, sem checar
+          // "o aparelho diz que suporta" antes — se falhar, cai no
+          // catch e simplesmente não liga, sem quebrar o resto.
           const ajusteDelay = isIOS ? 1000 : 500;
           setTimeout(async () => {
+            // Foco contínuo — tenta direto, funciona em bastante
+            // Android mesmo sem o Chrome expor isso via capabilities.
+            try {
+              await scanner.applyVideoConstraints({ advanced: [{ focusMode: "continuous" }] } as any);
+            } catch (e) {
+              console.warn("Foco contínuo não suportado nesse aparelho:", e);
+            }
+
+            // Zoom leve — só tenta se a capability existir de verdade
+            // (sem isso não dá pra saber um valor seguro de zoom; ao
+            // contrário do torch, aplicar um zoom "no escuro" pode
+            // sair de um range válido e falhar sem necessidade).
             try {
               const capabilities = scanner.getRunningTrackCameraCapabilities() as unknown as ExtendedCameraCapabilities;
-
-              setHasTorch(!!capabilities?.torch);
-
-              const advanced: Record<string, unknown>[] = [];
-
-              // Foco contínuo — ajuda MUITO mais que ficar tentando focar
-              // manualmente aproximando/afastando o celular.
-              if (capabilities?.focusMode?.includes("continuous")) {
-                advanced.push({ focusMode: "continuous" });
-              }
-
-              // Zoom leve (não no máximo) — aproxima o suficiente pra
-              // ajudar o foco travar no código, sem perder nitidez por
-              // zoom digital exagerado.
               if (capabilities?.zoom) {
                 const { min, max } = capabilities.zoom;
                 const zoomAlvo = Math.min(max, min + (max - min) * 0.25);
-                if (zoomAlvo > min) advanced.push({ zoom: zoomAlvo });
-              }
-
-              if (advanced.length > 0) {
-                await scanner.applyVideoConstraints({ advanced } as any);
-              }
-
-              // Lanterna automática — em vez de exigir que a consultora
-              // descubra e toque o botão, já liga sozinha quando
-              // disponível (ela pode apagar manualmente se não precisar).
-              if (capabilities?.torch) {
-                try {
-                  await scanner.applyVideoConstraints({ advanced: [{ torch: true }] } as any);
-                  setTorchOn(true);
-                } catch (e) {
-                  console.warn("Não deu pra ligar a lanterna automaticamente:", e);
+                if (zoomAlvo > min) {
+                  await scanner.applyVideoConstraints({ advanced: [{ zoom: zoomAlvo }] } as any);
                 }
               }
             } catch (e) {
-              console.warn("Erro ao ajustar câmera:", e);
+              console.warn("Zoom não suportado nesse aparelho:", e);
+            }
+
+            // Lanterna — tenta ligar direto, SEM checar capabilities
+            // antes (é exatamente essa checagem que falhava sempre no
+            // iOS). Só marca hasTorch=true se a tentativa realmente
+            // funcionar, então o botão manual só aparece quando faz
+            // sentido aparecer.
+            try {
+              await scanner.applyVideoConstraints({ advanced: [{ torch: true }] } as any);
+              setTorchOn(true);
+              setHasTorch(true);
+            } catch (e) {
+              console.warn("Lanterna não disponível nesse aparelho:", e);
+              setHasTorch(false);
             }
           }, ajusteDelay);
         }
