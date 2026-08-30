@@ -981,21 +981,37 @@ class StockEntryView(APIView):
                             product.save()
                             print("Produto atualizado com os novos dados")
                 else:
-                    # ⚠️ CORREÇÃO: antes, não achar o produto no catálogo
-                    # criava um produto NOVO na hora — mas o catálogo é
-                    # GLOBAL (compartilhado entre todas as lojas). Um
-                    # código lido errado, ou uma consultora digitando
-                    # nome/categoria por conta própria, poluía o banco
-                    # pra sempre, pra todo mundo. Agora recusa e pede
-                    # pra conferir a leitura, em vez de criar sozinho.
-                    return Response({
-                        'error': (
-                            'Não encontramos esse produto no catálogo. Confira se o '
-                            'código de barras foi lido certo e tente escanear de novo. '
-                            'Se o produto for novo de verdade, fale com o suporte.'
-                        ),
-                        'error_code': 'PRODUTO_NAO_ENCONTRADO',
-                    }, status=422)
+                    # ⚠️ NOVO: fluxo guiado de cadastro colaborativo —
+                    # consultora pode criar produto novo, mas ele entra
+                    # como 'aguardando' (invisível pro catálogo global
+                    # até o admin revisar, corrigir nome e adicionar SKU).
+                    # O frontend garante que ela passou pelo fluxo de
+                    # verificação antes de chegar aqui (campo
+                    # 'confirmado_novo=True' obrigatório).
+                    if not data.get('confirmado_novo'):
+                        return Response({
+                            'error': 'Produto não encontrado no catálogo.',
+                            'error_code': 'PRODUTO_NAO_ENCONTRADO',
+                            'requer_confirmacao': True,
+                        }, status=422)
+
+                    nome = (data.get('name') or '').strip()
+                    if not nome:
+                        return Response({
+                            'error': 'Informe o nome do produto pra cadastrar.',
+                            'error_code': 'NOME_OBRIGATORIO',
+                        }, status=400)
+
+                    product = Product.objects.create(
+                        bar_code=barcode_input or None,
+                        name=nome,
+                        category=data.get('category', 'Geral'),
+                        brand=data.get('brand') or None,
+                        official_price=data.get('sale_price', 0),
+                        image_url=data.get('image_url', ''),
+                        review_status='aguardando',
+                    )
+                    print(f"Produto novo criado aguardando revisão: {product}")
                 
                 # 3. Gerenciar estoque da loja (TENANT-AWARE)
                 print(f"Criando/atualizando InventoryItem para store={store}, product={product}")
@@ -1312,7 +1328,7 @@ def lookup_product(request):
         }, status=422)
 
     if not force_remote:
-        local = Product.objects.filter(Q(bar_code=query) | Q(natura_sku=query)).first()
+        local = Product.objects.filter(Q(bar_code=query) | Q(natura_sku=query), review_status='aprovado').first()
         if local:
             print(f"   ✅ Encontrado no banco local (Match Exato): {local.name}")
             return Response({"found": True, "source": "local", "data": ProductSerializer(local).data})
