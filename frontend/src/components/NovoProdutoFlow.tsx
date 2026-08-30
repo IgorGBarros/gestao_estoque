@@ -290,4 +290,3 @@ interface Props {
   onCancelar: () => void;
   onConcluido: (produto: { name: string; category: string; brand: string; image_url: string }) => void;
 }
-
