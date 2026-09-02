@@ -8,6 +8,7 @@ import {
   CreditCard, AlertTriangle, Crown, RotateCcw, Home
 } from "lucide-react";
 import BarcodeScanner from "../components/BarcodeScanner";
+import NovoProdutoFlow from "../components/NovoProdutoFlow";
 import ProductSearchModal from "../components/ProductSearchModal";
 import UpgradeModal from "../components/UpgradeModal";
 import ProBadge from "../components/ProBadge";
@@ -113,6 +114,10 @@ export default function AddProduct() {
 
   // Sessão
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>({ has_session: false });
+  // ⚠️ NOVO: fluxo guiado de produto novo — aparece quando o backend
+  // retorna requer_confirmacao=true (produto não encontrado, mas sem
+  // bloqueio duro — a consultora passa pelo fluxo de verificação).
+  const [mostrarFluxoNovoProduto, setMostrarFluxoNovoProduto] = useState(false);
   const [showContinueModal, setShowContinueModal] = useState(false);
 
   // Limites do plano
@@ -346,8 +351,14 @@ export default function AddProduct() {
         setIsSuccess(false);
         setShowContinueModal(true);
       }, 1500);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao salvar:", error);
+      // Produto não está no catálogo e precisa do fluxo guiado de
+      // verificação antes de cadastrar — abre a tela assistida em vez
+      // de só mostrar um erro genérico sem saída.
+      if (error?.response?.data?.requer_confirmacao) {
+        setMostrarFluxoNovoProduto(true);
+      }
     }
   };
 
@@ -447,6 +458,24 @@ export default function AddProduct() {
   // ══════════════════════════════════════════
   return (
     <div className="min-h-screen bg-background">
+
+      {/* ⚠️ NOVO: fluxo guiado de produto novo — aparece como overlay
+          quando o backend responde requer_confirmacao=true (produto não
+          está no catálogo, consultora precisa verificar e preencher
+          antes de cadastrar, em vez de só receber um erro sem saída). */}
+      {mostrarFluxoNovoProduto && (
+        <div className="fixed inset-0 z-50 bg-background overflow-y-auto">
+          <NovoProdutoFlow
+            barCode={data.bar_code || ""}
+            onCancelar={() => setMostrarFluxoNovoProduto(false)}
+            onConcluido={() => {
+              setMostrarFluxoNovoProduto(false);
+              navigate("/app");
+            }}
+          />
+        </div>
+      )}
+
       {/* ── HEADER ── */}
       <header className="border-b border-border bg-card">
         <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">

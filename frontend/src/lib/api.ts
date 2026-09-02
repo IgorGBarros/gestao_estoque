@@ -568,6 +568,10 @@ export const adminApi = {
     apiRequest<any>(`/admin/produtos-catalogo/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
   deletarProduto: (id: number) =>
     apiRequest<any>(`/admin/produtos-catalogo/${id}/deletar/`, { method: "DELETE" }),
+  // 🕵️ Revisão de produtos criados pelas consultoras
+  produtosAguardando: () => apiRequest<any[]>("/admin/produtos-aguardando/"),
+  revisarProduto: (id: number, data: { acao: "aprovar" | "rejeitar"; name?: string; natura_sku?: string; category?: string; brand?: string; official_price?: number }) =>
+    apiRequest<any>(`/admin/produtos-aguardando/${id}/revisar/`, { method: "POST", body: JSON.stringify(data) }),
   sqlConsole: (query: string) =>
     apiRequest<{ colunas: string[]; linhas: any[][]; total_retornado: number }>(
       "/admin/sql-console/", { method: "POST", body: JSON.stringify({ query }) }

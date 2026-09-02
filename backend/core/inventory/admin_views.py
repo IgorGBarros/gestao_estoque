@@ -2241,3 +2241,88 @@ def admin_produto_deletar(request, produto_id):
         }, status=409)
 
     return Response({'deletado': True})
+
+# ─────────────────────────────────────────────────────────────
+# 🕵️ REVISÃO DE PRODUTOS — produtos criados pelas consultoras entram
+# como 'aguardando', ficam invisíveis no catálogo global, e aparecem
+# aqui pra Igor revisar, corrigir nome e adicionar SKU de uma vez só.
+# ─────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def admin_produtos_aguardando(request):
+    """
+    GET /api/admin/produtos-aguardando/
+    Lista produtos criados pelas consultoras que ainda não foram
+    revisados. Inclui qual loja criou e quando, pra ter contexto
+    de qual consultora cadastrou aquele produto.
+    """
+    from inventory.models import Product, InventoryItem
+
+    aguardando = Product.objects.filter(review_status='aguardando').order_by('-created_at')
+    resultado = []
+    for p in aguardando:
+        # Qual loja cadastrou? (a primeira que tem esse produto no estoque)
+        item = InventoryItem.objects.filter(product=p).select_related('store__owner').first()
+        resultado.append({
+            'id': p.id,
+            'name': p.name,
+            'brand': p.brand,
+            'bar_code': p.bar_code,
+            'natura_sku': p.natura_sku,
+            'category': p.category,
+            'image_url': p.image_url,
+            'official_price': float(p.official_price) if p.official_price else None,
+            'created_at': p.created_at.isoformat(),
+            'cadastrada_por': item.store.owner.email if item and item.store and item.store.owner else '—',
+        })
+    return Response(resultado)
+
+
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def admin_produto_revisar(request, produto_id):
+    """
+    POST /api/admin/produtos-aguardando/<id>/revisar/
+    Aprova ou rejeita um produto aguardando revisão. Na aprovação,
+    permite corrigir nome, categoria e adicionar SKU — os campos mais
+    comuns que as consultoras deixam errado ou em branco.
+
+    Body: {
+      "acao": "aprovar" | "rejeitar",
+      "name": "...",          (opcional, corrige o nome na aprovação)
+      "natura_sku": "...",    (opcional, adiciona SKU na aprovação)
+      "category": "...",      (opcional)
+      "brand": "...",         (opcional)
+    }
+    """
+    from inventory.models import Product
+
+    produto = Product.objects.filter(id=produto_id, review_status='aguardando').first()
+    if not produto:
+        return Response({'error': 'Produto não encontrado ou já revisado.'}, status=404)
+
+    acao = request.data.get('acao')
+    if acao not in ('aprovar', 'rejeitar'):
+        return Response({'error': 'Ação deve ser "aprovar" ou "rejeitar".'}, status=400)
+
+    if acao == 'rejeitar':
+        produto.review_status = 'rejeitado'
+        produto.save(update_fields=['review_status'])
+        return Response({'revisado': True, 'status': 'rejeitado'})
+
+    # Aprovação — corrige os campos que o admin quiser antes de publicar
+    campos_editaveis = ['name', 'natura_sku', 'category', 'brand', 'official_price', 'image_url']
+    alterados = ['review_status']
+    produto.review_status = 'aprovado'
+
+    for campo in campos_editaveis:
+        if campo in request.data and request.data[campo] is not None:
+            valor = request.data[campo]
+            if isinstance(valor, str):
+                valor = valor.strip() or None if campo in ('natura_sku', 'brand') else valor.strip()
+            setattr(produto, campo, valor)
+            alterados.append(campo)
+
+    produto.save(update_fields=alterados)
+    return Response({'revisado': True, 'status': 'aprovado', 'produto_id': produto.id})

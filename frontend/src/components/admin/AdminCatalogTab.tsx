@@ -4,10 +4,11 @@
 // barras (existia antes, só movida pra cá), navegação por marca (novo,
 // paginado de verdade) e consulta SQL (novo, restrito a leitura).
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../ui/tabs";
-import { Barcode, Package, Terminal, ChevronRight } from "lucide-react";
+import { Barcode, Package, Terminal, ChevronRight, ClipboardCheck } from "lucide-react";
 import AdminBarcodeReviewTab from "./AdminBarcodeReviewTab";
 import AdminProductBrowserTab from "./AdminProductBrowserTab";
 import AdminSQLConsoleTab from "./AdminSQLConsoleTab";
+import AdminProductReviewTab from "./AdminProductReviewTab";
 
 interface Props {
   toast: (opts: { title: string; description?: string; variant?: "default" | "destructive" }) => void;
@@ -49,11 +50,15 @@ export default function AdminCatalogTab({ toast, onVoltar, onPainel }: Props) {
         <TabsTrigger value="sql" className="flex shrink-0 items-center gap-2">
           <Terminal className="h-4 w-4" /> Consulta SQL
         </TabsTrigger>
+        <TabsTrigger value="revisao_produtos" className="flex shrink-0 items-center gap-2">
+          <ClipboardCheck className="h-4 w-4" /> Revisão de Produtos
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="revisao"><AdminBarcodeReviewTab toast={toast} /></TabsContent>
       <TabsContent value="produtos"><AdminProductBrowserTab toast={toast} /></TabsContent>
       <TabsContent value="sql"><AdminSQLConsoleTab toast={toast} /></TabsContent>
+      <TabsContent value="revisao_produtos"><AdminProductReviewTab toast={toast} /></TabsContent>
     </Tabs>
   );
 }

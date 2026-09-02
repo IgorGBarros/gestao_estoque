@@ -102,6 +102,21 @@ class Product(models.Model):
     last_checked_at = models.DateTimeField(null=True, blank=True, verbose_name="Última Checagem de Preço")
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # ⚠️ NOVO: status de revisão — produtos criados pelas consultoras
+    # entram como 'aguardando' e ficam invisíveis pro catálogo global
+    # até o admin revisar, corrigir nome e adicionar SKU. Os criados
+    # pelos crawlers e admin entram direto como 'aprovado'.
+    REVIEW_STATUS_CHOICES = [
+        ('aprovado', 'Aprovado'),
+        ('aguardando', 'Aguardando revisão'),
+        ('rejeitado', 'Rejeitado'),
+    ]
+    review_status = models.CharField(
+        max_length=20, choices=REVIEW_STATUS_CHOICES,
+        default='aprovado',
+        help_text="'aprovado' = aparece no catálogo; 'aguardando' = criado por consultora, aguarda revisão do admin.",
+    )
+
     class Meta:
         verbose_name = 'Produto'
         verbose_name_plural = 'Produtos'
