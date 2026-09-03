@@ -158,6 +158,7 @@ export interface InventoryItem {
   total_quantity?: number;
   min_quantity?: number;
   cost_price: number;
+  cost_price_real?: number;
   sale_price: number | null;
   product?: {
     id: number | string;
@@ -393,6 +394,15 @@ export const movementsApi = {
       console.error("❌ Erro ao criar movimentação:", error);
       throw error;
     }
+  },
+
+  update: async (id: string | number, data: { unit_cost?: number | null; unit_price?: number | null; description?: string }) => {
+    const result = await apiRequest<Movement>(`/transactions/${id}/`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    clearAppCache();
+    return result;
   },
 };
 

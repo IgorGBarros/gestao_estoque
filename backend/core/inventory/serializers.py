@@ -281,6 +281,7 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     # não herdada implicitamente.
     batches = serializers.SerializerMethodField()
     display_price = serializers.SerializerMethodField()
+    cost_price_real = serializers.SerializerMethodField()
     
     # ✅ NOVO: Campos calculados
     total_cost = serializers.SerializerMethodField()
@@ -296,13 +297,33 @@ class InventoryItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventoryItem
         fields = [
-            'id', 'product', 'sale_price', 'cost_price', 
+            'id', 'product', 'sale_price', 'cost_price', 'cost_price_real',
             'total_quantity', 'min_quantity', 'batches', 'display_price',
             'total_cost', 'potential_profit'
         ]
     
     def get_display_price(self, obj):
         return obj.sale_price if obj.sale_price and obj.sale_price > 0 else obj.product.official_price
+
+    def get_cost_price_real(self, obj):
+        """
+        Custo efetivo — usa o custo cadastrado quando disponível, mas faz
+        fallback pra official_price quando for 0 (consultora não preencheu).
+        Isso evita que a tela de baixa apareça com 'Custo: R$ 0,00' sem
+        avisar, o que distorcia o cálculo de lucro silenciosamente.
+        """
+        if obj.cost_price and float(obj.cost_price) > 0:
+            return float(obj.cost_price)
+        # Tenta o lote mais antigo (FIFO) que ainda tem custo
+        primeiro_lote = obj.batches.filter(
+            quantity__gt=0, cost_price__gt=0
+        ).order_by('expiration_date', 'id').first()
+        if primeiro_lote:
+            return float(primeiro_lote.cost_price)
+        # Fallback: preço oficial do produto como estimativa
+        if obj.product and obj.product.official_price:
+            return float(obj.product.official_price)
+        return 0
     
     def get_total_cost(self, obj):
         """Custo total do estoque"""

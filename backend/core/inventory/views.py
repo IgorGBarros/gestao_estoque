@@ -2661,6 +2661,40 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
             print(f"❌ Erro no get_queryset: {e}")
             return StockTransaction.objects.none()
 
+    def partial_update(self, request, *args, **kwargs):
+        """
+        PATCH /api/transactions/<id>/ — edita campos financeiros de uma
+        movimentação já registrada. Só permite: unit_cost, unit_price e
+        description. Quantity e tipo nunca mudam depois de criados —
+        alterar isso quebraria o saldo do estoque e o histórico FIFO.
+        """
+        transacao = self.get_object()  # já filtra por loja via get_queryset
+        campos_permitidos = {'unit_cost', 'unit_price', 'description'}
+        alterados = []
+
+        for campo in campos_permitidos:
+            if campo in request.data:
+                valor = request.data[campo]
+                if valor == '' or valor is None:
+                    valor = None
+                elif campo in ('unit_cost', 'unit_price'):
+                    try:
+                        from decimal import Decimal
+                        valor = Decimal(str(valor))
+                    except Exception:
+                        return Response(
+                            {'error': f'Valor inválido para {campo}.'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                setattr(transacao, campo, valor)
+                alterados.append(campo)
+
+        if not alterados:
+            return Response({'error': 'Nenhum campo válido para atualizar.'}, status=400)
+
+        transacao.save(update_fields=alterados)
+        return Response(StockTransactionSerializer(transacao).data)
+
     def apply_fifo_withdrawal(self, inventory_item, quantity_to_withdraw):
         """✅ FIFO automático com correções - VERSÃO FUNCIONAL"""
         print(f"🎯 Aplicando FIFO: {quantity_to_withdraw} unidades de {inventory_item.product.name}")

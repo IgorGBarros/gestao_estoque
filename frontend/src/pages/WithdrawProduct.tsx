@@ -115,7 +115,13 @@ export default function WithdrawProduct() {
 
       const sortedBatches = batches.sort((a, b) => compareDateLocal(a.expiration_date, b.expiration_date));
 
-      const batchCost = sortedBatches.length > 0 ? sortedBatches[0].cost_price : item.cost_price;
+      // ⚠️ CORREÇÃO: antes usava item.cost_price direto — quando a consultora
+      // não cadastrava custo, esse campo vinha 0 e o lucro ficava distorcido.
+      // Agora usa cost_price_real (calculado no backend com fallback automático:
+      // custo do lote → custo do item → preço oficial do produto).
+      const batchCost = sortedBatches.length > 0
+        ? (sortedBatches[0].cost_price || item.cost_price_real || item.cost_price || 0)
+        : (item.cost_price_real || item.cost_price || 0);
       const productId = String(item.product?.id || item.id || "");
 
       if (!productId) {
