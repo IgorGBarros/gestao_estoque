@@ -387,37 +387,32 @@ export default function MovementHistory() {
                   </div>
 
                   {/* Preços — editáveis inline */}
-                  <div className="flex items-center justify-between border-t border-border/50 pt-3 mt-3">
-                    <div className="flex gap-5 text-xs text-muted-foreground">
-                      <p>
+                  <div className="flex items-center justify-between border-t border-border/50 pt-3 mt-3 gap-2">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      <span>
                         Custo:{" "}
-                        <span className={`font-bold ${!m.unit_cost || m.unit_cost === 0 ? "text-amber-500" : "text-foreground"}`}>
-                          {m.unit_cost ? formatMoney(m.unit_cost) : "⚠️ Não informado"}
+                        <span className={`font-semibold ${!m.unit_cost || m.unit_cost === 0 ? "text-amber-500" : "text-foreground"}`}>
+                          {m.unit_cost ? formatMoney(m.unit_cost) : "⚠️ não informado"}
                         </span>
-                      </p>
+                      </span>
                       {m.unit_price != null && m.unit_price > 0 && (
-                        <p>
+                        <span>
                           Venda:{" "}
-                          <span className="font-bold text-foreground">
-                            {formatMoney(m.unit_price)}
-                          </span>
-                        </p>
+                          <span className="font-semibold text-foreground">{formatMoney(m.unit_price)}</span>
+                        </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); iniciarEdicao(m); setExpandedId(m.id); }}
-                        className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground"
-                        title="Editar valores desta movimentação"
-                      >
-                        <Pencil className="h-3 w-3" /> Editar
-                      </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {editandoId !== m.id && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); iniciarEdicao(m); setExpandedId(m.id); }}
+                          className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:border-brand hover:text-brand transition-colors"
+                        >
+                          <Pencil className="h-3 w-3" /> Editar
+                        </button>
+                      )}
                       <div className="p-1.5 rounded-full bg-secondary/80 text-muted-foreground hover:bg-secondary transition-colors">
-                        {isExpanded ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
-                        )}
+                        {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                       </div>
                     </div>
                   </div>
@@ -431,60 +426,74 @@ export default function MovementHistory() {
                         exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden"
                       >
-                        {/* Formulário de edição inline */}
+                        {/* Formulário de edição */}
                         {editandoId === m.id && (
-                          <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-                              ✏️ Editar valores
+                          <div className="mt-3 rounded-xl border border-brand/30 bg-brand/5 p-4 space-y-3">
+                            <p className="text-xs font-semibold text-brand flex items-center gap-1.5">
+                              <Pencil className="h-3.5 w-3.5" /> Editar movimentação
                             </p>
-                            <div className="grid grid-cols-2 gap-2">
+
+                            {/* Campos de valor — lado a lado em telas maiores */}
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                               <div>
-                                <label className="text-[10px] text-muted-foreground">Custo unitário (R$)</label>
+                                <label className="text-xs font-medium text-muted-foreground">
+                                  Custo unitário (R$)
+                                </label>
                                 <input
                                   type="number" step="0.01" min="0"
                                   value={editForm.unit_cost}
                                   onChange={(e) => setEditForm((p) => ({ ...p, unit_cost: e.target.value }))}
-                                  placeholder="Ex: 30.00"
-                                  className="mt-1 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm font-mono outline-none focus:border-brand"
+                                  placeholder="0,00"
+                                  className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm font-mono outline-none focus:border-brand"
                                 />
                               </div>
                               {m.ui_type === "saida" && (
                                 <div>
-                                  <label className="text-[10px] text-muted-foreground">Preço de venda (R$)</label>
+                                  <label className="text-xs font-medium text-muted-foreground">
+                                    Preço de venda (R$)
+                                  </label>
                                   <input
                                     type="number" step="0.01" min="0"
                                     value={editForm.unit_price}
                                     onChange={(e) => setEditForm((p) => ({ ...p, unit_price: e.target.value }))}
-                                    placeholder="Ex: 75.00"
-                                    className="mt-1 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm font-mono outline-none focus:border-brand"
+                                    placeholder="0,00"
+                                    className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm font-mono outline-none focus:border-brand"
                                   />
                                 </div>
                               )}
                             </div>
+
+                            {/* Descrição — largura total */}
                             <div>
-                              <label className="text-[10px] text-muted-foreground">Descrição</label>
+                              <label className="text-xs font-medium text-muted-foreground">
+                                Descrição
+                              </label>
                               <input
                                 type="text"
                                 value={editForm.description}
                                 onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))}
                                 placeholder="Ex: Venda para Maria"
-                                className="mt-1 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-brand"
+                                className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-sm outline-none focus:border-brand"
                               />
                             </div>
-                            <div className="flex gap-2 pt-1">
+
+                            {/* Botões — mesmo padrão do resto do app */}
+                            <div className="flex gap-3 pt-1">
                               <button
                                 onClick={() => setEditandoId(null)}
-                                className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-secondary"
+                                className="flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card py-3 text-sm font-medium text-foreground hover:bg-secondary transition-colors"
                               >
-                                <XIcon className="h-3 w-3" /> Cancelar
+                                <XIcon className="h-4 w-4" /> Cancelar
                               </button>
                               <button
                                 onClick={() => salvarEdicao(m.id)}
                                 disabled={salvandoEdicao}
-                                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50 active:scale-95 transition-all"
                               >
-                                {salvandoEdicao ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                                Salvar
+                                {salvandoEdicao
+                                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                                  : <Save className="h-4 w-4" />}
+                                Salvar alterações
                               </button>
                             </div>
                           </div>
