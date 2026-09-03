@@ -41,35 +41,34 @@ from django.conf import settings
 from django.db.models import F, Sum
 from django.db.models.functions import Abs
 from django.utils import timezone
-from groq import Groq, GroqError
-
 from inventory.models import InventoryItem, StockTransaction
 
 logger = logging.getLogger(__name__)
 
 THINK_TAG_RE = re.compile(r"<think>.*?</think>", flags=re.DOTALL | re.IGNORECASE)
 
-# ⚠️ Modelo: a Groq descontinuou os antigos Llama 3.x de chat. O recomendado
-# hoje pra tarefas de raciocínio/uso geral é a linha "gpt-oss". Usamos o
-# 20B — as duas tarefas daqui (escolher uma função de uma lista fechada, e
-# explicar um resultado numérico em 1-2 frases) são simples o bastante pra
-# não precisar do 120B, que custa o dobro por token. Se a qualidade das
-# respostas não for boa o suficiente, trocar aqui para "openai/gpt-oss-120b"
-# é a única mudança necessária.
 GROQ_MODEL = getattr(settings, "GROQ_MODEL", "openai/gpt-oss-20b")
 
 _client = None
 
 
-def _get_client() -> Groq:
+def _get_client():
     """
     Client da Groq, criado uma vez só (é thread-safe e reaproveitável).
-    Lançar aqui, e não no import do módulo, evita quebrar o site inteiro se
-    a variável de ambiente não estiver configurada — só o endpoint da
-    Amorinha falha, com uma mensagem clara, em vez do Django não subir.
+    ⚠️ CORREÇÃO: o import do groq ficava no topo do arquivo, o que fazia
+    o Django inteiro travar na inicialização se o pacote não estivesse
+    instalado (ex: ambiente local sem groq, ou rodando só o crawler da
+    Avatim sem precisar de IA). Movido pra cá: só falha quando a
+    Amorinha é realmente chamada, não na subida do servidor.
     """
     global _client
     if _client is None:
+        try:
+            from groq import Groq
+        except ImportError:
+            raise RuntimeError(
+                "Pacote 'groq' não instalado. Rode: pip install groq"
+            )
         api_key = getattr(settings, "GROQ_API_KEY", None)
         if not api_key:
             raise RuntimeError("GROQ_API_KEY não configurada")
@@ -355,7 +354,7 @@ def query_database_with_llm(user_question: str, store, history: list = None) -> 
         # GROQ_API_KEY não configurada — erro de configuração, não do usuário.
         logger.error("Amorinha: GROQ_API_KEY não configurada no ambiente")
         return "A assistente está temporariamente indisponível. Tente novamente mais tarde."
-    except GroqError:
+    except Exception:  # GroqError or other API errors
         # Rate limit, chave inválida, indisponibilidade momentânea da Groq etc.
         logger.exception("Amorinha: erro na chamada à API da Groq")
         return "Desculpe, tive um problema para me conectar. Tente novamente em instantes."
@@ -457,7 +456,7 @@ def responder_com_central_de_ajuda(pergunta: str, store) -> dict:
     except RuntimeError:
         logger.error("Amorinha (Central de Ajuda): GROQ_API_KEY não configurada")
         return {'encontrou': False}
-    except GroqError:
+    except Exception:  # GroqError or other API errors
         logger.exception("Amorinha (Central de Ajuda): erro na chamada à API da Groq")
         return {'encontrou': False}
     except Exception:
