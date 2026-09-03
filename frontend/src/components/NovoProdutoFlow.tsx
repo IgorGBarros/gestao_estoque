@@ -48,13 +48,15 @@ export default function NovoProdutoFlow({ barCode, onCancelar, onConcluido }: Pr
     setBuscandoCosmo(true);
     setPasso("preencher");
 
-    // Tenta buscar pelo código de barras no Cosmo/Google Shopping — se
-    // achar, pré-preenche o formulário. A consultora ainda pode corrigir
-    // qualquer campo antes de enviar.
+    // ⚠️ SIMPLIFICADO: o scraper ao vivo (force_remote=true) estava
+    // causando erros 403 na Natura e timeouts no Google Shopping — não
+    // valia o tempo que a consultora ficava esperando. Agora consulta
+    // só o catálogo local (Cosmo pré-vetado) que já é rápido. O crawler
+    // da Avatim e o crawl_all3.py populam o banco offline, e é só desses
+    // dados que faz sentido pré-preencher aqui.
     try {
-      const r = await api.get(`products/lookup/?ean=${encodeURIComponent(barCode)}&force_remote=true`);
+      const r = await api.get(`products/lookup/?ean=${encodeURIComponent(barCode)}`);
       const dado = r.data;
-
       if (dado?.found && dado?.data) {
         const d = dado.data;
         setForm({
@@ -63,10 +65,10 @@ export default function NovoProdutoFlow({ barCode, onCancelar, onConcluido }: Pr
           brand: d.brand || "",
           image_url: d.image_url || d.thumbnail || "",
         });
-        setFontePreencher(dado.source === "remote_unconfirmed" ? "Cosmo / Internet" : "Catálogo");
+        setFontePreencher("Catálogo");
       }
     } catch {
-      // Se falhar, deixa o formulário em branco — sem drama
+      // silencioso — formulário fica em branco, consultora preenche
     } finally {
       setBuscandoCosmo(false);
     }
