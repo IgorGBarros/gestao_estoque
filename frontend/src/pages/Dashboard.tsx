@@ -191,20 +191,40 @@ export default function Dashboard() {
           ) : (
             <>
               {/* 1. Cards: entrou, saiu, lucro */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <CardValor
                   icone={TrendingUp} cor="entrada"
-                  titulo="Entrou" valor={dados.resumo.entradas} sub="vendas no período"
+                  titulo="Receita" valor={dados.resumo.entradas} sub="total de vendas"
                 />
                 <CardValor
                   icone={TrendingDown} cor="saida"
-                  titulo="Saiu" valor={dados.resumo.saidas} sub="compras de estoque"
+                  titulo="Custo das vendas" valor={dados.resumo.custo_vendido} sub="quanto pagou pelos produtos vendidos"
+                />
+                <CardValor
+                  icone={TrendingDown} cor="saida"
+                  titulo="Compras de estoque" valor={dados.resumo.saidas} sub="entradas de estoque no período"
                 />
                 <CardValor
                   icone={Wallet} cor="resultado"
-                  titulo="Lucro" valor={dados.resumo.lucro} sub="vendas menos o custo"
+                  titulo="Lucro" valor={dados.resumo.lucro} sub="receita menos custo das vendas"
                 />
               </div>
+
+              {/* ⚠️ NOVO: aviso quando lucro = receita (custo_vendido = 0) — indica
+                  que há vendas sem custo cadastrado, distorcendo o resultado */}
+              {dados.resumo.entradas > 0 && dados.resumo.custo_vendido === 0 && (
+                <div className="flex items-start gap-3 rounded-xl bg-amber-50 border border-amber-200 p-3">
+                  <span className="text-lg">⚠️</span>
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">Custo das vendas não registrado</p>
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      Há vendas registradas, mas nenhuma tem custo de produto cadastrado.
+                      O lucro mostrado é igual à receita bruta — não reflete o valor real.
+                      Ao fazer a baixa, preencha o campo "Custo unitário" para calcular o lucro correto.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* 2. Gráfico de evolução */}
               {dados.evolucao.length > 0 && (

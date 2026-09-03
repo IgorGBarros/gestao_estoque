@@ -164,14 +164,21 @@ export default function WithdrawProduct() {
 
   const maxQty = data.selected_batch?.quantity || data.current_quantity;
 
+  // ⚠️ NOVO: custo editável na baixa — quando a consultora não cadastrou
+  // custo no AddProduct (cost_price = 0), ela pode corrigir aqui antes
+  // de confirmar. Sem isso, o lucro aparecia igual à receita bruta.
+  const [custoEditado, setCustoEditado] = useState<number | null>(null);
+  const custoEfetivo = custoEditado !== null ? custoEditado : data.cost_price;
+  const custoZerado = custoEfetivo === 0 || custoEfetivo === null;
+
   const profit =
     data.sale_type === "venda" && data.sale_price
-      ? (data.sale_price - data.cost_price) * data.withdraw_qty
+      ? (data.sale_price - custoEfetivo) * data.withdraw_qty
       : null;
 
   const margin =
-    data.sale_price && data.cost_price && data.cost_price > 0
-      ? (((data.sale_price - data.cost_price) / data.cost_price) * 100).toFixed(1)
+    data.sale_price && custoEfetivo && custoEfetivo > 0
+      ? (((data.sale_price - custoEfetivo) / custoEfetivo) * 100).toFixed(1)
       : null;
 
   const currentSaleType = SALE_TYPES.find((t) => t.value === data.sale_type)!;
@@ -498,8 +505,43 @@ export default function WithdrawProduct() {
                 </div>
 
                 {data.sale_type === "venda" && (
-                  <div>
-                    <label className="text-sm font-medium text-foreground">Preço de Venda Unitário (R$)</label>
+                  <div className="space-y-3">
+                    {/* ⚠️ NOVO: custo editável — quando não foi cadastrado
+                        (fica 0 por padrão), mostra aviso destacado e permite
+                        corrigir agora mesmo, sem ir em outra tela. Sem isso,
+                        o lucro aparecia igual à receita (distorcido). */}
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-medium text-foreground">Custo Unitário (R$)</label>
+                        {custoZerado && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                            ⚠️ Custo não cadastrado
+                          </span>
+                        )}
+                      </div>
+                      <div className="relative mt-2">
+                        <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={custoEditado !== null ? custoEditado : data.cost_price || ""}
+                          onChange={(e) => setCustoEditado(parseFloat(e.target.value) || 0)}
+                          placeholder="Quanto você pagou por unidade?"
+                          className={`w-full rounded-lg border py-2.5 pl-10 pr-4 text-sm outline-none focus:border-brand ${
+                            custoZerado ? "border-amber-300 bg-amber-50" : "border-input bg-background"
+                          }`}
+                        />
+                      </div>
+                      {custoZerado && (
+                        <p className="mt-1 text-xs text-amber-600">
+                          Preencha o custo para calcular o lucro real desta venda.
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="text-sm font-medium text-foreground">Preço de Venda Unitário (R$)</label>
                     <div className="relative mt-2">
                       <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <input
@@ -517,6 +559,7 @@ export default function WithdrawProduct() {
                         Margem: {margin}% · Lucro: {formatMoney(profit)}
                       </p>
                     )}
+                    </div>
                   </div>
                 )}
 
@@ -559,13 +602,43 @@ export default function WithdrawProduct() {
                           <Row label="Método" value={data.selected_batch ? "Lote específico" : "FIFO Automático"} />
                         )}
                         {data.notes && <Row label="Descrição" value={data.notes} />}
-                        <Row label="Custo Unitário" value={formatMoney(data.cost_price)} />
-                        {data.sale_type === "venda" && data.sale_price && (
-                          <>
-                            <Row label="Preço Venda Unitário" value={formatMoney(data.sale_price)} />
-                            <Row label="Receita Total" value={formatMoney(data.sale_price * data.withdraw_qty)} />
-                            <Row label="Lucro Total" value={formatMoney(profit)} />
-                          </>
+
+                        {/* ⚠️ NOVO: bloco de valores destacado separadamente —
+                            antes custo/venda/lucro ficavam misturados com
+                            os outros dados sem destaque visual */}
+                        {data.sale_type === "venda" && (
+                          <div className="mt-3 rounded-lg border border-border bg-background p-3 space-y-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Resumo financeiro</p>
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="text-muted-foreground">Custo unitário</span>
+                              <span className={`font-medium ${custoZerado ? "text-amber-600" : "text-foreground"}`}>
+                                {custoZerado ? "⚠️ Não informado" : formatMoney(custoEfetivo)}
+                              </span>
+                            </div>
+                            {data.sale_price && (
+                              <>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-muted-foreground">Preço de venda unitário</span>
+                                  <span className="font-medium text-foreground">{formatMoney(data.sale_price)}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-sm">
+                                  <span className="text-muted-foreground">Receita total ({data.withdraw_qty} un.)</span>
+                                  <span className="font-medium text-foreground">{formatMoney(data.sale_price * data.withdraw_qty)}</span>
+                                </div>
+                                {!custoZerado && profit !== null && (
+                                  <div className={`flex items-center justify-between rounded-lg px-2 py-1.5 text-sm font-semibold ${profit >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                                    <span>Lucro total</span>
+                                    <span>{formatMoney(profit)}{margin ? ` (${margin}%)` : ""}</span>
+                                  </div>
+                                )}
+                                {custoZerado && (
+                                  <p className="text-[10px] text-amber-600">
+                                    Volte e informe o custo para calcular o lucro real.
+                                  </p>
+                                )}
+                              </>
+                            )}
+                          </div>
                         )}
                         {!currentSaleType.hasRevenue && <Row label="Receita" value="R$ 0,00" />}
                       </div>
