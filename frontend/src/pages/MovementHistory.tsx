@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, ArrowUpCircle, ArrowDownCircle, Search, Package,
   ChevronDown, ChevronUp, Calendar, Calculator, Download,
+  Pencil, Save, X as XIcon, Loader2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { movementsApi, formatMoney, movementsReportApi } from "../lib/api";
@@ -33,6 +34,11 @@ export default function MovementHistory() {
   const [selectedMonth, setSelectedMonth] = useState<string>("all");
   const [expandedId, setExpandedId] = useState<string | number | null>(null);
   const [baixandoRel, setBaixandoRel] = useState(false);
+  // ⚠️ NOVO: edição inline de movimentações — só campos financeiros
+  // (custo, preço de venda, descrição). Quantidade e tipo são imutáveis.
+  const [editandoId, setEditandoId] = useState<string | number | null>(null);
+  const [editForm, setEditForm] = useState<{ unit_cost: string; unit_price: string; description: string }>({ unit_cost: "", unit_price: "", description: "" });
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -124,6 +130,33 @@ export default function MovementHistory() {
       /* silencioso: o extrato na tela continua disponível */
     } finally {
       setBaixandoRel(false);
+    }
+  };
+
+  const iniciarEdicao = (m: any) => {
+    setEditandoId(m.id);
+    setEditForm({
+      unit_cost: m.unit_cost != null ? String(m.unit_cost) : "",
+      unit_price: m.unit_price != null ? String(m.unit_price) : "",
+      description: m.description || "",
+    });
+  };
+
+  const salvarEdicao = async (id: string | number) => {
+    setSalvandoEdicao(true);
+    try {
+      const payload: any = { description: editForm.description };
+      if (editForm.unit_cost !== "") payload.unit_cost = parseFloat(editForm.unit_cost) || 0;
+      if (editForm.unit_price !== "") payload.unit_price = parseFloat(editForm.unit_price) || 0;
+      await movementsApi.update(id, payload);
+      setMovements((prev) => prev.map((m) =>
+        m.id === id ? { ...m, ...payload } : m
+      ));
+      setEditandoId(null);
+    } catch {
+      alert("Não deu pra salvar. Tente de novo.");
+    } finally {
+      setSalvandoEdicao(false);
     }
   };
 
@@ -353,28 +386,39 @@ export default function MovementHistory() {
                     </div>
                   </div>
 
-                  {/* Preços */}
+                  {/* Preços — editáveis inline */}
                   <div className="flex items-center justify-between border-t border-border/50 pt-3 mt-3">
                     <div className="flex gap-5 text-xs text-muted-foreground">
                       <p>
                         Custo:{" "}
-                        <span className="font-bold text-foreground">
-                          {formatMoney(m.unit_cost)}
+                        <span className={`font-bold ${!m.unit_cost || m.unit_cost === 0 ? "text-amber-500" : "text-foreground"}`}>
+                          {m.unit_cost ? formatMoney(m.unit_cost) : "⚠️ Não informado"}
                         </span>
                       </p>
-                      <p>
-                        Venda:{" "}
-                        <span className="font-bold text-foreground">
-                          {formatMoney(m.unit_price)}
-                        </span>
-                      </p>
-                    </div>
-                    <div className="p-1.5 rounded-full bg-secondary/80 text-muted-foreground hover:bg-secondary transition-colors">
-                      {isExpanded ? (
-                        <ChevronUp className="h-4 w-4" />
-                      ) : (
-                        <ChevronDown className="h-4 w-4" />
+                      {m.unit_price != null && m.unit_price > 0 && (
+                        <p>
+                          Venda:{" "}
+                          <span className="font-bold text-foreground">
+                            {formatMoney(m.unit_price)}
+                          </span>
+                        </p>
                       )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); iniciarEdicao(m); setExpandedId(m.id); }}
+                        className="flex items-center gap-1 rounded-lg border border-border px-2 py-1 text-[10px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+                        title="Editar valores desta movimentação"
+                      >
+                        <Pencil className="h-3 w-3" /> Editar
+                      </button>
+                      <div className="p-1.5 rounded-full bg-secondary/80 text-muted-foreground hover:bg-secondary transition-colors">
+                        {isExpanded ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -387,6 +431,65 @@ export default function MovementHistory() {
                         exit={{ height: 0, opacity: 0 }}
                         className="overflow-hidden"
                       >
+                        {/* Formulário de edição inline */}
+                        {editandoId === m.id && (
+                          <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                              ✏️ Editar valores
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="text-[10px] text-muted-foreground">Custo unitário (R$)</label>
+                                <input
+                                  type="number" step="0.01" min="0"
+                                  value={editForm.unit_cost}
+                                  onChange={(e) => setEditForm((p) => ({ ...p, unit_cost: e.target.value }))}
+                                  placeholder="Ex: 30.00"
+                                  className="mt-1 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm font-mono outline-none focus:border-brand"
+                                />
+                              </div>
+                              {m.ui_type === "saida" && (
+                                <div>
+                                  <label className="text-[10px] text-muted-foreground">Preço de venda (R$)</label>
+                                  <input
+                                    type="number" step="0.01" min="0"
+                                    value={editForm.unit_price}
+                                    onChange={(e) => setEditForm((p) => ({ ...p, unit_price: e.target.value }))}
+                                    placeholder="Ex: 75.00"
+                                    className="mt-1 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm font-mono outline-none focus:border-brand"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-muted-foreground">Descrição</label>
+                              <input
+                                type="text"
+                                value={editForm.description}
+                                onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))}
+                                placeholder="Ex: Venda para Maria"
+                                className="mt-1 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-sm outline-none focus:border-brand"
+                              />
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                onClick={() => setEditandoId(null)}
+                                className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-secondary"
+                              >
+                                <XIcon className="h-3 w-3" /> Cancelar
+                              </button>
+                              <button
+                                onClick={() => salvarEdicao(m.id)}
+                                disabled={salvandoEdicao}
+                                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+                              >
+                                {salvandoEdicao ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                                Salvar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
                         <div className="mt-3 pt-3 border-t border-border/50 grid grid-cols-2 gap-y-3 gap-x-4 text-xs">
                           <div className="bg-secondary/30 p-3 rounded-xl border border-border">
                             <p className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1.5 mb-1">
