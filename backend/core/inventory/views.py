@@ -981,13 +981,6 @@ class StockEntryView(APIView):
                             product.save()
                             print("Produto atualizado com os novos dados")
                 else:
-                    # ⚠️ NOVO: fluxo guiado de cadastro colaborativo —
-                    # consultora pode criar produto novo, mas ele entra
-                    # como 'aguardando' (invisível pro catálogo global
-                    # até o admin revisar, corrigir nome e adicionar SKU).
-                    # O frontend garante que ela passou pelo fluxo de
-                    # verificação antes de chegar aqui (campo
-                    # 'confirmado_novo=True' obrigatório).
                     if not data.get('confirmado_novo'):
                         return Response({
                             'error': 'Produto não encontrado no catálogo.',
@@ -1002,16 +995,56 @@ class StockEntryView(APIView):
                             'error_code': 'NOME_OBRIGATORIO',
                         }, status=400)
 
-                    product = Product.objects.create(
-                        bar_code=barcode_input or None,
-                        name=nome,
-                        category=data.get('category', 'Geral'),
-                        brand=data.get('brand') or None,
-                        official_price=data.get('sale_price', 0),
-                        image_url=data.get('image_url', ''),
-                        review_status='aguardando',
-                    )
-                    print(f"Produto novo criado aguardando revisão: {product}")
+                    # ⚠️ CORREÇÃO DO BUG DE DUPLICATA: antes, o lookup
+                    # buscava só pelo bar_code do request, então quando
+                    # o produto existia no banco com bara_code=NULL mas
+                    # natura_sku preenchido (vindo do crawler da Avatim),
+                    # criava um segundo registro idêntico como 'aguardando'.
+                    # Agora tenta achar pelo natura_sku do payload antes
+                    # de criar — se achar, atualiza o bar_code e usa o
+                    # produto existente sem criar nada.
+                    sku_do_payload = (data.get('natura_sku') or '').strip()
+                    if sku_do_payload:
+                        produto_por_sku = Product.objects.filter(
+                            natura_sku=sku_do_payload
+                        ).first()
+                        if produto_por_sku:
+                            # Produto existia pelo SKU — só faltava o bar_code
+                            if barcode_input and not produto_por_sku.bar_code:
+                                produto_por_sku.bar_code = barcode_input
+                                campos = ['bar_code']
+                                # Preenche outros campos que estejam vazios
+                                if data.get('brand') and not produto_por_sku.brand:
+                                    produto_por_sku.brand = data['brand']
+                                    campos.append('brand')
+                                produto_por_sku.save(update_fields=campos)
+                                print(f"Produto existente atualizado com bar_code: {produto_por_sku}")
+                            product = produto_por_sku
+                            # Pula a criação abaixo — vai direto pro InventoryItem
+                            print(f"Produto encontrado pelo SKU do payload, sem criar duplicata: {product}")
+                        else:
+                            product = Product.objects.create(
+                                bar_code=barcode_input or None,
+                                natura_sku=sku_do_payload or None,
+                                name=nome,
+                                category=data.get('category', 'Geral'),
+                                brand=data.get('brand') or None,
+                                official_price=data.get('sale_price', 0),
+                                image_url=data.get('image_url', ''),
+                                review_status='aguardando',
+                            )
+                            print(f"Produto novo criado aguardando revisão: {product}")
+                    else:
+                        product = Product.objects.create(
+                            bar_code=barcode_input or None,
+                            name=nome,
+                            category=data.get('category', 'Geral'),
+                            brand=data.get('brand') or None,
+                            official_price=data.get('sale_price', 0),
+                            image_url=data.get('image_url', ''),
+                            review_status='aguardando',
+                        )
+                        print(f"Produto novo criado aguardando revisão: {product}")
                 
                 # 3. Gerenciar estoque da loja (TENANT-AWARE)
                 print(f"Criando/atualizando InventoryItem para store={store}, product={product}")

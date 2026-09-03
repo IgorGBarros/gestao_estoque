@@ -2,15 +2,14 @@
 management/commands/crawl_avatim.py
 
 Crawler da Avatim (avatim.com.br) — plataforma VNDA (brasileira).
-Não usa Selenium porque o JSON do produto está embutido diretamente
-no HTML da página, nos blocos <script> — não precisa de JS renderizado.
+Não usa Selenium porque os dados do produto estão embutidos diretamente
+no HTML da página em atributos data-* e inputs — não precisa de JS renderizado.
 
 Estratégia:
   1. Percorre as páginas de listagem (/todos-os-produtos?page=N) pra
      descobrir todos os slugs/IDs de produto.
-  2. Para cada produto, busca a página individual e extrai o JSON
-     embutido (variants/skus — mesmo formato que o usuário mostrou:
-     full_name, sku, price, barcode, image_url, etc.)
+  2. Para cada produto, busca a página individual e extrai os dados
+     dos atributos HTML (nome, preço, SKU, categoria, etc.)
   3. Salva no banco com brand='Avatim' e review_status='aprovado'.
 
 Uso:
@@ -22,6 +21,8 @@ import json
 import re
 import time
 import random
+import requests
+from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -37,8 +38,6 @@ HEADERS = {
 BASE_URL = "https://www.avatim.com.br"
 
 # Mapeamento de categorias Avatim → nosso sistema.
-# Usa o campo attribute1 (ex: "Essência para Difusor", "Sabonete Líquido")
-# ou o segmento da URL do produto quando attribute1 não estiver disponível.
 CATEGORIA_MAP = {
     "essência para difusor": "Casa",
     "essencia para difusor": "Casa",
@@ -63,14 +62,20 @@ CATEGORIA_MAP = {
     "condicionador": "Cabelos",
     "máscara capilar": "Cabelos",
     "desodorante": "Corpo e Banho",
+    "acessórios": "Acessórios",
+    "kit": "Kits",
+    "necessaire": "Acessórios",
 }
 
 
-def _detectar_categoria(attribute1: str, nome: str) -> str:
-    chave = (attribute1 or "").lower().strip()
-    for palavra, cat in CATEGORIA_MAP.items():
-        if palavra in chave:
-            return cat
+def _detectar_categoria(categoria_html: str, nome: str) -> str:
+    """Detecta categoria baseado na categoria do HTML ou no nome."""
+    if categoria_html:
+        chave = categoria_html.lower().strip()
+        for palavra, cat in CATEGORIA_MAP.items():
+            if palavra in chave:
+                return cat
+    
     # Fallback pelo nome do produto
     nome_lower = (nome or "").lower()
     if any(x in nome_lower for x in ["difusor", "vela", "incenso", "sachê", "ambiental"]):
@@ -81,64 +86,110 @@ def _detectar_categoria(attribute1: str, nome: str) -> str:
         return "Corpo e Banho"
     if any(x in nome_lower for x in ["shampoo", "condicionador", "cabelo"]):
         return "Cabelos"
+    if any(x in nome_lower for x in ["necessaire", "kit", "acessório"]):
+        return "Acessórios"
     return "Geral"
 
 
-def _extrair_json_produto(html: str):
+def _extrair_dados_produto(html: str):
     """
-    Extrai o JSON de variantes embutido no HTML da página de produto
-    da plataforma VNDA. O formato típico é:
-      <script>var skus = [{...}];</script>
-    ou
-      <script>window.Vnda.Data.skus = [{...}];</script>
+    Extrai os dados do produto diretamente do HTML da página.
+    Usa a mesma lógica robusta de regex do crawler de referência.
     """
-    # Padrões comuns da VNDA
-    padroes = [
-        r'var\s+skus\s*=\s*(\[.*?\]);',
-        r'window\.Vnda\.Data\.skus\s*=\s*(\[.*?\]);',
-        r'"skus"\s*:\s*(\[.*?\])',
-        r'data-skus=["\'](\[.*?\])["\']',
-    ]
-    for padrao in padroes:
-        m = re.search(padrao, html, re.DOTALL)
+    dados = {}
+    
+    # 1. Extrair nome do produto
+    m = re.search(r'<h[13][^>]*class="name"[^>]*>([^<]+)</h[13]>', html)
+    if m:
+        dados['nome'] = m.group(1).strip()
+    
+    # 2. Extrair preço (Lógica robusta baseada no crawler de referência)
+    # Procura por "R$" seguido de espaço/&nbsp; e o formato brasileiro exato: 1.234,56 ou 56,78
+    m = re.search(r'R\$\s*(?:&nbsp;)?\s*(\d{1,3}(?:\.\d{3})*,\d{2})', html)
+    
+    if m:
+        # Converte formato brasileiro (1.234,56) para formato Decimal padrão (1234.56)
+        preco_str = m.group(1).replace('.', '').replace(',', '.')
+        try:
+            dados['preco'] = Decimal(preco_str)
+        except Exception:
+            pass
+    
+    # Fallback: se não achou no texto formatado, tenta data-price (às vezes vem como "61.00")
+    if 'preco' not in dados:
+        m = re.search(r'data-price="([\d.,]+)"', html)
         if m:
+            raw_price = m.group(1)
+            # Se tiver vírgula, é formato brasileiro. Se não, pode ser float padrão.
+            if ',' in raw_price:
+                preco_str = raw_price.replace('.', '').replace(',', '.')
+            else:
+                preco_str = raw_price
+            
             try:
-                return json.loads(m.group(1))
-            except json.JSONDecodeError:
-                continue
-    return None
+                dados['preco'] = Decimal(preco_str)
+            except Exception:
+                pass
 
-
-def _extrair_imagem(html: str) -> str:
-    """
-    Extrai a primeira imagem de produto do Open Graph ou da primeira
-    tag img com CDN da Avatim.
-    """
+    # 3. Extrair SKU
+    m = re.search(r'<input[^>]*name="sku"[^>]*value="([^"]*)"', html)
+    if m:
+        dados['sku'] = m.group(1).strip()
+    else:
+        m = re.search(r'data-sku="([^"]*)"', html)
+        if m:
+            dados['sku'] = m.group(1).strip()
+    
+    # 4. Extrair ID do produto
+    m = re.search(r'data-product-id="(\d+)"', html)
+    if m:
+        dados['product_id'] = m.group(1)
+    
+    # 5. Extrair categoria
+    m = re.search(r'categoria[^>]*>([^<]+)</', html, re.IGNORECASE)
+    if m:
+        dados['categoria_html'] = m.group(1).strip()
+    
+    # 6. Extrair linha/attribute1
+    m = re.search(r'linha[^>]*>([^<]+)</', html, re.IGNORECASE)
+    if m:
+        dados['linha'] = m.group(1).strip()
+    
+    # 7. Extrair imagem
     m = re.search(r'<meta[^>]+property="og:image"[^>]+content="([^"]+)"', html)
     if m:
-        return m.group(1)
-    m = re.search(r'(https://cdn\.vnda\.com\.br/avatim/[^"\']+\.jpg[^"\']*)', html)
-    if m:
-        return m.group(1)
-    return ""
+        dados['imagem'] = m.group(1)
+    else:
+        m = re.search(r'(https://cdn\.vnda\.com\.br/avatim/[^"\']+\.jpg[^"\']*)', html)
+        if m:
+            dados['imagem'] = m.group(1)
+    
+    # 8. Extrair barcode
+    m = re.search(r'data-barcode="([^"]*)"', html)
+    if m and m.group(1):
+        dados['barcode'] = m.group(1)
+    
+    return dados if dados else None
 
 
-def _buscar_pagina(url: str, sessao) -> str | None:
-    import requests
+def _buscar_pagina(url: str, sessao: requests.Session) -> str | None:
     try:
         resp = sessao.get(url, headers=HEADERS, timeout=15)
         if resp.status_code == 200:
             return resp.text
         if resp.status_code == 429:
-            print(f"  ⏳ Rate limit — aguardando 30s")
+            print("  ⏳ Rate limit — aguardando 30s")
             time.sleep(30)
+            resp = sessao.get(url, headers=HEADERS, timeout=15)
+            if resp.status_code == 200:
+                return resp.text
         return None
     except Exception as e:
         print(f"  ❌ Erro ao buscar {url}: {e}")
         return None
 
 
-def _descobrir_slugs(sessao, max_pages: int = 50) -> list[str]:
+def _descobrir_slugs(sessao: requests.Session, max_pages: int = 50) -> list[str]:
     """
     Percorre as páginas de listagem e coleta todos os slugs de produto.
     """
@@ -149,19 +200,18 @@ def _descobrir_slugs(sessao, max_pages: int = 50) -> list[str]:
         if not html:
             break
 
-        # Links de produto na VNDA são /produto/<slug>-<id>
-        encontrados = re.findall(r'/produto/([\w\-]+-\d+)', html)
+        # Links de produto: /produto/<slug-com-numeros>
+        encontrados = re.findall(r'/produto/([a-z0-9\-]+)', html)
         novos = [s for s in encontrados if s not in slugs]
 
         if not novos:
-            # Nenhum produto novo nessa página → chegamos no fim
             break
 
         slugs.extend(novos)
         print(f"  Página {page}: +{len(novos)} slugs ({len(slugs)} total)")
         time.sleep(random.uniform(0.5, 1.0))
 
-    return list(dict.fromkeys(slugs))  # deduplica mantendo a ordem
+    return list(dict.fromkeys(slugs))
 
 
 class Command(BaseCommand):
@@ -170,10 +220,9 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--limit", type=int, default=0, help="Limita a N produtos (0 = sem limite)")
         parser.add_argument("--dry-run", action="store_true", help="Mostra o que faria, não salva nada")
-        parser.add_argument("--max-pages", type=int, default=50, help="Máximo de páginas de listagem a varrer (default 50)")
+        parser.add_argument("--max-pages", type=int, default=50, help="Máximo de páginas de listagem (default 50)")
 
     def handle(self, *args, **options):
-        import requests
         from inventory.models import Product
 
         limite = options["limit"]
@@ -204,36 +253,39 @@ class Command(BaseCommand):
                 erros += 1
                 continue
 
-            variantes = _extrair_json_produto(html)
-            if not variantes:
-                self.stdout.write(f"  ⚠️ JSON não encontrado — pulando")
+            dados = _extrair_dados_produto(html)
+            if not dados:
+                self.stdout.write(self.style.WARNING("  ⚠️ Dados não encontrados — pulando"))
                 ignorados += 1
                 continue
 
-            # Pega a variante principal (main=True) ou a primeira
-            variante = next((v for v in variantes if v.get("main")), variantes[0])
-
-            nome = (variante.get("full_name") or variante.get("name") or "").strip()
+            nome = dados.get('nome', '').strip()
             if not nome:
+                self.stdout.write(self.style.WARNING("  ⚠️ Nome não encontrado — pulando"))
                 ignorados += 1
                 continue
 
-            sku = str(variante.get("sku") or "").strip()
-            barcode = str(variante.get("barcode") or "").strip() or None
-            preco = variante.get("sale_price") or variante.get("price")
-            imagem = variante.get("image_url") or _extrair_imagem(html)
-            attribute1 = variante.get("attribute1") or ""
-            categoria = _detectar_categoria(attribute1, nome)
+            sku = dados.get('sku', '').strip()
+            barcode = dados.get('barcode')
+            preco = dados.get('preco')
+            imagem = dados.get('imagem', '')
+            categoria_html = dados.get('categoria_html', '')
+            linha = dados.get('linha', '')
+            
+            categoria = _detectar_categoria(categoria_html or linha, nome)
+
+            # Formata o preço para exibição correta (ex: 82.00 em vez de 820.0)
+            preco_formatado = f"R$ {preco:.2f}" if preco is not None else "R$ 0.00"
 
             self.stdout.write(
                 f"  → {nome[:50]} | sku={sku} | barcode={barcode} | "
-                f"cat={categoria} | R$ {preco}"
+                f"cat={categoria} | {preco_formatado}"
             )
 
             if dry_run:
                 continue
 
-            # Tenta casar por SKU primeiro, depois por código de barras
+            # Buscar produto existente
             produto = None
             if sku:
                 produto = Product.objects.filter(natura_sku=sku).first()
@@ -256,16 +308,15 @@ class Command(BaseCommand):
                 defaults["natura_sku"] = sku
 
             if produto:
-                # Só atualiza campos que estão vazios — não sobrescreve
-                # correção manual que já tenha sido feita.
                 alterados = []
                 for campo, valor in defaults.items():
                     if campo in ("review_status", "last_checked_at"):
-                        continue  # sempre preserva o status existente
+                        continue
                     atual = getattr(produto, campo, None)
                     if not atual and valor:
                         setattr(produto, campo, valor)
                         alterados.append(campo)
+                
                 if alterados:
                     produto.save(update_fields=alterados)
                     atualizados += 1
