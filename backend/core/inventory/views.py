@@ -535,35 +535,9 @@ class InventoryViewSet(TenantModelMixin, viewsets.ModelViewSet):
     # são pequenos (dezenas de itens), então resposta sem paginação é ok.
     pagination_class = None
 
-    def get_queryset(self):
-        """
-        ⚠️ RESTAURADO a partir da v1.0.0 (comparação pedida pelo Igor): esta
-        view usava seu PRÓPRIO get_queryset, com Prefetch ordenando os lotes
-        por validade — comentário original já dizia "✅ CORREÇÃO: Ordenar
-        lotes por validade (FIFO)". Em algum refactor (provavelmente quando
-        TenantModelMixin foi introduzido/simplificado), esse Prefetch se
-        perdeu, e a view passou a usar o get_queryset genérico do mixin, sem
-        nenhuma ordenação. Era a causa raiz da validade errada em "Meu
-        Estoque" — o InventoryItemSerializer.get_batches (correção anterior,
-        já testada) cobre o caso mesmo sem isto, mas o Prefetch aqui evita
-        uma query por item (N+1) e é a fonte de verdade original.
-        """
-        try:
-            store = self.get_store()
-            return InventoryItem.objects.filter(store=store).select_related('product').prefetch_related(
-                Prefetch(
-                    'batches',
-                    queryset=InventoryBatch.objects.filter(quantity__gt=0).order_by(
-                        F('expiration_date').asc(nulls_last=True), 'id'
-                    )
-                )
-            ).order_by('-updated_at')
-        except Exception as e:
-            print(f"❌ Erro no get_queryset Inventory: {e}")
-            return InventoryItem.objects.none()
+    # ⚠️ CORRIGIDO: havia dois get_queryset definidos — o segundo (abaixo)
+    # é o que Python usava; o primeiro foi removido para evitar confusão.
 
-    # ✅ GET /api/inventory/by-barcode/<code>/ — o frontend (lib/api.ts) já
-    # chamava esta rota, mas ela nunca existiu no backend (Auditoria P0.1).
     @action(detail=False, methods=['get'], url_path='by-barcode/(?P<barcode>[^/]+)')
     def by_barcode(self, request, barcode=None):
         item = self.get_queryset().filter(product__bar_code=barcode).first()

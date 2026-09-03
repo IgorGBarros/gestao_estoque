@@ -309,18 +309,13 @@ class InventoryItemSerializer(serializers.ModelSerializer):
         """
         Custo efetivo — usa o custo cadastrado quando disponível, mas faz
         fallback pra official_price quando for 0 (consultora não preencheu).
-        Isso evita que a tela de baixa apareça com 'Custo: R$ 0,00' sem
-        avisar, o que distorcia o cálculo de lucro silenciosamente.
+        ⚠️ CORREÇÃO: tentava filtrar batches por cost_price, mas InventoryBatch
+        não tem esse campo — causava FieldError que derrubava a serialização
+        de todos os itens do estoque. Removido o acesso ao batch.
         """
         if obj.cost_price and float(obj.cost_price) > 0:
             return float(obj.cost_price)
-        # Tenta o lote mais antigo (FIFO) que ainda tem custo
-        primeiro_lote = obj.batches.filter(
-            quantity__gt=0, cost_price__gt=0
-        ).order_by('expiration_date', 'id').first()
-        if primeiro_lote:
-            return float(primeiro_lote.cost_price)
-        # Fallback: preço oficial do produto como estimativa
+        # Fallback: preço oficial do produto como estimativa de custo
         if obj.product and obj.product.official_price:
             return float(obj.product.official_price)
         return 0
