@@ -19,12 +19,12 @@ const CATEGORIES = [
   "Maquiagem", "Infantil", "Casa", "Outro",
 ];
 
-// ⚠️ NOVO: mesmas 6 marcas que o crawler (crawl_all3) já suporta — select
-// em vez de texto livre, pra evitar "avon"/"Avon"/"AVON" quebrando a
-// correspondência de marca em outros lugares do sistema depois.
-const BRANDS = [
-  "Natura", "Avon", "O Boticário", "Eudora", "Mary Kay", "Quem Disse Berenice", "Outra",
-];
+// ⚠️ CORRIGIDO: lista de marcas centralizada em src/lib/brands.ts —
+// antes estava hardcoded aqui, então adicionar uma marca nova exigia
+// atualizar manualmente em vários arquivos espalhados.
+import { MARCAS_PADRAO } from "../lib/brands";
+
+const BRANDS = [...MARCAS_PADRAO];
 
 const emptyProduct: Product = {
   name: "",

@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { Search, PackagePlus, AlertTriangle, Loader2, CheckCircle, Sparkles } from "lucide-react";
 import { api } from "../services/api";
+import { MARCAS_PADRAO } from "../lib/brands";
 
 interface Props {
   barCode: string;
@@ -236,7 +237,7 @@ export default function NovoProdutoFlow({ barCode, onCancelar, onConcluido }: Pr
                   className="mt-1 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-brand"
                 >
                   <option value="">Selecione</option>
-                  {["Natura", "Avon", "O Boticário", "Eudora", "Mary Kay", "Quem Disse Berenice"].map((m) => (
+                  {MARCAS_PADRAO.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
                   <option value="Outra">Outra</option>
