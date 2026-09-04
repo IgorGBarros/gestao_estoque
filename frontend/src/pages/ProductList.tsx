@@ -1,5 +1,5 @@
 // pages/ProductList.tsx — VERSÃO FINAL COM PALETA COMPLETA MINHA AMORA
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Plus, Search, Edit2, Package, ArrowLeft, Scale,
@@ -9,10 +9,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import { inventoryApi, formatMoney, stockReportApi } from "../lib/api";
 import { parseDateLocal, formatDateLocal, compareDateLocal } from "../lib/dateUtils";
 import { btn } from "../lib/ui";
-import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
+import { useToast } from '../components/ui/use-toast';
 import StockAdjustmentModal from "../components/StockAdjustmentModal";
 import ProductSearchModal from "../components/ProductSearchModal";
 import { LoadingSpinner } from "../components/ui/loading-spinner";
+import { buildBrandList } from "../lib/brands";
 
 function getStockStatus(qty: number, min: number): { label: string; color: string } {
   if (qty <= 0)
@@ -105,6 +106,14 @@ export default function ProductList() {
   // procurar manualmente.
   const [search, setSearch] = useState(() => searchParams.get("search") || "");
   const [filterStock, setFilterStock] = useState<StockFilter>("COM_ESTOQUE");
+  const [filterBrand, setFilterBrand] = useState<string>("TODAS");
+
+  // Lista de marcas derivada do próprio inventário carregado — assim
+  // uma marca nova aparece automaticamente sem precisar atualizar código.
+  const marcasNoEstoque = useMemo(() => {
+    const extras = inventory.map((i) => i.product?.brand || (i as any).brand);
+    return buildBrandList(extras);
+  }, [inventory]);
   const [loading, setLoading] = useState(true);
 
   const [adjustItem, setAdjustItem] = useState<any | null>(null);
@@ -193,7 +202,12 @@ export default function ProductList() {
         ? qty > 0
         : qty <= 0;
 
-    return textMatch && stockMatch;
+    const brandMatch =
+      filterBrand === "TODAS"
+        ? true
+        : (item.product?.brand || (item as any).brand || "") === filterBrand;
+
+    return textMatch && stockMatch && brandMatch;
   });
 
   return (
@@ -293,6 +307,31 @@ export default function ProductList() {
             Todos
           </button>
         </div>
+
+        {/* Filtro por marca — derivado do inventário real, aparece
+            automaticamente quando uma marca nova for adicionada */}
+        {marcasNoEstoque.length > 1 && (
+          <div className="flex items-center gap-2">
+            <select
+              value={filterBrand}
+              onChange={(e) => setFilterBrand(e.target.value)}
+              className="flex-1 rounded-xl border border-brand-peach bg-brand-soft px-3 py-2 text-sm text-brand-rose outline-none focus:border-brand"
+            >
+              <option value="TODAS">Todas as marcas</option>
+              {marcasNoEstoque.filter(m => m !== "Outra").map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            {filterBrand !== "TODAS" && (
+              <button
+                onClick={() => setFilterBrand("TODAS")}
+                className="flex items-center gap-1 rounded-xl border border-brand-peach bg-brand-soft px-3 py-2 text-xs text-brand-rose hover:bg-brand-peach/30"
+              >
+                <X className="h-3 w-3" /> Limpar
+              </button>
+            )}
+          </div>
+        )}
 
         {/* ══════════════════════════════════════════
             PRODUCT LIST
