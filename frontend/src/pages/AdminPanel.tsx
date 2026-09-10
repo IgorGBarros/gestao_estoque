@@ -14,6 +14,7 @@ import { profileApi, adminApi, adminHealthApi, systemConfigApi, SystemConfigStat
 import { useAuth } from "../hooks/useAuth";
 import ConsultantsHealthTab from "../components/admin/ConsultantsHealthTab";
 import CrmOverviewTab from "../components/admin/CrmOverviewTab";
+import AdminGrowthTab from "../components/admin/AdminGrowthTab";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { Badge } from "../components/ui/badge";
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "../components/ui/table";
@@ -2279,6 +2280,10 @@ export default function AdminPanel() {
           </TabsContent>
 
           <TabsContent value="analytics" className="space-y-6">
+            {/* 🌱 Growth Dashboard — North Star, funil, churn risk, UTM */}
+            <AdminGrowthTab toast={toast} />
+
+            <div className="border-t border-border pt-6">
             {/* 📊 Indicadores de gestão que saíram do Dashboard da consultora.
                 Para ela não geravam ação; aqui mostram quem precisa de ajuda. */}
             <div>
@@ -2288,6 +2293,8 @@ export default function AdminPanel() {
               </p>
             </div>
             <ConsultantsHealthTab />
+
+            </div>{/* fecha saúde das consultoras */}
 
             <div className="pt-6 border-t border-border">
               <h2 className="text-2xl font-bold">CRM da vitrine</h2>

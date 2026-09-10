@@ -7,6 +7,8 @@ import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast 
 import { useConsent, PURPOSES } from "../hooks/useConsent"; // ✅ Import correto
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
 import { LoadingSpinner } from "../components/ui/loading-spinner";
+import { sendUTMToBackend } from "../lib/utm";
+import { api } from "../services/api";
 
 // Versão do termo de consentimento (mudar quando atualizar a política)
 const CONSENT_VERSION = "v1.0_2026-05";
@@ -67,6 +69,7 @@ export default function Auth() {
     try {
       if (isLogin) {
         await signIn(email, password);
+        await sendUTMToBackend((url, d) => api.post(url, d));
         navigate("/app");
       } else {
         // 1. Criar usuário
@@ -88,6 +91,7 @@ export default function Auth() {
           console.warn("Usuário criado, mas consentimento LGPD falhou");
         }
         
+        await sendUTMToBackend((url, d) => api.post(url, d));
         navigate("/app");
       }
     } catch (err: any) {
