@@ -4,11 +4,12 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Package, BarChart3, Store, ScanBarcode, Shield, Sparkles,
-  Check, X, ArrowRight, Star, TrendingDown, Bell, Bot, Crown, 
+  Check, X, ArrowRight, Star, TrendingDown, Bell, Bot, Crown,
   Zap, Users, CreditCard,
 } from "lucide-react";
-import { api } from "../services/api"; 
-import { useToast } from '../components/ui/use-toast';// ✅ Importar useToast original para evitar dependência circular
+import { api } from "../services/api";
+import { useToast } from '../components/ui/use-toast';
+import { useSystemConfig } from "../hooks/useSystemConfig";
 import logoMinhaAmora from "../assets/logo-minhaamora.png";
 import amorinhaAvatar from "../assets/amorinha-avatar.png";
 import appPreview1 from "../assets/app-preview-1.png";
@@ -263,7 +264,21 @@ export default function LandingPage() {
   // Captura UTM no first-touch (sobrevive ao redirect de auth)
   useEffect(() => { captureUTM(); }, []);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  // Suporte público — usa WhatsApp ou email configurado em Sistema → Configurações,
+  // não o /support interno da loja da consultora (que exige login).
+  const { whatsappSuporte, emailSuporte } = useSystemConfig();
 
+  const abrirSuporte = () => {
+    if (whatsappSuporte) {
+      const msg = encodeURIComponent("Olá! Preciso de ajuda com o Minha Amora.");
+      window.open(`https://api.whatsapp.com/send?phone=${whatsappSuporte}&text=${msg}`, "_blank", "noopener");
+    } else if (emailSuporte) {
+      window.location.href = `mailto:${emailSuporte}?subject=Suporte%20Minha%20Amora`;
+    } else {
+      // Fallback: email padrão enquanto não está configurado no admin
+      window.location.href = "mailto:contato@minhaamora.com.br?subject=Suporte%20Minha%20Amora";
+    }
+  };
   return (
     <div className="min-h-screen bg-background text-foreground overflow-x-hidden">
       <AnimatePresence>
@@ -862,8 +877,8 @@ export default function LandingPage() {
                 >
                   Termos de Uso
                 </button>
-                <button 
-                  onClick={() => navigate("/support")}
+                <button
+                  onClick={abrirSuporte}
                   className="hover:text-[#871745] transition-colors"
                 >
                   Suporte

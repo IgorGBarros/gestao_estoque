@@ -1,6 +1,6 @@
 // src/components/admin/AdminGrowthTab.tsx
 import { useState, useEffect } from "react";
-import { TrendingUp, TrendingDown, Users, AlertTriangle, RefreshCw, Target, BarChart3, Zap } from "lucide-react";
+import { TrendingUp, TrendingDown, Users, AlertTriangle, RefreshCw, Target, BarChart3, Zap, GitBranch } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { adminApi } from "../../lib/api";
 import { LoadingSpinner } from "../ui/loading-spinner";
@@ -42,10 +42,15 @@ function Taxa({ label, val, meta }: { label: string; val: number; meta: number }
 export default function AdminGrowthTab({ toast }: Props) {
   const [dados, setDados] = useState<GrowthData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [onboarding, setOnboarding] = useState<any>(null);
 
   const carregar = async () => {
     setLoading(true);
-    try { setDados(await adminApi.growthDashboard()); }
+    try {
+      const [g, o] = await Promise.all([adminApi.growthDashboard(), adminApi.growthOnboarding()]);
+      setDados(g);
+      setOnboarding(o);
+    }
     catch { toast({ title: "Erro ao carregar growth", variant: "destructive" }); }
     finally { setLoading(false); }
   };
@@ -160,6 +165,47 @@ export default function AdminGrowthTab({ toast }: Props) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Onboarding Stages */}
+      {onboarding && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <GitBranch className="h-4 w-4" /> Estágios de Onboarding
+            </CardTitle>
+            <CardDescription>Onde cada consultora está no funil</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {[
+                { key: 'trial_recente',        label: 'Trial < 3 dias',    cor: 'border-blue-200 bg-blue-50 text-blue-700' },
+                { key: 'sem_ativacao_risco',   label: 'Sem ativar (3-7d)', cor: 'border-amber-200 bg-amber-50 text-amber-700' },
+                { key: 'sem_ativacao_critico', label: 'Sem ativar > 7d',   cor: 'border-red-200 bg-red-50 text-red-700' },
+                { key: 'ativado_trial',        label: 'Ativou (trial)',     cor: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+                { key: 'pagante_ativo',        label: 'Pagante ativo',      cor: 'border-brand/30 bg-brand/5 text-brand' },
+                { key: 'pagante_em_risco',     label: 'Pagante em risco',   cor: 'border-orange-200 bg-orange-50 text-orange-700' },
+              ].map(({ key, label, cor }) => (
+                <div key={key} className={`rounded-lg border p-3 text-center ${cor}`}>
+                  <p className="text-xl font-bold">{onboarding.totais[key] ?? 0}</p>
+                  <p className="text-[10px] font-medium mt-0.5">{label}</p>
+                </div>
+              ))}
+            </div>
+            {/* Consultoras críticas sem ativação */}
+            {onboarding.estagios.sem_ativacao_critico?.length > 0 && (
+              <div className="mt-4 space-y-1">
+                <p className="text-xs font-semibold text-red-700 mb-2">⚠️ Precisam de intervenção agora:</p>
+                {onboarding.estagios.sem_ativacao_critico.slice(0, 5).map((c: any) => (
+                  <div key={c.email} className="flex items-center justify-between rounded-lg bg-red-50 border border-red-200 px-3 py-1.5 text-xs">
+                    <span className="truncate">{c.email}</span>
+                    <span className="shrink-0 text-red-600 font-medium ml-2">D{c.dias_cadastrado}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

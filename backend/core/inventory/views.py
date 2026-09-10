@@ -5302,3 +5302,138 @@ def growth_dashboard(request):
         'canais': canais_lista,
         'indicacoes': {'total': total_ind, 'ultimos_30d': ind_30d},
     })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🤝 PROGRAMA DE INDICAÇÃO — endpoints da consultora e da página pública
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def meu_codigo_indicacao(request):
+    """
+    GET /api/growth/meu-codigo/
+    Retorna o código de indicação da própria consultora (referrer_store).
+    Se não tiver código ainda, cria automaticamente.
+    """
+    from inventory.models import ReferralCode
+    import random, string
+
+    store = getattr(request.user, 'store', None)
+    if not store:
+        return Response({'error': 'Loja não encontrada.'}, status=404)
+
+    codigo = ReferralCode.objects.filter(referrer_store=store, active=True).first()
+    if not codigo:
+        # Gera um código legível no formato NOME-4LETRAS
+        nome = (store.owner.name or store.owner.email.split('@')[0]).upper()[:6]
+        sufixo = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        code = f"{nome}-{sufixo}"
+        while ReferralCode.objects.filter(code=code).exists():
+            sufixo = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+            code = f"{nome}-{sufixo}"
+        codigo = ReferralCode.objects.create(
+            code=code,
+            label=f"Código de {store.owner.name or store.owner.email}",
+            referrer_store=store,
+            bonus_trial_days=30,
+            referrer_bonus_days=7,
+            max_uses=None,  # sem limite — consultora pode indicar quantas quiser
+        )
+
+    link = f"https://minhaamora.com.br/ref/{codigo.code}"
+    return Response({
+        'code': codigo.code,
+        'link': link,
+        'times_used': codigo.times_used,
+        'bonus_trial_days': codigo.bonus_trial_days,
+        'referrer_bonus_days': codigo.referrer_bonus_days,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def referral_landing(request, code):
+    """
+    GET /api/ref/<code>/
+    Endpoint público — a página /ref/CODE chama isso pra validar o código
+    e mostrar as informações antes do cadastro.
+    """
+    from inventory.models import ReferralCode
+    try:
+        ref = ReferralCode.objects.select_related('referrer_store__owner').get(code=code, active=True)
+        if ref.esgotado:
+            return Response({'valido': False, 'motivo': 'Código esgotado.'})
+        nome_indicadora = None
+        if ref.referrer_store and ref.referrer_store.owner:
+            nome_indicadora = ref.referrer_store.owner.name or ref.referrer_store.owner.email.split('@')[0]
+        return Response({
+            'valido': True,
+            'code': ref.code,
+            'bonus_dias': ref.bonus_trial_days,
+            'nome_indicadora': nome_indicadora,
+        })
+    except ReferralCode.DoesNotExist:
+        return Response({'valido': False, 'motivo': 'Código não encontrado.'})
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def growth_onboarding_stages(request):
+    """
+    GET /api/admin/growth/onboarding/
+    Consultoras agrupadas por estágio de onboarding para acompanhamento.
+    Permite saber quem precisa de intervenção manual (D3/D7 sem ativação).
+    """
+    from datetime import timedelta
+    agora = timezone.now()
+
+    lojas = Store.objects.filter(owner__isnull=False).select_related('owner').order_by('-created_at')
+
+    estagios = {
+        'sem_ativacao_critico': [],   # Trial > 7 dias, sem ativar
+        'sem_ativacao_risco':   [],   # Trial 3-7 dias, sem ativar
+        'trial_recente':        [],   # Trial < 3 dias
+        'ativado_trial':        [],   # Ativou, ainda no trial
+        'pagante_ativo':        [],   # Pagante com uso
+        'pagante_em_risco':     [],   # Pagante sem uso
+    }
+
+    for loja in lojas:
+        dias = (agora - loja.created_at).days
+        em_trial = loja.plan == 'free' and loja.trial_ends_at and loja.trial_ends_at >= agora
+        pagante = loja.plan == 'pro' and loja.subscription_expires_at and loja.subscription_expires_at >= agora
+        ativado = bool(loja.activated_at)
+        vendas_30d = StockTransaction.objects.filter(
+            store=loja, transaction_type='VENDA',
+            created_at__gte=agora - timedelta(days=30)
+        ).count()
+
+        info = {
+            'email': loja.owner.email,
+            'nome': loja.owner.name or '',
+            'dias_cadastrado': dias,
+            'ativado': ativado,
+            'vendas_30d': vendas_30d,
+            'utm_source': loja.utm_source or 'direto',
+        }
+
+        if pagante:
+            if vendas_30d >= 3:
+                estagios['pagante_ativo'].append(info)
+            else:
+                estagios['pagante_em_risco'].append(info)
+        elif em_trial:
+            if ativado:
+                estagios['ativado_trial'].append(info)
+            elif dias >= 7:
+                estagios['sem_ativacao_critico'].append(info)
+            elif dias >= 3:
+                estagios['sem_ativacao_risco'].append(info)
+            else:
+                estagios['trial_recente'].append(info)
+
+    return Response({
+        'estagios': estagios,
+        'totais': {k: len(v) for k, v in estagios.items()},
+    })
