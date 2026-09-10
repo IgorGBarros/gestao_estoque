@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { captureUTM } from "../lib/utm";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -259,6 +260,8 @@ function CheckoutModal({ open, onClose }: CheckoutModalProps) {
 // ─── Landing Page Component ──────────────────────────────────────────────────
 export default function LandingPage() {
   const navigate = useNavigate();
+  // Captura UTM no first-touch (sobrevive ao redirect de auth)
+  useEffect(() => { captureUTM(); }, []);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   return (

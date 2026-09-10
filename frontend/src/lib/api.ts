@@ -541,6 +541,9 @@ export const adminApi = {
   toggleReferralCode: (id: number) =>
     apiRequest<any>(`/admin/referral-codes/${id}/toggle/`, { method: "POST" }),
 
+  // 🌱 Growth dashboard
+  growthDashboard: () => apiRequest<any>("/admin/growth/"),
+
   // 📬 Contato — e-mail real, WhatsApp com link pronto (envio manual).
   // Texto sempre livre — modelo é só ponto de partida, nunca obrigatório.
   listTemplates: () => apiRequest<{ email: { value: string; label: string }[]; whatsapp: { value: string; label: string }[] }>("/admin/templates/"),

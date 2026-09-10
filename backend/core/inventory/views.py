@@ -2728,11 +2728,21 @@ class StockTransactionViewSet(TenantModelMixin, viewsets.ModelViewSet):
         try:
             store = ensure_user_has_store(self.request.user)
             print(f"🏪 perform_create - store_id: {store.id}")
-            
-            # ✅ FORÇAR store na criação
+
             instance = serializer.save(store=store)
             print(f"✅ StockTransaction {instance.id} criada com store_id: {instance.store_id}")
-            
+
+            # 🌱 ATIVAÇÃO AUTOMÁTICA — detecta o "momento eureka" quando a
+            # consultora atinge 3 vendas registradas pela primeira vez.
+            if instance.transaction_type == 'VENDA' and not store.activated_at:
+                total_vendas = StockTransaction.objects.filter(
+                    store=store, transaction_type='VENDA'
+                ).count()
+                if total_vendas >= 3:
+                    store.activated_at = timezone.now()
+                    store.save(update_fields=['activated_at'])
+                    print(f"🎯 Ativação: loja {store.id} atingiu {total_vendas} vendas")
+
         except Exception as e:
             print(f"❌ Erro no perform_create: {e}")
             import traceback
@@ -5163,3 +5173,132 @@ def health_check_view(request):
 # com os outros endpoints de /api/v1/ (products, lookup, storefront), pra
 # não ter dois arquivos diferentes definindo pedaços da mesma superfície
 # comercial. Ver api_comercial_urls.py.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🌱 GROWTH — UTM, ativação e dashboard de crescimento
+# ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def save_utm(request):
+    """
+    POST /api/growth/utm/
+    Salva parâmetros UTM capturados na landing page no momento do
+    cadastro. Chamado uma única vez logo após o primeiro login/signup.
+    Só salva se ainda não tiver UTM — preserva o first-touch.
+    """
+    store = getattr(request.user, 'store', None)
+    if not store:
+        return Response({'ok': False}, status=404)
+    if store.utm_source:
+        return Response({'ok': True, 'msg': 'já registrado'})
+    campos = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content']
+    salvou = []
+    for c in campos:
+        val = (request.data.get(c) or '').strip()[:100]
+        if val:
+            setattr(store, c, val)
+            salvou.append(c)
+    if salvou:
+        store.save(update_fields=salvou)
+    return Response({'ok': True, 'salvou': salvou})
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def growth_dashboard(request):
+    """
+    GET /api/admin/growth/
+    North Star Metric, funil, Churn Risk Score e aquisição por canal.
+    """
+    from django.db.models import Count
+    from datetime import timedelta
+
+    agora       = timezone.now()
+    ha_7d       = agora - timedelta(days=7)
+    ha_14d      = agora - timedelta(days=14)
+    ha_30d      = agora - timedelta(days=30)
+
+    lojas = Store.objects.filter(owner__isnull=False).select_related('owner')
+
+    # ── North Star: consultoras com 3+ vendas nos últimos 7 dias ──────────
+    def contagem_nsm(inicio, fim=None):
+        qs = StockTransaction.objects.filter(transaction_type='VENDA', created_at__gte=inicio)
+        if fim:
+            qs = qs.filter(created_at__lt=fim)
+        ids = (qs.values('store_id').annotate(n=Count('id')).filter(n__gte=3)
+               .values_list('store_id', flat=True))
+        return len(ids)
+
+    nsm_atual    = contagem_nsm(ha_7d)
+    nsm_anterior = contagem_nsm(ha_14d, ha_7d)
+
+    # ── Funil ─────────────────────────────────────────────────────────────
+    total    = lojas.count()
+    em_trial = lojas.filter(plan='free', trial_ends_at__gte=agora).count()
+    ativadas = lojas.filter(activated_at__isnull=False).count()
+    pagantes = lojas.filter(plan='pro', subscription_expires_at__gte=agora).count()
+    novos_30 = lojas.filter(created_at__gte=ha_30d).count()
+    atv_30   = lojas.filter(activated_at__gte=ha_30d).count()
+    pag_30   = lojas.filter(subscription_started_at__gte=ha_30d, plan='pro').count()
+
+    # ── Churn Risk Score ──────────────────────────────────────────────────
+    em_risco = []
+    for loja in lojas.filter(plan='pro', subscription_expires_at__gte=agora):
+        score = 0
+        last_login = getattr(loja.owner, 'last_login', None)
+        dias_sem_login = (agora - last_login).days if last_login else 999
+        if dias_sem_login >= 7:  score += 30
+        vendas_30 = StockTransaction.objects.filter(
+            store=loja, transaction_type='VENDA', created_at__gte=ha_30d).count()
+        if vendas_30 == 0:  score += 25
+        elif vendas_30 < 3: score += 10
+        if score >= 25:
+            nivel = 'CRITICAL' if score >= 50 else 'HIGH' if score >= 30 else 'MEDIUM'
+            em_risco.append({
+                'store_id': loja.id,
+                'email': loja.owner.email,
+                'score': score,
+                'nivel': nivel,
+                'vendas_30d': vendas_30,
+                'dias_sem_login': dias_sem_login,
+            })
+    em_risco.sort(key=lambda x: x['score'], reverse=True)
+
+    # ── Aquisição por canal UTM ───────────────────────────────────────────
+    canais: dict = {}
+    for loja in lojas:
+        canal = loja.utm_source or 'direto'
+        if canal not in canais:
+            canais[canal] = {'total': 0, 'pagantes': 0}
+        canais[canal]['total'] += 1
+        if loja.plan == 'pro' and loja.subscription_expires_at and loja.subscription_expires_at >= agora:
+            canais[canal]['pagantes'] += 1
+    canais_lista = sorted([
+        {'canal': k, 'total': v['total'], 'pagantes': v['pagantes'],
+         'conversao': round(v['pagantes'] / v['total'] * 100, 1) if v['total'] else 0}
+        for k, v in canais.items()
+    ], key=lambda x: x['pagantes'], reverse=True)
+
+    # ── Indicações ────────────────────────────────────────────────────────
+    from inventory.models import ReferralUse
+    total_ind = ReferralUse.objects.count()
+    ind_30d   = ReferralUse.objects.filter(created_at__gte=ha_30d).count()
+
+    return Response({
+        'north_star': {
+            'valor': nsm_atual,
+            'anterior': nsm_anterior,
+            'variacao': nsm_atual - nsm_anterior,
+        },
+        'funil': {
+            'total': total, 'em_trial': em_trial,
+            'ativadas': ativadas, 'pagantes': pagantes,
+            'novos_30d': novos_30, 'ativados_30d': atv_30, 'pagantes_30d': pag_30,
+            'activation_rate': round(ativadas / total * 100, 1) if total else 0,
+            'trial_conversion': round(pagantes / ativadas * 100, 1) if ativadas else 0,
+        },
+        'churn_risk': em_risco[:20],
+        'canais': canais_lista,
+        'indicacoes': {'total': total_ind, 'ultimos_30d': ind_30d},
+    })

@@ -169,6 +169,7 @@ urlpatterns = [
 # recebia 404. Este bloco fecha essa lacuna.
 from rest_framework.routers import DefaultRouter
 from inventory.views import InventoryViewSet, StockTransactionViewSet, StockEntryView, ProductViewSet
+from inventory.views import save_utm, growth_dashboard
 
 router = DefaultRouter()
 router.register(r'api/inventory', InventoryViewSet, basename='inventory')
@@ -183,4 +184,7 @@ router.register(r'api/products', ProductViewSet, basename='products')
 urlpatterns += router.urls
 urlpatterns += [
     path('api/stock/entry/', StockEntryView.as_view(), name='stock_entry'),
+    # 🌱 Growth
+    path('api/growth/utm/',   save_utm,          name='save_utm'),
+    path('api/admin/growth/', growth_dashboard,  name='growth_dashboard'),
 ]

@@ -214,6 +214,17 @@ class Store(models.Model):
     # momento pela Central de Ajuda > Guias, mesmo já tendo sido concluído.
     onboarding_completed = models.BooleanField(default=False)
 
+    # ── Growth & Attribution ──────────────────────────────────────────────
+    # UTM capturados na landing page no momento do cadastro (first-touch).
+    utm_source   = models.CharField(max_length=100, blank=True, default='')
+    utm_medium   = models.CharField(max_length=100, blank=True, default='')
+    utm_campaign = models.CharField(max_length=100, blank=True, default='')
+    utm_content  = models.CharField(max_length=100, blank=True, default='')
+
+    # Momento eureka — primeira vez que a consultora atingiu 3+ vendas.
+    # Preenchido automaticamente no StockTransactionViewSet.perform_create.
+    activated_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         verbose_name = 'Loja'
         verbose_name_plural = 'Lojas'
