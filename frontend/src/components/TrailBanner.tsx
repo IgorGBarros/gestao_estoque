@@ -4,9 +4,45 @@
 //   • TrialBanner        — faixa discreta com a contagem regressiva
 //   • TrialExpiredScreen — bloqueio suave quando o teste acaba
 import { useNavigate } from "react-router-dom";
-import { Sparkles, Clock, Lock, Download } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Sparkles, Clock, Lock, Download, AlertTriangle } from "lucide-react";
 import { useTrial } from "../hooks/useTrial";
-import { consentApi } from "../lib/api";
+import { consentApi, profileApi } from "../lib/api";
+
+// ⚠️ NOVO: banner âmbar exibido no ProtectedLayout quando a assinatura
+// expirou mas ainda está no período de graça de 7 dias.
+export function GracePeriodBanner() {
+  const navigate = useNavigate();
+  const [show, setShow] = useState(false);
+  const [days, setDays] = useState(0);
+
+  useEffect(() => {
+    profileApi.get().then((p: any) => {
+      const ss = p?.subscription_status;
+      if (ss?.in_grace_period) {
+        setShow(true);
+        setDays(ss.grace_days_remaining ?? 0);
+      }
+    }).catch(() => {});
+  }, []);
+
+  if (!show) return null;
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-400/30 bg-amber-50 px-4 py-2 text-xs">
+      <span className="flex items-center gap-1.5 font-medium text-amber-800">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+        Assinatura expirada — acesso PRO por mais {days} dia{days !== 1 ? "s" : ""}
+      </span>
+      <button
+        onClick={() => navigate("/plans")}
+        className="shrink-0 rounded-lg bg-amber-500 px-3 py-1 font-semibold text-white hover:bg-amber-600"
+      >
+        Renovar agora
+      </button>
+    </div>
+  );
+}
 
 export function TrialBanner() {
   const navigate = useNavigate();

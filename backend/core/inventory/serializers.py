@@ -652,6 +652,10 @@ class ProfileSerializer(serializers.ModelSerializer):
             # "venceu semana passada". Quem precisa avisar sobre renovação usa
             # `status` ('expired') e esta data.
             'expires_at': obj.subscription_expires_at,
+            # Grace period — usados no banner global e na tela de planos
+            'in_grace_period': obj.in_grace_period,
+            'grace_days_remaining': obj.grace_days_remaining,
+            'subscription_expired': obj.subscription_expired,
         }
     
     def get_stats(self, obj):

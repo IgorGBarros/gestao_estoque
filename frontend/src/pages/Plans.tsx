@@ -3,11 +3,11 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Crown, Check, X, Sparkles,
-  CreditCard, QrCode, Barcode, ShieldCheck,
+  CreditCard, QrCode, Barcode, ShieldCheck, AlertTriangle,
 } from "lucide-react";
 import { usePlan } from "../hooks/usePlan";
 import { useAuth } from "../hooks/useAuth";
-import { plansApi, paymentsApi } from "../lib/api";
+import { plansApi, paymentsApi, profileApi } from "../lib/api";
 import { useToast } from '../components/ui/use-toast'; // ✅ Importar useToast original para evitar dependência circular
 import { LoadingSpinner } from "../components/ui/loading-spinner";
 
@@ -56,8 +56,23 @@ export default function Plans() {
 
   const [billing, setBilling] = useState<BillingCycle>("monthly");
   const [processing, setProcessing] = useState(false);
+  // Grace period — assinatura expirou mas ainda está no prazo de graça
+  const [isInGrace, setIsInGrace] = useState(false);
+  const [graceDays, setGraceDays] = useState<number>(0);
+  const [subscriptionExpired, setSubscriptionExpired] = useState(false);
 
-  // ✅ Preços dinâmicos do PlanConfig (via /api/plans/). Enquanto carrega,
+  useEffect(() => {
+    profileApi.get().then((p: any) => {
+      const ss = p?.subscription_status;
+      if (ss) {
+        setIsInGrace(ss.in_grace_period === true);
+        setGraceDays(ss.grace_days_remaining ?? 0);
+        setSubscriptionExpired(ss.subscription_expired === true);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Preços dinâmicos do PlanConfig (via /api/plans/). Enquanto carrega,
   // usa os defaults; se a API responder, substitui pelos valores reais.
   const [monthlyPrice, setMonthlyPrice] = useState(DEFAULT_MONTHLY_PRICE);
   const [yearlyPrice, setYearlyPrice] = useState(DEFAULT_YEARLY_PRICE);
@@ -141,14 +156,43 @@ export default function Plans() {
         {/* ══════════════════════════════════════════
             BANNER PRO ATIVO
             ══════════════════════════════════════════ */}
-        {isPro && (
+        {/* PRO ativo */}
+        {isPro && !isInGrace && (
           <div className="rounded-xl border border-brand/30 bg-brand/5 p-4 flex items-center gap-3">
             <Crown className="h-5 w-5 text-brand shrink-0" />
             <div>
               <p className="text-sm font-semibold text-foreground">Você já é PRO! 🎉</p>
-              <p className="text-xs text-muted-foreground">
-                Aproveite todos os recursos premium do sistema.
+              <p className="text-xs text-muted-foreground">Aproveite todos os recursos premium do sistema.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Período de graça */}
+        {isInGrace && (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-amber-800">
+                Assinatura expirada — você ainda tem acesso por {graceDays} dia{graceDays !== 1 ? "s" : ""}
               </p>
+              <p className="text-xs text-amber-700 mt-1">
+                Renove agora para não perder o acesso às funções PRO.
+              </p>
+              <button onClick={handleSubscribe}
+                className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">
+                Renovar agora →
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Expirada, sem graça, já virou free */}
+        {subscriptionExpired && !isInGrace && !isPro && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Sua assinatura PRO expirou</p>
+              <p className="text-xs text-muted-foreground mt-1">Assine novamente para recuperar o acesso às funções PRO.</p>
             </div>
           </div>
         )}
@@ -258,10 +302,14 @@ export default function Plans() {
                 </div>
               )}
             </div>
-            {isPro ? (
+            {isPro && !isInGrace ? (
               <div className="w-full rounded-xl bg-brand/10 border border-brand/30 py-3 text-center text-sm font-semibold text-brand">
                 ✓ Plano ativo
               </div>
+            ) : isInGrace ? (
+              <button onClick={handleSubscribe} className="w-full rounded-xl bg-amber-500 py-3 text-sm font-semibold text-white hover:bg-amber-600">
+                ⚠️ Renovar — expira em {graceDays} dia{graceDays !== 1 ? "s" : ""}
+              </button>
             ) : (
               <div className="text-xs text-muted-foreground text-center py-1">
                 Cancele quando quiser, sem multa
