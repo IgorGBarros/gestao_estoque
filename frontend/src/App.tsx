@@ -14,7 +14,7 @@ import { ThemeProvider } from "./hooks/useTheme";
 // Components
 import ProtectedRoute from "./components/ProtectedRoute";
 import ImpersonationBanner from "./components/ImpersonationBanner";
-import { TrialBanner, TrialExpiredScreen } from "./components/TrailBanner";
+import { TrialBanner, TrialExpiredScreen, GracePeriodBanner } from "./components/TrailBanner";
 import { NoveltyCarouselModal } from "./components/NoveltyCarouselModal";
 import { MaintenanceBanner } from "./components/MaintenanceBanner";
 // ✅ ErrorBoundary REMOVIDO
@@ -70,19 +70,18 @@ const queryClient = new QueryClient({
 });
 
 // ✅ Layout Wrapper para Rotas Protegidas
-// Nota: o <SessionHeader /> global foi REMOVIDO daqui. A sessão de cadastro
-// pertence ao fluxo do AddProduct (que já tem indicador próprio de "Sessão
-// Ativa" e o resumo ao finalizar), e não ao app inteiro.
 const ProtectedLayout = ({ children }: { children: React.ReactNode }) => (
   <div className="min-h-screen bg-background flex flex-col">
-    {/* Aviso de sessão de suporte. Some sozinho fora do modo — e é o único
-        caminho de volta para a conta do administrador. */}
     <ImpersonationBanner />
-    {/* Contagem regressiva do teste. Some sozinha fora do período. */}
     <TrialBanner />
-    {/* Aviso de manutenção — vem antes da promoção de propósito: um alerta
-        de possível instabilidade é mais importante que uma oferta. */}
+    {/* ⚠️ CORREÇÃO: GracePeriodBanner aparece só aqui (dentro do app),
+        nunca na landing page ou admin-panel. */}
+    <GracePeriodBanner />
     <MaintenanceBanner />
+    {/* ⚠️ CORREÇÃO: NoveltyCarouselModal estava fora do ProtectedLayout —
+        aparecia na landing page, vitrine e admin-panel também. Movido
+        para cá: só consultoras autenticadas veem as novidades. */}
+    <NoveltyCarouselModal />
     <main className="flex-1">{children}</main>
   </div>
 );
@@ -210,7 +209,6 @@ const App = () => {
               {/* Carrossel de promoções/novidades — precisa de useAuth(),
                   por isso mora aqui dentro, não lá em cima com o resto
                   dos componentes globais que não dependem de sessão. */}
-              <NoveltyCarouselModal />
               {/* ✅ 2. Wrapper que só renderiza modal discreto APÓS auth em rotas protegidas */}
               <AuthConsentWrapper>
                 <PlanProvider>

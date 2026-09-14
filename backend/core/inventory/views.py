@@ -2111,8 +2111,13 @@ def feature_gates_view(request):
     # o oposto do que o trial promete. Esta view alimenta useFeatureGates,
     # usado em Dashboard, Index, AddProduct e WithdrawProduct.
     store = get_current_store(request.user)
+
+    # Downgrade lazy: se o período de graça terminou, rebaixa pro free aqui.
+    if store:
+        store.auto_downgrade_if_needed()
+
     is_pro = bool(store and store.has_pro_access)
-    
+
     gates = [
         {"feature_key": "barcode_scanner", "label": "Scanner de Código", "description": None, "requires_pro": True},
         {"feature_key": "ocr_expiry", "label": "Leitor de Validade (IA)", "description": None, "requires_pro": True},
@@ -2177,10 +2182,13 @@ def profile_view(request):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # ✅ Validar ownership (segurança tenant)
+            # Validar ownership (segurança tenant)
             validate_store_ownership(user, store)
-            
-            # ✅ Serializar dados
+
+            # Downgrade lazy — rebaixa pro free se graça terminou
+            store.auto_downgrade_if_needed()
+
+            # Serializar dados
             from .serializers import ProfileSerializer
             serializer = ProfileSerializer(store, context={"request": request})
             

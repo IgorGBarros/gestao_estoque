@@ -288,16 +288,57 @@ class Store(models.Model):
             return False
         return bool(self.trial_ends_at) and timezone.now() >= self.trial_ends_at
 
+    # Período de graça de 7 dias após expiração da assinatura PRO.
+    GRACE_PERIOD_DAYS = 7
+
+    @property
+    def subscription_expired(self):
+        return (self.plan == 'pro'
+                and bool(self.subscription_expires_at)
+                and timezone.now() > self.subscription_expires_at)
+
+    @property
+    def in_grace_period(self):
+        if not self.subscription_expired:
+            return False
+        dias = (timezone.now() - self.subscription_expires_at).days
+        return dias <= self.GRACE_PERIOD_DAYS
+
+    @property
+    def grace_days_remaining(self):
+        if not self.in_grace_period:
+            return 0
+        dias = (timezone.now() - self.subscription_expires_at).days
+        return max(0, self.GRACE_PERIOD_DAYS - dias)
+
     @property
     def has_pro_access(self):
-        """Pode usar os recursos completos (assinante OU em teste)."""
-        return self.plan == 'pro' or self.is_in_trial
+        """CORRIGIDO: verifica expiry e grace period, nao so plan==pro."""
+        if self.plan != 'pro':
+            return self.is_in_trial
+        if not self.subscription_expires_at:
+            return True
+        if timezone.now() <= self.subscription_expires_at:
+            return True
+        return self.in_grace_period
+
+    def auto_downgrade_if_needed(self):
+        if self.plan == 'pro' and self.subscription_expired and not self.in_grace_period:
+            self.plan = 'free'
+            self.save(update_fields=['plan'])
+            return True
+        return False
 
     @property
     def access_status(self):
-        """Situação de acesso, para o frontend decidir o que mostrar."""
         if self.plan == 'pro':
-            return 'subscribed'
+            if not self.subscription_expires_at:
+                return 'subscribed'
+            if timezone.now() <= self.subscription_expires_at:
+                return 'subscribed'
+            if self.in_grace_period:
+                return 'grace_period'
+            return 'expired'
         if self.is_in_trial:
             return 'trial'
         if self.trial_expired:
@@ -358,11 +399,15 @@ class Store(models.Model):
     
     @property
     def subscription_status(self):
+        if self.plan != 'pro':
+            return 'free'
         if not self.subscription_expires_at:
-            return 'active' if self.plan == 'pro' else 'free'
-        if timezone.now() > self.subscription_expires_at:
-            return 'expired'
-        return 'active'
+            return 'active'
+        if timezone.now() <= self.subscription_expires_at:
+            return 'active'
+        if self.in_grace_period:
+            return 'grace_period'
+        return 'expired'
     
     @property
     def days_until_expiry(self):
